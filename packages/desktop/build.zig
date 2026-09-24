@@ -324,7 +324,9 @@ pub fn build(b: *std.Build) void {
                 palette_module.addIncludePath(.{ .cwd_relative = b.pathJoin(&.{ prefix, "include" }) });
             }
             gui_exe.root_module.linkSystemLibrary("sdl3", .{ .use_pkg_config = .yes });
-            gui_exe.root_module.linkSystemLibrary("sdl3-ttf", .{ .use_pkg_config = .yes });
+            // sdl3-ttf's pkg-config Libs repeat -lSDL3, and newer dyld aborts
+            // on a duplicate LC_LOAD_DYLIB; the Homebrew lib path is already set.
+            gui_exe.root_module.linkSystemLibrary("SDL3_ttf", .{});
             gui_exe.root_module.linkFramework("AppKit", .{});
             gui_exe.root_module.linkFramework("WebKit", .{});
         },
@@ -1194,9 +1196,18 @@ fn addMacOSSwiftWebView(b: *std.Build, compile: *std.Build.Step.Compile, arch: s
     compile.root_module.linkSystemLibrary("swiftObjectiveC", .{});
     compile.root_module.linkSystemLibrary("swiftQuartzCore", .{});
     compile.root_module.linkSystemLibrary("swiftUniformTypeIdentifiers", .{});
-    compile.root_module.linkSystemLibrary("swiftWebKit", .{});
     compile.root_module.linkSystemLibrary("swiftXPC", .{});
     compile.root_module.linkSystemLibrary("swiftos", .{});
+    // Link overlays only when the SDK ships them as separate libraries. Newer
+    // SDKs merge swiftWebKit into WebKit.framework (already linked), and a
+    // second WebKit load command makes dyld abort; newer swiftc also autolinks
+    // swiftSpatial and swiftsimd.
+    for ([_][]const u8{ "swiftWebKit", "swiftSpatial", "swiftsimd" }) |name| {
+        const tbd = b.pathJoin(&.{ macOSSDKRoot(b), "usr", "lib", "swift", b.fmt("lib{s}.tbd", .{name}) });
+        if (std.Io.Dir.accessAbsolute(b.graph.io, tbd, .{})) |_| {
+            compile.root_module.linkSystemLibrary(name, .{});
+        } else |_| {}
+    }
     compile.step.dependOn(&swift_obj.step);
 }
 
