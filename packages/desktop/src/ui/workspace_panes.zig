@@ -39,13 +39,11 @@ const ZOOM_ICON_SIZE_CSS: f32 = 17.0;
 const TERMINAL_ZOOM_HOVER_WIDTH_CSS: f32 = 112.0;
 const TERMINAL_ZOOM_HOVER_HEIGHT_CSS: f32 = 48.0;
 const INACTIVE_BORDER_WIDTH_CSS: f32 = 1.0;
-const FOCUS_BORDER_WIDTH_CSS: f32 = 2.0;
-const ZOOM_BORDER_WIDTH_CSS: f32 = 3.0;
-const LIGHT_PALETTE_FOCUS_BORDER_ALPHA: f32 = 0.55;
-const STATUS_BORDER_WIDTH_CSS: f32 = 3.0;
-const STATUS_ZOOM_BORDER_WIDTH_CSS: f32 = 4.0;
+const FOCUS_BORDER_WIDTH_CSS: f32 = 1.0;
+const ZOOM_BORDER_WIDTH_CSS: f32 = 1.0;
+const STATUS_BORDER_WIDTH_CSS: f32 = 1.5;
+const STATUS_ZOOM_BORDER_WIDTH_CSS: f32 = 2.0;
 const ZOOM_ICON_FOREGROUND_MIX: f32 = 0.30;
-const ZOOM_BORDER_FOREGROUND_MIX: f32 = 0.60;
 const DONE_PULSE_PERIOD_MS: i64 = 2800;
 const WORKING_PULSE_PERIOD_MS: i64 = 2200;
 const QUICK_PANE_MIN_W_CSS: f32 = 320.0;
@@ -3089,9 +3087,10 @@ fn renderLeafWithin(state: *runtime.AppState, pane_id: runtime.WorkspacePaneId, 
     const focus_alpha = focusBorderAlpha(pane_id);
     const alpha = @max(focus_alpha, if (maximized) @as(f32, 1.0) else @as(f32, 0.0));
     if (alpha > 0.01) {
-        var border_color = if (maximized) zoomBorderAccent() else theme.accent();
-        // A full-strength dark accent frame reads heavy on light palettes.
-        border_color[3] *= alpha * (if (theme.isLightPalette()) LIGHT_PALETTE_FOCUS_BORDER_ALPHA else 1.0);
+        // Focus and zoom frames are neutral hairlines; the accent is reserved
+        // for live agent status above and for primary actions.
+        var border_color = if (maximized) theme.restingEdge() else theme.focusRing();
+        border_color[3] *= alpha;
         const border_width = theme.scaledUi(if (maximized) ZOOM_BORDER_WIDTH_CSS else FOCUS_BORDER_WIDTH_CSS);
         queueBorder(state, rect, paletteColor(border_color), 0.0, border_width);
     }
@@ -3206,10 +3205,6 @@ fn renderPaneShortcutKeyTip(state: *runtime.AppState, target: palette.Rect, clip
 
 fn zoomIconAccent() [4]f32 {
     return theme.mix(theme.accent(), theme.current_colors.text, ZOOM_ICON_FOREGROUND_MIX);
-}
-
-fn zoomBorderAccent() [4]f32 {
-    return theme.mix(theme.accent(), theme.current_colors.text, ZOOM_BORDER_FOREGROUND_MIX);
 }
 
 fn renderInactivePaneFade(state: *runtime.AppState, pane_id: runtime.WorkspacePaneId, rect: palette.Rect) void {

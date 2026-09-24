@@ -2291,7 +2291,7 @@ pub const PaletteModalTextFocus = enum {
 /// the transcript's bubble body text keys off it (`chat_panel.zig`) so the
 /// prompt box and the chat thread always read at the same size.
 pub const PALETTE_COMPOSER_FONT_SIZE: f32 = 18.0;
-const PALETTE_COMPOSER_TOOLBAR_FONT_SIZE: f32 = 15.0;
+const PALETTE_COMPOSER_TOOLBAR_FONT_SIZE: f32 = 16.0;
 const PALETTE_COMPOSER_ICON_FONT_SIZE: f32 = 18.0;
 const PALETTE_COMPOSER_TEXT_ADVANCE_SCALE: f32 = 1.0;
 
@@ -2302,12 +2302,14 @@ fn paletteColor(color: [4]f32) palette.Color {
 fn paletteComposerStyle() PaletteComposerPrompt.Style {
     return .{
         .background_color = paletteColor(theme.withAlpha(theme.COLOR_PANEL_ALT, 248)),
-        .border_color = paletteColor(theme.COLOR_PANEL_MUTED),
-        .focus_border_color = paletteColor(theme.COLOR_GREEN),
-        .focus_border_width = 1.5,
-        .control_background_color = paletteColor(theme.withAlpha(theme.COLOR_PANEL_MUTED, 86)),
-        .control_hover_color = paletteColor(theme.withAlpha(theme.raise(theme.COLOR_PANEL_ALT, 0.08), 210)),
-        .separator_color = paletteColor(theme.withAlpha(theme.COLOR_TEXT_SUBTLE, 90)),
+        .border_color = paletteColor(theme.restingEdge()),
+        .focus_border_color = paletteColor(theme.focusRing()),
+        .focus_border_width = 1.0,
+        // Ghost pills: clear at rest, a faint neutral lift on hover. The
+        // toolbar separator is hidden; pill spacing already groups controls.
+        .control_background_color = paletteColor(theme.withAlpha(theme.COLOR_WHITE, 0)),
+        .control_hover_color = paletteColor(theme.withAlpha(theme.COLOR_WHITE, 16)),
+        .separator_color = paletteColor(theme.withAlpha(theme.COLOR_TEXT_SUBTLE, 0)),
         .send_color = paletteColor(theme.COLOR_GREEN),
         .send_hover_color = paletteColor(theme.raise(theme.COLOR_GREEN, 0.08)),
         .send_foreground_color = paletteColor(theme.foregroundOn(theme.COLOR_GREEN)),
@@ -2378,7 +2380,7 @@ pub const PaletteComposerPrompt = palette.composerPrompt(.{
     .pill_icon_gap = 12.0,
     // Kept tight: the chevron column already centers its ink with air on both
     // sides, so a wide gap here reads as dead space after the trailing glyph.
-    .pill_chevron_gap = 8.0,
+    .pill_chevron_gap = 4.0,
     // The folder glyph is host-drawn in the pill's overlay reserve (see
     // `renderComposerToolbarIcons`); the label is the directory basename so
     // the pill stays compact next to long model names.
@@ -2412,16 +2414,16 @@ pub const PaletteComposerPrompt = palette.composerPrompt(.{
     // component receives the active palette through `setStyle` every frame.
     .background_color = paletteColor(theme.withAlpha(theme.default_colors.panel_alt, 248)),
     .border_color = paletteColor(theme.default_colors.panel_muted),
-    .focus_border_color = paletteColor(theme.default_colors.accent),
-    .focus_border_width = 1.5,
+    .focus_border_color = paletteColor(theme.mix(theme.default_colors.background, theme.default_colors.text, 0.30)),
+    .focus_border_width = 1.0,
     // Force the bold pill labels (GPT-5.5, Medium, Fast, Full access) onto the
     // .ui role too so they share CalSans-Regular with the placeholder and the
     // workspace header buttons. The default `.ui_bold` falls through to the
     // renderer's heavy NotoSans-Bold, which reads as a different typeface.
     .bold_font_role = .ui,
-    .control_background_color = paletteColor(theme.withAlpha(theme.default_colors.panel_muted, 86)),
-    .control_hover_color = paletteColor(theme.withAlpha(theme.raiseAgainst(theme.default_colors.panel_alt, 0.08, theme.default_colors.background, theme.default_colors.text), 210)),
-    .separator_color = paletteColor(theme.withAlpha(theme.default_colors.text_subtle, 90)),
+    .control_background_color = paletteColor(theme.withAlpha(theme.default_colors.text, 0)),
+    .control_hover_color = paletteColor(theme.withAlpha(theme.default_colors.text, 16)),
+    .separator_color = paletteColor(theme.withAlpha(theme.default_colors.text_subtle, 0)),
     .menu_background_color = paletteColor(theme.default_colors.panel_alt),
     .menu_border_color = paletteColor(theme.default_colors.panel_muted),
     .menu_selected_color = paletteColor(theme.withAlpha(theme.default_colors.selection, 218)),
@@ -2446,8 +2448,12 @@ pub const PaletteComposerPrompt = palette.composerPrompt(.{
     .model_icon = "",
     .fast_icon = "",
     .access_icon = "",
-    // codicon-chevron-right (Nerd Font Symbols) — crisp at any size.
-    .chevron_icon = "\u{EAB6}",
+    // codicon-chevron-down (Nerd Font Symbols), drawn from the icon font so
+    // pickers read as dropdowns rather than disclosure arrows.
+    .chevron_icon = "\u{EAB4}",
+    .chevron_glyph = true,
+    // 18px icon font → ~12px chevron, matching the app's other dropdown carets.
+    .chevron_glyph_scale = 0.66,
     .send_icon = "",
     // codicon-debug-stop
     .stop_icon = "\u{EAD7}",

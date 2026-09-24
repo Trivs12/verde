@@ -37,6 +37,10 @@ const COMPOSER_HEIGHT: f32 = 262.0;
 /// Floor keeps ~2 lines of prompt text visible above the inner toolbar even
 /// in short panes, after the 42px directory strip is taken out.
 const COMPOSER_MIN_HEIGHT: f32 = 176.0;
+/// Prompt text lines the composer sizes itself to: empty drafts show two,
+/// longer drafts grow until `COMPOSER_HEIGHT` caps the box.
+const COMPOSER_MIN_LINES: f32 = 2.0;
+const COMPOSER_MAX_LINES: f32 = 10.0;
 /// Compact read-only strip used instead of the prompt box on subagent panes.
 const SUBAGENT_COMPOSER_HEIGHT: f32 = 72.0;
 const SUBAGENT_COMPOSER_MIN_HEIGHT: f32 = 60.0;
@@ -586,10 +590,22 @@ pub fn renderWorkspaceAtForPaneWithReserveAndTranscriptLayoutWidth(
 
     // ~30% shorter than the original (0.14 / 54 / 82) clamp: scale each bound by 0.7.
     const header_height = theme.clampf(rect.h * 0.098, theme.scaledUi(38.0), theme.scaledUi(TOP_BAR_HEIGHT));
+    const browser_visible = state.isBrowserVisible() and pane_id == null;
+    const split_chat_browser = browser_visible and rect.w >= theme.scaledUi(900.0);
+    const browser_width = if (split_chat_browser) state.browserPanelWidth(rect.w) else 0.0;
+    const composer_lane_w = if (split_chat_browser) rect.w - browser_width else rect.w;
+    const composer_lane_x = rect.x;
+
+    // The composer and transcript share one lane column so their edges line up;
+    // it only narrows when the linked drawer would otherwise cover it.
+    const composer_column = chatLaneColumn(composer_lane_x, composer_lane_w, linked_lane_w);
+    // The prompt box hugs its content (two lines when empty) and grows as the
+    // draft wraps, never exceeding the pane-relative cap it used to fill.
+    const composer_cap = theme.clampf(rect.h * 0.32, theme.scaledUi(COMPOSER_MIN_HEIGHT), theme.scaledUi(COMPOSER_HEIGHT));
     const composer_height = if (subagent_view)
         theme.clampf(rect.h * 0.12, theme.scaledUi(SUBAGENT_COMPOSER_MIN_HEIGHT), theme.scaledUi(SUBAGENT_COMPOSER_HEIGHT))
     else
-        theme.clampf(rect.h * 0.32, theme.scaledUi(COMPOSER_MIN_HEIGHT), theme.scaledUi(COMPOSER_HEIGHT));
+        @min(state.composer_controller.composer.preferredHeight(composer_column.w, !live_composer, COMPOSER_MIN_LINES, COMPOSER_MAX_LINES), composer_cap);
     // Lifted off the panel edge so the toolbar pills (and the popovers that
     // open above them) never sit flush against the bottom of the window.
     const bottom_margin = theme.clampf(rect.h * 0.028, theme.scaledUi(14.0), theme.scaledUi(22.0));
@@ -647,19 +663,10 @@ pub fn renderWorkspaceAtForPaneWithReserveAndTranscriptLayoutWidth(
     else
         0.0;
 
-    const browser_visible = state.isBrowserVisible() and pane_id == null;
-    const split_chat_browser = browser_visible and rect.w >= theme.scaledUi(900.0);
-    const browser_width = if (split_chat_browser) state.browserPanelWidth(rect.w) else 0.0;
     const target_split_chat_browser = browser_visible and transcript_layout_width >= theme.scaledUi(900.0);
     const target_browser_width = if (target_split_chat_browser) state.browserPanelWidth(transcript_layout_width) else 0.0;
     // Destination-width lane (browser removed, linked drawer still inside it).
     const target_chat_width = if (target_split_chat_browser) transcript_layout_width - target_browser_width else transcript_layout_width;
-    const composer_lane_w = if (split_chat_browser) rect.w - browser_width else rect.w;
-    const composer_lane_x = rect.x;
-
-    // The composer and transcript share one lane column so their edges line up;
-    // it only narrows when the linked drawer would otherwise cover it.
-    const composer_column = chatLaneColumn(composer_lane_x, composer_lane_w, linked_lane_w);
     const transcript_lane: TranscriptLane = .{ .layout_width = target_chat_width, .linked_reserve = target_linked_lane_w };
     const composer_rect = palette.Rect{
         .x = composer_column.x,
@@ -8315,22 +8322,16 @@ fn renderTranscriptBubbleFromParts(
     const bubble_width = if (role == .user) column.w * 0.62 else column.w;
     const bubble_x = if (role == .user) column.x + column.w - bubble_width else column.x;
     const bubble = snapRect(palette.Rect{ .x = bubble_x, .y = y, .w = bubble_width, .h = height });
-    // Replies sit on the panel surface so they lift off the pane background;
-    // the user's own turns carry a light accent wash with an accent edge.
-    const bg = switch (role) {
-        .user => theme.wash(theme.accent(), 64),
-        .assistant => theme.withAlpha(theme.COLOR_PANEL, 250),
-        .system => theme.wash(theme.COLOR_YELLOW, 54),
-    };
+    // Replies render directly on the pane background with no card; the
+    // user's own turns sit in a soft neutral bubble. Live state is carried by
+    // the pulsing dot beside the role label, not by the bubble edge.
     const rr = transcriptBubbleCornerRadius();
     const activity = if (active) theme.activityPulse(profiler.nowNs()) else 0.0;
-    const border_color = if (active)
-        theme.withAlpha(theme.COLOR_GREEN, @intFromFloat(92.0 + activity * 88.0))
-    else if (role == .user)
-        theme.border()
-    else
-        theme.borderMuted();
-    queueRoundedShellClipped(state, bubble, paletteColor(bg), paletteColor(border_color), rr, clip);
+    switch (role) {
+        .user => queueRoundedClipped(state, bubble, paletteColor(theme.userBubble()), rr, clip),
+        .assistant => {},
+        .system => queueRoundedShellClipped(state, bubble, paletteColor(theme.wash(theme.COLOR_YELLOW, 54)), paletteColor(theme.restingEdge()), rr, clip),
+    }
 
     var label_x = bubble.x + theme.scaledUi(14.0);
     if (active) {
@@ -9096,7 +9097,6 @@ const INACTIVE_RUN_PILL_ICON_SIZE_CSS: f32 = 18.0;
 // matching the live run pill's walk (including the half-space nudge that
 // centers each glyph over the word gap).
 fn renderInactiveComposerRunPill(state: *app_state.AppState, pill: palette.Rect, label: []const u8, slots: []const InactiveRunSlot) void {
-    queueRounded(state, pill, paletteColor(theme.withAlpha(theme.COLOR_PANEL_MUTED, 86)), pill.h * 0.5);
     const font = theme.scaledUi(12.5);
     const cell_w = theme.scaledUi(INACTIVE_RUN_PILL_ICON_CELL_CSS);
     const icon_size = theme.scaledUi(INACTIVE_RUN_PILL_ICON_SIZE_CSS);
@@ -9147,7 +9147,6 @@ fn inactiveComposerPillWidth(label: []const u8, has_icon: bool) f32 {
 
 // Renders a muted toolbar pill for the inactive composer preview.
 fn renderInactiveComposerPill(state: *app_state.AppState, rect: palette.Rect, label: []const u8, has_icon: bool) void {
-    queueRounded(state, rect, paletteColor(theme.withAlpha(theme.COLOR_PANEL_MUTED, 86)), rect.h * 0.5);
     const text_x = rect.x + theme.scaledUi(if (has_icon) 43.0 else 13.0);
     queueChromeLabel(state, .{
         .x = text_x,

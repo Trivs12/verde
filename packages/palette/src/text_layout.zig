@@ -221,6 +221,10 @@ const LineIterator = struct {
         const start = self.index;
         var end = start;
         var width: f32 = 0.0;
+        // Byte offset just past the most recent space/tab on this line: the
+        // preferred wrap point, so words stay whole. The space stays at the end
+        // of the wrapped line, keeping line ranges contiguous for caret math.
+        var word_break: ?usize = null;
         while (end < self.text.len) {
             if (self.text[end] == '\n') {
                 const row = self.row;
@@ -230,13 +234,16 @@ const LineIterator = struct {
             }
             const advance_value = self.metrics.nextAdvance(self.text, end);
             if (self.wrap and end > start and width + advance_value.width > self.max_width) {
+                // A single word wider than the line still breaks mid-word.
+                const break_at = word_break orelse end;
                 const row = self.row;
                 self.row += 1;
-                self.index = end;
-                return .{ .row = row, .start = start, .end = end };
+                self.index = break_at;
+                return .{ .row = row, .start = start, .end = break_at };
             }
             width += advance_value.width;
             end += advance_value.byte_len;
+            if (self.text[end - advance_value.byte_len] == ' ' or self.text[end - advance_value.byte_len] == '\t') word_break = end;
         }
 
         self.finished = true;
@@ -279,6 +286,17 @@ fn clippedRect(rect: draw.Rect, clip: draw.Rect) ?draw.Rect {
     const y1 = @min(rect.y + rect.h, clip.y + clip.h);
     if (x1 <= x0 or y1 <= y0) return null;
     return .{ .x = x0, .y = y0, .w = x1 - x0, .h = y1 - y0 };
+}
+
+test "wrapping breaks after spaces and keeps words whole" {
+    const metrics = FontMetrics.fixed(10, 5, 12);
+    // 4 cells per line: "ab cd" wraps before "cd", not inside it.
+    var iter = LineIterator.init("ab cdef", metrics, 20, true);
+    const first = iter.next().?;
+    try std.testing.expectEqualStrings("ab ", "ab cdef"[first.start..first.end]);
+    const second = iter.next().?;
+    try std.testing.expectEqualStrings("cdef", "ab cdef"[second.start..second.end]);
+    try std.testing.expect(iter.next() == null);
 }
 
 test "monospace layout emits wrapped run positions" {
