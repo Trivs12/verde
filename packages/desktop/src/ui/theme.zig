@@ -404,6 +404,24 @@ pub fn selection() [4]f32 {
     return current_colors.selection;
 }
 
+/// Neutral edge for resting chrome (cards, fields, pane frames). Derived from
+/// text over background so it stays quiet on every palette instead of
+/// borrowing the accent-tinted `border` role.
+pub fn restingEdge() [4]f32 {
+    return mix(current_colors.background, current_colors.text, 0.12);
+}
+
+/// Neutral, higher-contrast edge for focused fields and panes. The accent is
+/// reserved for primary actions and live status.
+pub fn focusRing() [4]f32 {
+    return mix(current_colors.background, current_colors.text, 0.30);
+}
+
+/// Neutral fill for the user's own transcript turns.
+pub fn userBubble() [4]f32 {
+    return mix(current_colors.background, current_colors.text, 0.07);
+}
+
 /// Chooses the active theme foreground or background token with the clearest
 /// luminance separation from a filled control. This keeps accent buttons
 /// readable for both light and dark custom themes.
@@ -499,13 +517,15 @@ pub fn syncLegacyColors() void {
 
 fn syncMarkdownColors() void {
     md.text_body = current_colors.text;
-    md.text_h1 = mix(current_colors.warning, current_colors.text, 0.18);
-    md.text_h2 = mix(current_colors.warning, current_colors.text, 0.32);
-    md.text_h3 = mix(current_colors.accent, current_colors.text, 0.45);
+    // Headings and inline code stay neutral; weight and the code pill carry
+    // the emphasis, so prose does not read as a patchwork of accent colors.
+    md.text_h1 = current_colors.text;
+    md.text_h2 = current_colors.text;
+    md.text_h3 = current_colors.text;
     md.text_h4_h6 = mix(current_colors.text, current_colors.background, 0.14);
     md.text_quote = current_colors.text_muted;
 
-    md.inline_code = mix(current_colors.warning, current_colors.text, 0.18);
+    md.inline_code = current_colors.text;
     md.link = mix(current_colors.accent, current_colors.text, 0.18);
     md.selection_fill = withAlpha(current_colors.selection, 210);
 

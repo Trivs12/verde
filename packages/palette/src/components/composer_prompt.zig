@@ -75,6 +75,11 @@ pub const ComposerPromptConfig = struct {
     access_icon: []const u8 = "L",
     access_label: []const u8 = "Full access",
     chevron_icon: []const u8 = ">",
+    /// Draw `chevron_icon` from the icon font instead of the built-in filled
+    /// disclosure triangle. Off by default so existing hosts keep the arrow.
+    chevron_glyph: bool = false,
+    /// Size of the `chevron_glyph` icon relative to `icon_font_size`.
+    chevron_glyph_scale: f32 = 1.0,
     send_icon: []const u8 = "^",
     stop_icon: []const u8 = "x",
     pending_icon: []const u8 = ".",
@@ -824,6 +829,21 @@ pub fn ComposerPrompt(comptime config: ComposerPromptConfig) type {
             });
         }
 
+        /// Bounds height that fits the prompt at `width`, with the text area
+        /// clamped to [min_lines, max_lines]. `empty` measures the placeholder
+        /// instead of the buffer (inactive previews of this composer).
+        pub fn preferredHeight(self: *const Component, width: f32, empty: bool, min_lines: f32, max_lines: f32) f32 {
+            const metrics = self.textMetrics();
+            const value = if (empty or self.buffer.items.len == 0) self.placeholderText() else self.buffer.items;
+            const text_w = @max(width - self.scaled(config.padding_x) * 2.0, 1.0);
+            const content = text_layout.contentHeight(value, metrics, text_w, true);
+            var height = self.scaled(config.padding_y) * 2.0 +
+                std.math.clamp(content, metrics.line_height * min_lines, metrics.line_height * max_lines) +
+                self.scaled(config.toolbar_gap) + self.scaled(config.toolbar_height);
+            if (self.directoryOutside()) height += self.scaled(config.toolbar_height) + self.scaled(config.toolbar_gap);
+            return @ceil(height);
+        }
+
         pub fn textRect(self: *const Component) draw.Rect {
             const frame = self.frameRect();
             return snapRect(.{
@@ -1017,7 +1037,11 @@ pub fn ComposerPrompt(comptime config: ComposerPromptConfig) type {
                 const cell_x = rect.x + rect.w - self.scaled(config.pill_padding_x) - cell;
                 const cell_rect_full: draw.Rect = .{ .x = cell_x, .y = rect.y, .w = cell, .h = rect.h };
                 const cell_rect = clippedRect(rect, cell_rect_full) orelse cell_rect_full;
-                try renderDisclosureArrow(allocator, batch, cell_rect, self.style.icon_color);
+                if (config.chevron_glyph) {
+                    try self.renderCenteredIconScaled(allocator, batch, cell_rect, right_icon, self.style.icon_color, config.chevron_glyph_scale);
+                } else {
+                    try renderDisclosureArrow(allocator, batch, cell_rect, self.style.icon_color);
+                }
             }
             try batch.textRuns(allocator, rect, label, runs[0..count], self.style.text_color, text_metrics.font_size, rect, text_metrics.line_height, text_metrics.fixedAdvance());
         }
@@ -1039,23 +1063,29 @@ pub fn ComposerPrompt(comptime config: ComposerPromptConfig) type {
         }
 
         fn renderCenteredIcon(self: *const Component, allocator: std.mem.Allocator, batch: *draw.RenderBatch, rect: draw.Rect, icon: []const u8, color: draw.Color) !void {
+            try self.renderCenteredIconScaled(allocator, batch, rect, icon, color, 1.0);
+        }
+
+        fn renderCenteredIconScaled(self: *const Component, allocator: std.mem.Allocator, batch: *draw.RenderBatch, rect: draw.Rect, icon: []const u8, color: draw.Color, scale: f32) !void {
             if (icon.len == 0) return;
             const metrics = self.iconMetrics();
-            const width = metrics.measureSlice(icon);
+            const width = metrics.measureSlice(icon) * scale;
+            const font_size = metrics.font_size * scale;
+            const line_height = metrics.line_height * scale;
             const runs = [_]draw.TextRun{.{
                 .text = icon,
                 .byte_start = 0,
                 .byte_end = icon.len,
                 .x = rect.x + (rect.w - width) * 0.5,
-                .y = rect.y + (rect.h - metrics.line_height) * 0.5,
-                .font_size = metrics.font_size,
-                .line_height = metrics.line_height,
+                .y = rect.y + (rect.h - line_height) * 0.5,
+                .font_size = font_size,
+                .line_height = line_height,
                 .color = color,
                 .clip = rect,
                 .font_role = config.icon_font_role,
                 .font_id = config.icon_font_id,
             }};
-            try batch.textRuns(allocator, rect, icon, &runs, color, metrics.font_size, rect, metrics.line_height, metrics.fixedAdvance());
+            try batch.textRuns(allocator, rect, icon, &runs, color, font_size, rect, line_height, metrics.fixedAdvance() * scale);
         }
 
         fn sendGlyphBounds(button: draw.Rect) draw.Rect {
@@ -1788,12 +1818,13 @@ pub fn ComposerPrompt(comptime config: ComposerPromptConfig) type {
         fn trailingChevronReserve(self: *const Component, right_icon: []const u8) f32 {
             if (right_icon.len == 0) return 0.0;
             const icon_metrics = self.iconMetrics();
-            const measured = icon_metrics.measureSlice(right_icon);
+            const glyph_scale: f32 = if (config.chevron_glyph) config.chevron_glyph_scale else 1.0;
+            const measured = icon_metrics.measureSlice(right_icon) * glyph_scale;
             // Measured advance for icon glyphs (e.g. ">") can be tighter than GPU text; reserve at least
             // a column so labels are not clipped and the chevron does not collide with the label.
             // The chevron inks only ~half its em, so the floor stays under the icon font size —
             // 21 read as a wide dead column once the floor scaled with display DPI.
-            const min_cell = @max(icon_metrics.font_size * 0.82, self.scaled(16.0));
+            const min_cell = @max(icon_metrics.font_size * glyph_scale * 0.82, self.scaled(if (config.chevron_glyph) 12.0 else 16.0));
             return self.scaled(config.pill_chevron_gap) + @max(measured, min_cell);
         }
 
