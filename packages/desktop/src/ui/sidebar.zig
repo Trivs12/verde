@@ -77,6 +77,10 @@ const SIDEBAR_FOOTER_RESERVE_CSS: f32 = 56.0;
 const SIDEBAR_ACTIVE_MAX_ROWS: usize = 10;
 /// Caption band above ACTIVE rows, including the gap under the label.
 const SIDEBAR_ACTIVE_LABEL_H_CSS: f32 = 20.0;
+/// Pinned "New chat" / "Search" rows under the rail header.
+const SIDEBAR_RAIL_ACTION_ROW_CSS: f32 = 32.0;
+/// Pinned section caption band ("Projects").
+const SIDEBAR_SECTION_CAPTION_H_CSS: f32 = 26.0;
 /// Hairline divider plus trailing gap that separates ACTIVE from the tree.
 const SIDEBAR_ACTIVE_TRAILING_H_CSS: f32 = 12.0;
 /// Keep at least this much of the workspace tree visible under a tall ACTIVE
@@ -103,9 +107,11 @@ const SidebarHitKind = enum {
     /// Per-workspace history action icon; opens the command palette scoped to
     /// that workspace's saved threads.
     history,
-    /// Search trigger (expanded pill / collapsed icon); opens the command
+    /// Search trigger (expanded row / collapsed icon); opens the command
     /// palette unscoped.
     command_palette,
+    /// Expanded rail "New chat" row; starts a chat in the selected workspace.
+    new_chat_trigger,
     /// Per-workspace gear icon; opens Workspace Settings bound to that
     /// workspace (distinct from global `settings` below).
     workspace_settings,
@@ -246,6 +252,7 @@ var terminal_action_hovered: ?usize = null;
 var history_action_hovered: ?usize = null;
 var workspace_settings_action_hovered: ?usize = null;
 var search_trigger_hovered: bool = false;
+var new_chat_trigger_hovered: bool = false;
 
 const WorkspaceDragState = struct {
     pending: bool = false,
@@ -363,6 +370,7 @@ pub fn handlePaletteMouseMotion(state: *runtime.AppState, x: f32, y: f32) void {
     var new_history_hover: ?usize = null;
     var new_workspace_settings_hover: ?usize = null;
     var new_search_hover = false;
+    var new_chat_hover = false;
     var new_settings_hover = false;
     if (rectContainsPoint(palette_sidebar_rect, x, y)) {
         // Walk hits in reverse so later (visually-topmost) rows win when
@@ -389,6 +397,7 @@ pub fn handlePaletteMouseMotion(state: *runtime.AppState, x: f32, y: f32) void {
                     if (!state.isSidebarCollapsed() and new_workspace_settings_hover == null) new_workspace_settings_hover = hit.project_index;
                 },
                 .command_palette => new_search_hover = true,
+                .new_chat_trigger => new_chat_hover = true,
                 .settings => new_settings_hover = true,
                 else => {},
             }
@@ -400,12 +409,13 @@ pub fn handlePaletteMouseMotion(state: *runtime.AppState, x: f32, y: f32) void {
     const terminal_changed = terminal_action_hovered != new_terminal_hover;
     const history_changed = history_action_hovered != new_history_hover;
     const workspace_settings_changed = workspace_settings_action_hovered != new_workspace_settings_hover;
-    const search_changed = search_trigger_hovered != new_search_hover;
+    const search_changed = search_trigger_hovered != new_search_hover or new_chat_trigger_hovered != new_chat_hover;
     const settings_changed = settings_hovered != new_settings_hover;
     terminal_action_hovered = new_terminal_hover;
     history_action_hovered = new_history_hover;
     workspace_settings_action_hovered = new_workspace_settings_hover;
     search_trigger_hovered = new_search_hover;
+    new_chat_trigger_hovered = new_chat_hover;
     settings_hovered = new_settings_hover;
     if (!project_changed and !new_thread_changed and !terminal_changed and !history_changed and !workspace_settings_changed and !search_changed and !settings_changed) return;
 
@@ -467,6 +477,9 @@ pub fn handlePaletteMouseButton(state: *runtime.AppState, x: f32, y: f32, down: 
             },
             .command_palette => {
                 state.openCommandPalette(null);
+            },
+            .new_chat_trigger => {
+                if (state.project_controller.projects.items.len > 0) state.createThreadForProject(@min(state.project_controller.selected_index, state.project_controller.projects.items.len - 1));
             },
             .settings => {
                 state.openSettingsModal();
@@ -1096,12 +1109,14 @@ fn renderPaletteExpandedSidebar(state: *runtime.AppState, rect: palette.Rect) vo
     // plumbing required.
     const header_top = rect.y + theme.scaledUi(14.0);
     const header_h = theme.scaledUi(32.0);
-    // Command-palette trigger pill sits pinned between the header row and the
-    // scrolling list, so the palette — now the only route to saved threads —
-    // keeps a visible entry point.
-    const search_h = theme.scaledUi(30.0);
-    const search_top = header_top + header_h + theme.scaledUi(10.0);
-    const list_top = search_top + search_h + theme.scaledUi(12.0);
+    // "New chat" and "Search" rows sit pinned between the header row and the
+    // scrolling list, so starting a chat and the palette — the only route to
+    // saved threads — keep visible entry points.
+    const action_row_h = theme.scaledUi(SIDEBAR_RAIL_ACTION_ROW_CSS);
+    const action_row_gap = theme.scaledUi(2.0);
+    const new_chat_top = header_top + header_h + theme.scaledUi(8.0);
+    const search_top = new_chat_top + action_row_h + action_row_gap;
+    const list_top = search_top + action_row_h + theme.scaledUi(12.0);
     // Reserve a band at the bottom of the rail for sticky chrome. Clipping the
     // workspace tree short here also caps `sidebar_max_scroll_y` (computed
     // below from `workspace_clip`), so the tree scrolls to rest above the
@@ -1122,7 +1137,11 @@ fn renderPaletteExpandedSidebar(state: *runtime.AppState, rect: palette.Rect) vo
         .h = easedAttentionViewportH(cluster_layout.viewport_h, motion_t),
     };
 
-    const workspace_top = list_top + cluster_layout.viewport_h;
+    // Pinned "Projects" caption between the ACTIVE cluster and the tree; it
+    // carries the add-workspace control.
+    const projects_caption_top = list_top + cluster_layout.viewport_h;
+    const projects_caption_h = theme.scaledUi(SIDEBAR_SECTION_CAPTION_H_CSS);
+    const workspace_top = projects_caption_top + projects_caption_h;
     const workspace_clip: palette.Rect = .{
         .x = rect.x,
         .y = workspace_top,
@@ -1302,6 +1321,9 @@ fn renderPaletteExpandedSidebar(state: *runtime.AppState, rect: palette.Rect) vo
         renderPaletteSettingsButton(state, btn_rect, footer_rect);
     }
 
+    // Projects caption paints after the tree so scrolled rows slide under it.
+    renderProjectsCaption(state, x, rail_w, .{ .x = rect.x, .y = projects_caption_top, .w = rect.w, .h = projects_caption_h });
+
     // Pin ACTIVE after the workspace tree so any tree row that scrolled into
     // the cluster band is covered — same overwrite trick as the header strip.
     if (attention_clip.h > 0.0) {
@@ -1326,11 +1348,14 @@ fn renderPaletteExpandedSidebar(state: *runtime.AppState, rect: palette.Rect) vo
     const btn_w = theme.scaledUi(28.0);
     const toggle_rect: palette.Rect = .{ .x = rect.x + rect.w - pad_x - btn_w, .y = header_top + (header_h - btn_w) * 0.5, .w = btn_w, .h = btn_w };
     renderPaletteSidebarToggle(state, toggle_rect, true);
-    const add_rect: palette.Rect = .{ .x = toggle_rect.x - btn_w - theme.scaledUi(4.0), .y = toggle_rect.y, .w = btn_w, .h = btn_w };
-    renderPaletteSidebarActionIcon(state, add_rect, NF_COD_ADD, null, rect);
-    addPaletteHit(add_rect, .add_workspace, 0, 0);
 
-    renderPaletteSearchTrigger(state, .{ .x = x, .y = search_top, .w = rail_w, .h = search_h });
+    var new_chat_hint_buf: [32]u8 = undefined;
+    const new_chat_hint = if (state.command_controller.keyboard_config) |config|
+        if (config.new_thread.len > 0) keybinds.formatKeybind(&new_chat_hint_buf, config.new_thread[0]) else ""
+    else
+        "";
+    renderPaletteRailActionRow(state, .{ .x = x, .y = new_chat_top, .w = rail_w, .h = action_row_h }, NF_COD_EDIT, "New chat", new_chat_hint, new_chat_trigger_hovered, .new_chat_trigger, true);
+    renderPaletteRailActionRow(state, .{ .x = x, .y = search_top, .w = rail_w, .h = action_row_h }, NF_COD_SEARCH, "Search", command_palette.commandPaletteShortcutHint(state), search_trigger_hovered, .command_palette, false);
 }
 
 const SidebarPaneRowsMeasurement = struct {
@@ -1396,43 +1421,72 @@ test "sidebar reveals a newly focused row past the viewport edge" {
 /// muted "Search" label, and the configured shortcut as plain subtle text.
 /// No box/border/badge chrome — it uses the same accent hover wash as list
 /// rows so it reads as part of the rail under any theme.
-fn renderPaletteSearchTrigger(state: *runtime.AppState, rect: palette.Rect) void {
-    const hovered = search_trigger_hovered;
+/// One pinned rail action row (icon, label, right-aligned shortcut hint), in
+/// the style of the rail's other rows. `primary` renders the label in the
+/// body text colour so "New chat" reads as the main action.
+fn renderPaletteRailActionRow(
+    state: *runtime.AppState,
+    rect: palette.Rect,
+    icon: []const u8,
+    label: []const u8,
+    hint: []const u8,
+    hovered: bool,
+    kind: SidebarHitKind,
+    primary: bool,
+) void {
     if (hovered) {
-        queuePaletteRoundedRect(state, snapRect(rect), paletteColor(sidebarTint(SIDEBAR_HOVER_TINT)), theme.scaledUi(6.0));
+        queuePaletteRoundedRect(state, snapRect(rect), paletteColor(sidebarTint(SIDEBAR_HOVER_TINT)), theme.scaledUi(7.0));
     }
-    addPaletteHit(rect, .command_palette, 0, 0);
+    addPaletteHit(rect, kind, 0, 0);
 
     const cy = rect.y + rect.h * 0.5;
-    const fg = if (hovered) theme.COLOR_WHITE else theme.COLOR_TEXT_SUBTLE;
-    const icon_font = theme.scaledUi(12.5);
+    const fg = if (hovered or primary) theme.COLOR_WHITE else theme.COLOR_TEXT_MUTED;
+    const icon_font = theme.scaledUi(14.0);
     queuePaletteIcon(state, .{
-        .x = rect.x + theme.scaledUi(8.0),
+        .x = rect.x + theme.scaledUi(SIDEBAR_THREAD_ICON_LEADING_PAD_CSS),
         .y = cy - icon_font * 0.55,
         .w = icon_font,
         .h = icon_font,
-    }, NF_COD_SEARCH, icon_font, paletteColor(fg), null);
+    }, icon, icon_font, paletteColor(fg), null);
 
-    const label_font = theme.scaledUi(12.5);
+    const label_font = theme.scaledUi(13.5);
     queuePaletteText(state, .{
-        .x = rect.x + theme.scaledUi(28.0),
+        .x = rect.x + theme.scaledUi(SIDEBAR_THREAD_ICON_LEADING_PAD_CSS + 24.0),
         .y = @round(cy - label_font * 0.65),
-        .w = theme.scaledUi(80.0),
+        .w = @max(rect.w - theme.scaledUi(96.0), theme.scaledUi(40.0)),
         .h = label_font * 1.3,
-    }, "Search", paletteColor(fg), label_font, rect);
+    }, label, paletteColor(fg), label_font, rect);
 
-    const hint = command_palette.commandPaletteShortcutHint(state);
     if (hint.len == 0) return;
-    const hint_font = theme.scaledUi(10.0);
+    const hint_font = theme.scaledUi(11.0);
     // Same per-char width estimate the rail uses elsewhere for right-aligned
     // labels; shortcut strings are short ASCII so the error stays invisible.
     const hint_w = @as(f32, @floatFromInt(hint.len)) * hint_font * 0.54;
     queuePaletteText(state, .{
-        .x = rect.x + rect.w - hint_w - theme.scaledUi(8.0),
+        .x = rect.x + rect.w - hint_w - theme.scaledUi(10.0),
         .y = @round(cy - hint_font * 0.65),
         .w = hint_w + theme.scaledUi(6.0),
         .h = hint_font * 1.3,
-    }, hint, paletteColor(theme.withAlpha(theme.COLOR_TEXT_SUBTLE, 210)), hint_font, rect);
+    }, hint, paletteColor(theme.COLOR_TEXT_SUBTLE), hint_font, rect);
+}
+
+/// Pinned "Projects" caption above the workspace tree, with the
+/// add-workspace control at its right edge.
+fn renderProjectsCaption(state: *runtime.AppState, x: f32, rail_w: f32, band: palette.Rect) void {
+    if (band.h <= 0.0) return;
+    queuePaletteRect(state, .{ .x = band.x, .y = band.y, .w = band.w - theme.scaledUi(1.0), .h = band.h }, paletteColor(theme.COLOR_PANEL));
+    const caption_font = theme.scaledUi(12.0);
+    const cy = band.y + band.h * 0.5;
+    queuePaletteText(state, .{
+        .x = x + theme.scaledUi(SIDEBAR_THREAD_ICON_LEADING_PAD_CSS),
+        .y = @round(cy - caption_font * 0.65),
+        .w = rail_w * 0.5,
+        .h = caption_font * 1.3,
+    }, "Projects", paletteColor(theme.COLOR_TEXT_SUBTLE), caption_font, band);
+    const btn = theme.scaledUi(24.0);
+    const add_rect: palette.Rect = .{ .x = x + rail_w - btn - theme.scaledUi(4.0), .y = cy - btn * 0.5, .w = btn, .h = btn };
+    renderPaletteSidebarActionIcon(state, add_rect, NF_COD_ADD, null, band);
+    addPaletteHit(add_rect, .add_workspace, 0, 0);
 }
 
 const AttentionClusterRow = struct {
@@ -1529,12 +1583,22 @@ fn renderAttentionClusterSection(
         .w = clip.w - theme.scaledUi(1.0),
         .h = label_h,
     }, paletteColor(theme.COLOR_PANEL));
+    const caption_font = theme.scaledUi(12.0);
     queuePaletteText(state, .{
-        .x = x,
+        .x = x + theme.scaledUi(SIDEBAR_THREAD_ICON_LEADING_PAD_CSS),
         .y = clip.y,
-        .w = rail_w,
-        .h = theme.scaledUi(18.0),
-    }, "ACTIVE", paletteColor(theme.COLOR_TEXT_SUBTLE), theme.scaledUi(11.0), clip);
+        .w = rail_w * 0.5,
+        .h = caption_font * 1.3,
+    }, "Active", paletteColor(theme.COLOR_TEXT_SUBTLE), caption_font, clip);
+    var count_buf: [8]u8 = undefined;
+    const count_label = std.fmt.bufPrint(&count_buf, "{d}", .{rows.len}) catch "";
+    const count_w = @as(f32, @floatFromInt(count_label.len)) * caption_font * 0.6;
+    queuePaletteText(state, .{
+        .x = x + rail_w - count_w - theme.scaledUi(10.0),
+        .y = clip.y,
+        .w = count_w + theme.scaledUi(4.0),
+        .h = caption_font * 1.3,
+    }, count_label, paletteColor(theme.COLOR_TEXT_SUBTLE), caption_font, clip);
 
     const divider_band: palette.Rect = .{
         .x = clip.x,
