@@ -38,7 +38,10 @@ fn attentionPulse(state: *runtime.AppState, project_index: usize) f32 {
 }
 
 /// Saved-thread row: provider bitmap slot (CSS px).
-const SIDEBAR_THREAD_PROVIDER_GLYPH_CSS: f32 = 18.0;
+const SIDEBAR_THREAD_PROVIDER_GLYPH_CSS: f32 = 22.0;
+/// Claude's mark fills its whole image while the other logos carry built-in
+/// padding; shrink it so every provider reads at the same optical size.
+const CLAUDE_LOGO_OPTICAL_SCALE: f32 = 0.8;
 /// Thread row height must fit `SIDEBAR_THREAD_PROVIDER_GLYPH_CSS` with a little vertical air.
 const SIDEBAR_THREAD_ROW_HEIGHT_CSS: f32 = 38.0;
 /// Vertical advance per thread row (row + gap).
@@ -740,19 +743,21 @@ fn finishWorkspaceDrag(state: *runtime.AppState, x: f32, y: f32) bool {
     _ = sdl.captureMouse(false);
 
     if (!drag.active) {
-        // No meaningful movement — treat as a plain click on the row. It
-        // always selects the workspace; a collapsed row also expands, and a
-        // click on the already-selected expanded row collapses it. Selecting
-        // an expanded workspace never re-hides its panes.
+        // No meaningful movement — treat as a plain click on the row. In the
+        // expanded rail it only opens or closes the folder; switching
+        // workspaces happens by clicking one of its rows. A workspace with no
+        // open panes has nothing to reveal, so the click selects it instead.
+        // The collapsed rail's avatar (no toggle) always selects.
         if (drag.project_index < state.project_controller.projects.items.len) {
             state.noteInteraction();
-            const was_selected = state.project_controller.selected_index == drag.project_index;
-            _ = state.selectProjectAtIndex(drag.project_index);
             const project = &state.project_controller.projects.items[drag.project_index];
-            if (drag.toggle_project_on_click and (was_selected or project.collapsed)) {
+            if (drag.toggle_project_on_click and project.workspace_layout.panes.items.len > 0) {
                 project.collapsed = !project.collapsed;
+            } else {
+                _ = state.selectProjectAtIndex(drag.project_index);
+                project.collapsed = false;
+                state.requestTranscriptScrollToBottom();
             }
-            state.requestTranscriptScrollToBottom();
             state.markDirty();
         }
         workspace_drop_valid = false;
@@ -3099,7 +3104,10 @@ fn queuePaletteProviderGlyphInRect(state: *runtime.AppState, provider: TerminalA
         .muse => state.muse_logo_texture,
     };
     if (texture) |cached| {
-        const r = utils.snapImageRectToPixels(utils.imageRectContain(cached.width, cached.height, box.x, box.y, box.w, box.h));
+        const scale: f32 = if (provider == .claude) CLAUDE_LOGO_OPTICAL_SCALE else 1.0;
+        const inset_w = box.w * (1.0 - scale) * 0.5;
+        const inset_h = box.h * (1.0 - scale) * 0.5;
+        const r = utils.snapImageRectToPixels(utils.imageRectContain(cached.width, cached.height, box.x + inset_w, box.y + inset_h, box.w * scale, box.h * scale));
         const draw = snapRect(.{ .x = r.x, .y = r.y, .w = r.w, .h = r.h });
         if (queuePaletteImage(state, draw, cached, paletteColor(theme.providerLogoTint(@tagName(provider))), clip)) return;
     }
