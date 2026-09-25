@@ -2282,10 +2282,12 @@ test "asciiIndexOfIgnoreCase finds case-insensitive needles" {
 
 test "formatKeybind renders modifiers and uppercases single letters" {
     var buf: [32]u8 = undefined;
-    const rendered = formatKeybind(&buf, .{ .primary = true, .shift = true, .key = .p });
+    const rendered = keybinds.formatKeybindText(&buf, .{ .primary = true, .shift = true, .key = .p });
     try std.testing.expectEqualStrings("Ctrl+Shift+P", rendered);
-    const plain = formatKeybind(&buf, .{ .alt = true, .key = .left });
+    const plain = keybinds.formatKeybindText(&buf, .{ .alt = true, .key = .left });
     try std.testing.expectEqualStrings("Alt+Left", plain);
+    try std.testing.expectEqualStrings("\u{21E7}\u{2318}P", keybinds.formatKeybindMac(&buf, .{ .primary = true, .shift = true, .key = .p }));
+    try std.testing.expectEqualStrings("\u{2303}\u{2325}T", keybinds.formatKeybindMac(&buf, .{ .ctrl = true, .alt = true, .key = .t }));
 }
 
 test "indexed keybind hints follow loaded workspace bindings" {
@@ -2294,7 +2296,8 @@ test "indexed keybind hints follow loaded workspace bindings" {
         .{ .ctrl = true, .key = .@"0" },
     };
     var buf: [32]u8 = undefined;
-    try std.testing.expectEqualStrings("Ctrl+1", indexedKeybindHint(&buf, &bindings, 0));
-    try std.testing.expectEqualStrings("Ctrl+0", indexedKeybindHint(&buf, &bindings, 1));
+    const mac = @import("builtin").os.tag == .macos;
+    try std.testing.expectEqualStrings(if (mac) "\u{2303}1" else "Ctrl+1", indexedKeybindHint(&buf, &bindings, 0));
+    try std.testing.expectEqualStrings(if (mac) "\u{2303}0" else "Ctrl+0", indexedKeybindHint(&buf, &bindings, 1));
     try std.testing.expectEqualStrings("", indexedKeybindHint(&buf, &bindings, 2));
 }

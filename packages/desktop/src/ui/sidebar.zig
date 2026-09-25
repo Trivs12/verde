@@ -1140,8 +1140,12 @@ fn renderPaletteExpandedSidebar(state: *runtime.AppState, rect: palette.Rect) vo
     // rendered AFTER the list (with a background strip first) so any list rows
     // scrolled into the header band are visually overwritten — no z-index
     // plumbing required.
-    const header_top = rect.y + theme.scaledUi(14.0);
-    const header_h = theme.scaledUi(32.0);
+    // With a transparent macOS titlebar the header row IS the titlebar band:
+    // the traffic lights sit at its left and the collapse control at its
+    // right, and the logo is dropped. Elsewhere it keeps its own inset row.
+    const titlebar_inset = theme.window_top_inset_px;
+    const header_top = if (titlebar_inset > 0.0) rect.y else rect.y + theme.scaledUi(14.0);
+    const header_h = if (titlebar_inset > 0.0) titlebar_inset else theme.scaledUi(32.0);
     // "New chat" and "Search" rows sit pinned between the header row and the
     // scrolling list, so starting a chat and the palette — the only route to
     // saved threads — keep visible entry points.
@@ -1247,11 +1251,9 @@ fn renderPaletteExpandedSidebar(state: *runtime.AppState, rect: palette.Rect) vo
 
         const cy = y + row_h * 0.5;
         var tx = x + theme.scaledUi(6.0);
-        const chevron_color: [4]f32 = if (selected or project_hovered) theme.COLOR_WHITE else theme.COLOR_TEXT_SUBTLE;
-        if (project_visible) queuePaletteChevron(state, tx, cy, chevron_color, effective_collapsed);
-        // Chevron renders into a ~14px wide cell — leave room before the
-        // folder icon so the arrow doesn't crowd the project title.
-        tx += theme.scaledUi(18.0);
+        // No disclosure chevron: the folder row itself toggles, and its
+        // indented pane rows show whether it is open.
+        tx += theme.scaledUi(4.0);
         if (project_visible) queuePaletteFolderIcon(state, tx, cy, theme.scaledUi(14.0), theme.scaledUi(10.0), if (selected or project_hovered) theme.COLOR_WHITE else theme.COLOR_TEXT_SUBTLE, selected);
         tx += theme.scaledUi(20.0);
 
@@ -1271,7 +1273,14 @@ fn renderPaletteExpandedSidebar(state: *runtime.AppState, rect: palette.Rect) vo
         const badge_w = theme.scaledUi(SIDEBAR_HERDR_BADGE_W_CSS);
         const badge_gap = theme.scaledUi(6.0);
         const label_right = if (badge_label != null) content_right - badge_w - badge_gap else content_right;
-        if (project_visible) queuePaletteText(state, .{ .x = tx, .y = y + theme.scaledUi(5.0), .w = @max(label_right - tx, theme.scaledUi(24.0)), .h = row_h }, project.label, paletteColor(if (selected or project_hovered) theme.COLOR_WHITE else theme.COLOR_TEXT_MUTED), theme.scaledUi(15.0), row_rect);
+        if (project_visible) {
+            const label_rect: palette.Rect = .{ .x = tx, .y = y + theme.scaledUi(5.0), .w = @max(label_right - tx, theme.scaledUi(24.0)), .h = row_h };
+            const label_color = paletteColor(if (selected or project_hovered) theme.COLOR_WHITE else theme.COLOR_TEXT_MUTED);
+            if (selected)
+                queuePaletteMediumText(state, label_rect, project.label, label_color, theme.scaledUi(14.5), row_rect)
+            else
+                queuePaletteText(state, label_rect, project.label, label_color, theme.scaledUi(14.5), row_rect);
+        }
         if (project_visible) {
             if (badge_label) |label| {
                 renderHerdrRuntimeBadge(state, .{ .x = content_right - badge_w, .y = y + theme.scaledUi(6.0), .w = badge_w, .h = row_h - theme.scaledUi(12.0) }, label, selected or project_hovered, row_rect);
@@ -1371,8 +1380,10 @@ fn renderPaletteExpandedSidebar(state: *runtime.AppState, rect: palette.Rect) vo
     // A single compact row: logo mark, then add-workspace and collapse
     // controls right-aligned.
     queuePaletteRect(state, .{ .x = rect.x, .y = rect.y, .w = rect.w - theme.scaledUi(1.0), .h = list_top - rect.y }, paletteColor(theme.COLOR_PANEL));
-    const logo = theme.scaledUi(28.0);
-    queuePaletteLogoMark(state, .{ .x = x, .y = header_top + (header_h - logo) * 0.5, .w = logo, .h = logo });
+    if (titlebar_inset <= 0.0) {
+        const logo = theme.scaledUi(28.0);
+        queuePaletteLogoMark(state, .{ .x = x, .y = header_top + (header_h - logo) * 0.5, .w = logo, .h = logo });
+    }
 
     const btn_w = theme.scaledUi(28.0);
     const toggle_rect: palette.Rect = .{ .x = rect.x + rect.w - pad_x - btn_w, .y = header_top + (header_h - btn_w) * 0.5, .w = btn_w, .h = btn_w };
@@ -1478,19 +1489,22 @@ fn renderPaletteRailActionRow(
         .h = icon_font,
     }, icon, icon_font, paletteColor(fg), null);
 
-    const label_font = theme.scaledUi(13.5);
-    queuePaletteText(state, .{
+    const label_font = theme.scaledUi(14.0);
+    const label_rect: palette.Rect = .{
         .x = rect.x + theme.scaledUi(SIDEBAR_THREAD_ICON_LEADING_PAD_CSS + 24.0),
         .y = @round(cy - label_font * 0.65),
         .w = @max(rect.w - theme.scaledUi(96.0), theme.scaledUi(40.0)),
         .h = label_font * 1.3,
-    }, label, paletteColor(fg), label_font, rect);
+    };
+    if (primary)
+        queuePaletteMediumText(state, label_rect, label, paletteColor(fg), label_font, rect)
+    else
+        queuePaletteText(state, label_rect, label, paletteColor(fg), label_font, rect);
 
     if (hint.len == 0) return;
-    const hint_font = theme.scaledUi(11.0);
-    // Same per-char width estimate the rail uses elsewhere for right-aligned
-    // labels; shortcut strings are short ASCII so the error stays invisible.
-    const hint_w = @as(f32, @floatFromInt(hint.len)) * hint_font * 0.54;
+    const hint_font = theme.scaledUi(12.0);
+    // Measured, not estimated: macOS hints are multi-byte modifier symbols.
+    const hint_w = runtime.paletteUiTextPrefixWidth(hint, hint_font, hint.len);
     queuePaletteText(state, .{
         .x = rect.x + rect.w - hint_w - theme.scaledUi(10.0),
         .y = @round(cy - hint_font * 0.65),
@@ -1630,7 +1644,7 @@ fn renderAttentionClusterSection(
     }, "Active", paletteColor(theme.COLOR_TEXT_SUBTLE), caption_font, clip);
     var count_buf: [8]u8 = undefined;
     const count_label = std.fmt.bufPrint(&count_buf, "{d}", .{rows.len}) catch "";
-    const count_w = @as(f32, @floatFromInt(count_label.len)) * caption_font * 0.6;
+    const count_w = runtime.paletteUiTextPrefixWidth(count_label, caption_font, count_label.len);
     queuePaletteText(state, .{
         .x = x + rail_w - count_w - theme.scaledUi(10.0),
         .y = clip.y,
@@ -1837,7 +1851,9 @@ fn renderPaletteCollapsedSidebar(state: *runtime.AppState, rect: palette.Rect) v
     const button = theme.scaledUi(SIDEBAR_RAIL_BUTTON_CSS);
     const step = button + theme.scaledUi(SIDEBAR_RAIL_BUTTON_GAP_CSS);
     const x = rect.x + (rect.w - button) * 0.5;
-    const header_top = rect.y + theme.scaledUi(14.0);
+    // The traffic lights span the collapsed rail's titlebar band, so its
+    // controls start below it.
+    const header_top = rect.y + theme.window_top_inset_px + theme.scaledUi(14.0);
     const header_h = theme.scaledUi(32.0);
     const logo = theme.scaledUi(28.0);
     queuePaletteLogoMark(state, .{ .x = rect.x + (rect.w - logo) * 0.5, .y = header_top + (header_h - logo) * 0.5, .w = logo, .h = logo });
@@ -2550,12 +2566,16 @@ fn renderOpenPaneRow(
 
     const title_font = theme.scaledUi(13.5);
     const title_line = title_font * 1.30;
-    queuePaletteText(state, .{
+    const title_rect: palette.Rect = .{
         .x = rect.x + title_left,
         .y = @round(rect.y + (rect.h - title_line) * 0.5),
         .w = rect.w - title_left - theme.scaledUi(12.0),
         .h = title_line,
-    }, shown, paletteColor(title_color), title_font, clip);
+    };
+    if (focused)
+        queuePaletteMediumText(state, title_rect, shown, paletteColor(title_color), title_font, clip)
+    else
+        queuePaletteText(state, title_rect, shown, paletteColor(title_color), title_font, clip);
 
     // Trailing status column: a coloured pulsing pip plus quiet status text
     // (muted when waiting on the user, subtle otherwise). The at-a-glance words/elapsed-time are what the expanded rail
@@ -2919,17 +2939,30 @@ fn queuePaletteLogoMark(state: *runtime.AppState, rect: palette.Rect) void {
     }, mark_color);
 }
 
+/// Sidebar label in the regular UI face. (A null font role would fall back to
+/// the renderer's bold prose face.)
 fn queuePaletteText(state: *runtime.AppState, rect: palette.Rect, value: []const u8, color: palette.Color, font_size: f32, clip: ?palette.Rect) void {
+    queuePaletteRoleText(state, rect, value, color, font_size, .ui, clip);
+}
+
+/// Emphasised sidebar label (selected workspace, focused row, primary action).
+fn queuePaletteMediumText(state: *runtime.AppState, rect: palette.Rect, value: []const u8, color: palette.Color, font_size: f32, clip: ?palette.Rect) void {
+    queuePaletteRoleText(state, rect, value, color, font_size, .ui_medium, clip);
+}
+
+fn queuePaletteRoleText(state: *runtime.AppState, rect: palette.Rect, value: []const u8, color: palette.Color, font_size: f32, role: palette.FontRole, clip: ?palette.Rect) void {
     const stable_value = stablePaletteText(state, value) catch |err| {
         log.warn("failed to retain sidebar palette text: {s}", .{@errorName(err)});
         return;
     };
-    state.palette_overlay_batch.fixedText(
+    state.palette_overlay_batch.fixedRoleText(
         state.allocator,
         snapRect(rect),
         stable_value,
         color,
         font_size,
+        role,
+        null,
         clip,
         .{},
         font_size * 0.55,

@@ -489,6 +489,11 @@ pub fn wash(color: [4]f32, alpha: u8) [4]f32 {
 /// white/grey marks (OpenAI, Cursor, Grok, Pi, FX) are drawn in the text
 /// colour so they stay visible on light themes; logos with their own brand
 /// colours, and OpenCode's two-tone mark, are drawn untinted.
+/// Framebuffer pixels at the top of the window covered by a transparent
+/// native titlebar (macOS traffic lights). Set by the main loop each frame;
+/// the root layout and sidebar keep their controls clear of it.
+pub var window_top_inset_px: f32 = 0.0;
+
 pub fn providerLogoTint(provider_tag: []const u8) [4]f32 {
     const branded = [_][]const u8{ "claude", "amp", "muse", "opencode" };
     for (branded) |name| {

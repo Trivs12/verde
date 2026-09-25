@@ -2151,7 +2151,29 @@ pub fn formatCtrlShiftKeyTipAt(buf: []u8, bindings: []const Keybind, index: usiz
 }
 
 /// Formats a keybind for compact UI shortcut hints.
+/// Formats a binding for display: macOS uses Apple's modifier symbols in
+/// their standard order (⌃⌥⇧⌘) with ⌘ for the primary modifier, matching how
+/// `matches` resolves it; other platforms spell modifiers out.
 pub fn formatKeybind(buf: []u8, binding: Keybind) []const u8 {
+    return if (builtin.os.tag == .macos) formatKeybindMac(buf, binding) else formatKeybindText(buf, binding);
+}
+
+/// macOS display form, e.g. "⌘⇧P".
+pub fn formatKeybindMac(buf: []u8, binding: Keybind) []const u8 {
+    var count: usize = 0;
+    if (binding.ctrl) count += copyInto(buf[count..], "\u{2303}");
+    if (binding.alt) count += copyInto(buf[count..], "\u{2325}");
+    if (binding.shift) count += copyInto(buf[count..], "\u{21E7}");
+    if (binding.primary or binding.meta) count += copyInto(buf[count..], "\u{2318}");
+    const name = keycodeLabel(binding.key);
+    const name_start = count;
+    count += copyInto(buf[count..], name);
+    if (name.len == 1 and count > name_start) buf[count - 1] = std.ascii.toUpper(buf[count - 1]);
+    return buf[0..count];
+}
+
+/// Spelled-out display form, e.g. "Ctrl+Shift+P".
+pub fn formatKeybindText(buf: []u8, binding: Keybind) []const u8 {
     var count: usize = 0;
     if (binding.primary or binding.ctrl) count += copyInto(buf[count..], "Ctrl+");
     if (binding.meta) count += copyInto(buf[count..], "Meta+");

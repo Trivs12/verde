@@ -692,7 +692,7 @@ fn mainInner(init: std.process.Init) !void {
         chat_panel_ui.resetRuntimeBannerHits();
 
         state.noteWorkspaceSwitchRenderStarted();
-        ui_layout.window_top_inset_px = windowTopInsetPx(window, ui_scale);
+        ui_theme.window_top_inset_px = windowTopInsetPx(window, ui_scale);
         recordSpan(&frame_sample, .render_root, struct {
             fn run(app_state: *AppState, framebuffer_width: c_int, framebuffer_height: c_int) void {
                 ui_layout.renderRoot(app_state, @floatFromInt(framebuffer_width), @floatFromInt(framebuffer_height));
