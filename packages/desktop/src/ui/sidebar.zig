@@ -36,7 +36,7 @@ fn attentionPulse(state: *runtime.AppState, project_index: usize) f32 {
     return 0.35 + 0.65 * theme.activityPulse(profiler.nowNs());
 }
 
-/// Saved-thread row: provider bitmap slot (CSS px). Match `COMPOSER_PROVIDER_LOGO_SLOT_CSS` in `chat_panel.zig`.
+/// Saved-thread row: provider bitmap slot (CSS px).
 const SIDEBAR_THREAD_PROVIDER_GLYPH_CSS: f32 = 22.0;
 /// Thread row height must fit `SIDEBAR_THREAD_PROVIDER_GLYPH_CSS` with a little vertical air.
 const SIDEBAR_THREAD_ROW_HEIGHT_CSS: f32 = 38.0;

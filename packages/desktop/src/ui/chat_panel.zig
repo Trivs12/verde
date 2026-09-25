@@ -37,9 +37,10 @@ const COMPOSER_HEIGHT: f32 = 262.0;
 /// Floor keeps ~2 lines of prompt text visible above the inner toolbar even
 /// in short panes, after the 42px directory strip is taken out.
 const COMPOSER_MIN_HEIGHT: f32 = 176.0;
-/// Prompt text lines the composer sizes itself to: empty drafts show two,
-/// longer drafts grow until `COMPOSER_HEIGHT` caps the box.
-const COMPOSER_MIN_LINES: f32 = 2.0;
+/// Prompt text lines the composer sizes itself to once it stacks: one-line
+/// drafts use the slim inline bar, longer drafts grow until `COMPOSER_HEIGHT`
+/// caps the box.
+const COMPOSER_MIN_LINES: f32 = 1.0;
 const COMPOSER_MAX_LINES: f32 = 10.0;
 /// Compact read-only strip used instead of the prompt box on subagent panes.
 const SUBAGENT_COMPOSER_HEIGHT: f32 = 72.0;
@@ -80,11 +81,6 @@ const APPROVAL_CARD_HEIGHT: f32 = 164.0;
 const COMPOSER_FILE_SEARCH_Z: i32 = 150;
 /// Must match `PaletteComposerPrompt` `pill_padding_x` in `state.zig` so toolbar glyphs align with label insets.
 const COMPOSER_TOOLBAR_PILL_PAD_X: f32 = 13.0;
-/// Provider logo slot in the model pill.
-const COMPOSER_PROVIDER_LOGO_SLOT_CSS: f32 = 26.0;
-/// Folder glyph size inside the directory pill; a touch under the provider
-/// logo slot so the codicon's ink weight matches the neighbouring logos.
-const COMPOSER_DIRECTORY_GLYPH_CSS: f32 = 17.0;
 /// codicon-layers: the directory pill's glyph when the chat runs in an
 /// open workspace root.
 const NF_COD_LAYERS = "\u{EBD2}";
@@ -8993,14 +8989,27 @@ fn renderComposer(state: *app_state.AppState, rect: palette.Rect) void {
 }
 
 /// Renders the unfocused split-pane prompt preview without touching the shared live composer widget.
+/// Geometry comes from the composer's pure `previewGeometry`, laid out for this
+/// pane's own labels, so the preview matches the live slim bar exactly.
 fn renderInactiveComposer(state: *app_state.AppState, rect: palette.Rect) void {
-    const radius = theme.scaledUi(13.0);
+    const thread = state.currentThread();
+    var detail_buf: [128]u8 = undefined;
+    const model_label = state.currentComposerModelLabel();
+    const detail_label = state.composerModelDetailText(&detail_buf);
+    const directory_label = state.directoryPillLabel(state.currentThreadEffectiveCwd());
+    const runtime_label = state.currentRuntimePickerLabel();
+    const layout = state.composer_controller.composer.previewGeometry(rect, .{
+        .model = model_label,
+        .detail = detail_label,
+        .directory = directory_label,
+        .runtime = runtime_label,
+    });
     queuePanel(
         state,
-        rect,
+        layout.frame,
         paletteColor(theme.withAlpha(theme.COLOR_PANEL_ALT, 248)),
         paletteColor(theme.COLOR_PANEL_MUTED),
-        radius,
+        layout.corner_radius,
         @max(theme.scaledUi(1.0), 1.0),
     );
 
@@ -9015,160 +9024,59 @@ fn renderInactiveComposer(state: *app_state.AppState, rect: palette.Rect) void {
         paletteColor(theme.withAlpha(theme.COLOR_TEXT_SUBTLE, 220))
     else
         paletteColor(theme.COLOR_WHITE);
-    const pad = theme.scaledUi(18.0);
-    const toolbar_h = theme.scaledUi(42.0);
-    queueText(state, .{
-        .x = rect.x + pad,
-        .y = rect.y + theme.scaledUi(18.0),
-        .w = @max(rect.w - pad * 2.0, theme.scaledUi(1.0)),
-        .h = @max(rect.h - toolbar_h - theme.scaledUi(24.0), theme.scaledUi(20.0)),
-    }, text, color, theme.scaledUi(15.5), rect);
+    queueInactiveComposerLabel(state, layout.text, text, color, theme.scaledUi(app_state.PALETTE_COMPOSER_FONT_SIZE));
 
-    renderInactiveComposerToolbar(state, rect);
-    renderInactiveComposerSubmit(state, rect);
-}
-
-// Renders the read-only composer toolbar shown in split panes that do not own live input.
-fn renderInactiveComposerToolbar(state: *app_state.AppState, rect: palette.Rect) void {
-    const thread = state.currentThread();
-    const pad = theme.scaledUi(18.0);
-    const gap = theme.scaledUi(8.0);
-    const pill_h = theme.scaledUi(28.0);
-    const y = rect.y + rect.h - theme.scaledUi(40.0);
-    const max_x = rect.x + rect.w - theme.scaledUi(58.0);
-    var x = rect.x + pad;
-
-    const model_label = state.currentComposerModelLabel();
-    const model_w = inactiveComposerPillWidth(model_label, true);
-    if (x + model_w <= max_x) {
-        const pill = palette.Rect{ .x = x, .y = y, .w = model_w, .h = pill_h };
-        renderInactiveComposerPill(state, pill, model_label, true);
-        renderInactiveComposerProviderIcon(state, pill, thread.provider);
-        x += model_w + gap;
-    }
-
-    // The live composer consolidates reasoning/speed/access into one run
-    // pill; the read-only preview mirrors that with the same summary text
-    // and the same embedded state glyphs (brain gauge / bolt / lock).
-    // Measure the joined label (it spans up to three settings and includes
-    // multibyte separators) instead of guessing from byte count.
-    var summary_buf: [192]u8 = undefined;
-    const summary = state.composerRunSummaryParts(&summary_buf);
-    // Slot order mirrors syncPaletteComposerControls: optional reasoning
-    // glyph, optional speed glyph, then the always-present access glyph.
-    var slots: [3]InactiveRunSlot = undefined;
-    var slot_count: usize = 0;
-    if (summary.reasoning_offset) |offset| {
-        slots[slot_count] = .{ .byte_offset = offset, .kind = .reasoning };
-        slot_count += 1;
-    }
-    if (summary.fast_offset) |offset| {
-        slots[slot_count] = .{ .byte_offset = offset, .kind = .speed };
-        slot_count += 1;
-    }
-    slots[slot_count] = .{ .byte_offset = summary.access_offset, .kind = .access };
-    slot_count += 1;
-
-    const summary_text_w = text_measure.textWidth(.ui, theme.scaledUi(12.5), summary.text);
-    const cells_w = @as(f32, @floatFromInt(slot_count)) * theme.scaledUi(INACTIVE_RUN_PILL_ICON_CELL_CSS);
-    const summary_w = theme.clampf(summary_text_w + cells_w + theme.scaledUi(26.0), theme.scaledUi(76.0), theme.scaledUi(340.0));
-    if (x + summary_w <= max_x) {
-        renderInactiveComposerRunPill(state, .{ .x = x, .y = y, .w = summary_w, .h = pill_h }, summary.text, slots[0..slot_count]);
-    }
-}
-
-/// One host-drawn state glyph inside the inactive preview's run pill;
-/// `byte_offset` splits the summary text exactly like the live pill's
-/// ComposerPromptIconSlot.
-const InactiveRunSlot = struct {
-    byte_offset: usize,
-    kind: enum { reasoning, speed, access },
-};
-
-/// Glyph cell width inside the inactive run pill; the preview is a scaled-
-/// down echo of the live pill (12.5pt vs 15pt labels), so the cell shrinks
-/// with it. Same convention as `COMPOSER_RUN_PILL_ICON_CELL`.
-const INACTIVE_RUN_PILL_ICON_CELL_CSS: f32 = 24.0;
-/// Drawn glyph size inside an inactive run-pill cell (live pill draws 22).
-const INACTIVE_RUN_PILL_ICON_SIZE_CSS: f32 = 18.0;
-
-// Renders the inactive preview's run pill: summary text broken around glyph
-// cells so brain/bolt/lock land beside the segment each one describes,
-// matching the live run pill's walk (including the half-space nudge that
-// centers each glyph over the word gap).
-fn renderInactiveComposerRunPill(state: *app_state.AppState, pill: palette.Rect, label: []const u8, slots: []const InactiveRunSlot) void {
-    const font = theme.scaledUi(12.5);
-    const cell_w = theme.scaledUi(INACTIVE_RUN_PILL_ICON_CELL_CSS);
-    const icon_size = theme.scaledUi(INACTIVE_RUN_PILL_ICON_SIZE_CSS);
-    const icon_color = paletteColor(theme.COLOR_TEXT_MUTED);
-    const label_right = pill.x + pill.w - theme.scaledUi(10.0);
-    const label_y = pill.y + (pill.h - theme.scaledUi(15.0)) * 0.5;
-    const label_h = theme.scaledUi(16.0);
-    var x = pill.x + theme.scaledUi(13.0);
-    var byte: usize = 0;
-    for (slots) |slot| {
-        const offset = @min(slot.byte_offset, label.len);
-        if (offset > byte) {
-            const seg = label[byte..offset];
-            const seg_w = text_measure.textWidth(.ui, font, seg);
-            queueChromeLabel(state, .{ .x = x, .y = label_y, .w = seg_w + theme.scaledUi(2.0), .h = label_h }, seg, paletteColor(theme.COLOR_WHITE), font, pill);
-            x += seg_w;
-            byte = offset;
+    // Merged model label: provider logo, name, muted variant words, chevron.
+    const toolbar_font = theme.scaledUi(app_state.PALETTE_COMPOSER_TOOLBAR_FONT_SIZE);
+    if (layout.model.w > 0.0) {
+        renderInactiveComposerProviderIcon(state, layout.model_icon, layout.model, thread.provider);
+        queueInactiveComposerLabel(state, layout.model_text, model_label, paletteColor(theme.COLOR_WHITE), toolbar_font);
+        queueInactiveComposerLabel(state, layout.detail_text, detail_label, paletteColor(theme.COLOR_TEXT_SUBTLE), toolbar_font);
+        if (layout.chevron.w > 0.0) {
+            const glyph = theme.scaledUi(12.0);
+            queueIconText(state, snapIconRectOrigin(.{
+                .x = layout.chevron.x + (layout.chevron.w - glyph) * 0.5,
+                .y = layout.chevron.y + (layout.chevron.h - glyph) * 0.5,
+                .w = glyph,
+                .h = glyph,
+            }), NF_COD_CHEVRON_DOWN, paletteColor(theme.COLOR_TEXT_MUTED), glyph, layout.chevron);
         }
-        // Center the glyph over the word gap: cell spare plus the separator's
-        // leading space, mirroring reasoningIconSlotRects.
-        var space_end = byte;
-        while (space_end < label.len and label[space_end] == ' ') : (space_end += 1) {}
-        const gap_shift = text_measure.textWidth(.ui, font, label[byte..space_end]) * 0.5;
-        if (x + gap_shift + cell_w > label_right) break;
-        const cell = palette.Rect{ .x = x + gap_shift, .y = pill.y, .w = cell_w, .h = pill.h };
-        switch (slot.kind) {
-            // The brain inks its full em; draw it smaller so the three glyphs
-            // read as the same visual weight (matches the live pill).
-            .reasoning => drawThinkingIcon(state, composerIconRectInCell(cell, icon_size * 0.85), icon_color),
-            .speed => if (state.currentThread().fast_mode == .on)
-                drawBoltIcon(state, composerIconRectInCell(cell, icon_size), icon_color)
-            else
-                drawDefaultModeIcon(state, composerIconRectInCell(cell, icon_size), icon_color),
-            .access => drawAccessIcon(state, composerIconRectInCell(cell, icon_size), icon_color),
-        }
-        x += cell_w;
     }
-    if (byte < label.len) {
-        const tail = label[byte..];
-        queueChromeLabel(state, .{ .x = x, .y = label_y, .w = @max(label_right - x, theme.scaledUi(1.0)), .h = label_h }, tail, paletteColor(theme.COLOR_WHITE), font, pill);
+
+    // Directory strip chips under the bar, as in the live composer.
+    const chip_font = theme.scaledUi(app_state.PALETTE_COMPOSER_STRIP_FONT_SIZE);
+    const chip_color = paletteColor(theme.COLOR_TEXT_MUTED);
+    if (layout.directory.w > 0.0 and state.composer_controller.composer.showDirectoryToggle()) {
+        const directory_glyph = if (state.currentThreadCwdIsWorkspace()) NF_COD_LAYERS else file_icons.folder.glyph;
+        queueIconText(state, snapIconRectOrigin(layout.directory_icon), directory_glyph, chip_color, layout.directory_icon.w, layout.directory);
+        queueInactiveComposerLabel(state, layout.directory_text, directory_label, chip_color, chip_font);
     }
+    if (layout.runtime.w > 0.0 and state.composer_controller.composer.showRuntimeToggle()) {
+        queueIconText(state, snapIconRectOrigin(layout.runtime_icon), NF_COD_DEVICE_DESKTOP, chip_color, layout.runtime_icon.w, layout.runtime);
+        queueInactiveComposerLabel(state, layout.runtime_text, runtime_label, chip_color, chip_font);
+    }
+
+    renderInactiveComposerSubmit(state, layout.send);
 }
 
-fn inactiveComposerPillWidth(label: []const u8, has_icon: bool) f32 {
-    const text_w = @as(f32, @floatFromInt(label.len)) * theme.scaledUi(12.5) * 0.54;
-    return theme.clampf(text_w + theme.scaledUi(if (has_icon) 50.0 else 26.0), theme.scaledUi(if (has_icon) 92.0 else 76.0), theme.scaledUi(180.0));
-}
-
-// Renders a muted toolbar pill for the inactive composer preview.
-fn renderInactiveComposerPill(state: *app_state.AppState, rect: palette.Rect, label: []const u8, has_icon: bool) void {
-    const text_x = rect.x + theme.scaledUi(if (has_icon) 43.0 else 13.0);
+// Draws one vertically centred `.ui` label clipped to its preview cell.
+fn queueInactiveComposerLabel(state: *app_state.AppState, cell: palette.Rect, label: []const u8, color: palette.Color, font_size: f32) void {
+    if (cell.w <= 0.0 or label.len == 0) return;
+    const line_h = font_size * 1.25;
     queueChromeLabel(state, .{
-        .x = text_x,
-        .y = rect.y + (rect.h - theme.scaledUi(15.0)) * 0.5,
-        .w = @max(rect.x + rect.w - text_x - theme.scaledUi(10.0), theme.scaledUi(1.0)),
-        .h = theme.scaledUi(16.0),
-    }, label, paletteColor(theme.COLOR_WHITE), theme.scaledUi(12.5), rect);
+        .x = cell.x,
+        .y = cell.y + (cell.h - line_h) * 0.5,
+        .w = cell.w,
+        .h = line_h,
+    }, label, color, font_size, cell);
 }
 
-// Renders the provider mark inside the inactive composer model pill.
-fn renderInactiveComposerProviderIcon(state: *app_state.AppState, pill: palette.Rect, provider: app_state.Provider) void {
-    const provider_slot = theme.scaledUi(COMPOSER_PROVIDER_LOGO_SLOT_CSS);
-    const icon_slot = palette.Rect{
-        .x = pill.x + theme.scaledUi(COMPOSER_TOOLBAR_PILL_PAD_X),
-        .y = pill.y + (pill.h - provider_slot) * 0.5,
-        .w = provider_slot,
-        .h = provider_slot,
-    };
+// Renders the provider mark in the preview's merged-label logo cell.
+fn renderInactiveComposerProviderIcon(state: *app_state.AppState, icon_slot: palette.Rect, clip: palette.Rect, provider: app_state.Provider) void {
     const provider_icon = state.providerLogoTexture(provider);
     if (provider_icon) |cached| {
         const r = utils.snapImageRectToPixels(utils.imageRectContain(cached.width, cached.height, icon_slot.x, icon_slot.y, icon_slot.w, icon_slot.h));
-        queueProviderLogo(state, .{ .x = r.x, .y = r.y, .w = r.w, .h = r.h }, cached, provider, pill);
+        queueProviderLogo(state, .{ .x = r.x, .y = r.y, .w = r.w, .h = r.h }, cached, provider, clip);
     } else {
         const fallback_label = switch (provider) {
             .codex => "C",
@@ -9180,26 +9088,21 @@ fn renderInactiveComposerProviderIcon(state: *app_state.AppState, pill: palette.
             .grok => "G",
             .muse => "M",
         };
-        queueText(state, icon_slot, fallback_label, paletteColor(theme.withAlpha(theme.COLOR_WHITE, 175)), theme.scaledUi(13.0), pill);
+        queueText(state, icon_slot, fallback_label, paletteColor(theme.withAlpha(theme.COLOR_WHITE, 175)), theme.scaledUi(13.0), clip);
     }
 }
 
 // Renders the inactive composer submit/stop affordance without registering hit state.
-fn renderInactiveComposerSubmit(state: *app_state.AppState, rect: palette.Rect) void {
-    const size = theme.scaledUi(28.0);
-    const button = palette.Rect{
-        .x = rect.x + rect.w - theme.scaledUi(18.0) - size,
-        .y = rect.y + rect.h - theme.scaledUi(40.0),
-        .w = size,
-        .h = size,
-    };
+fn renderInactiveComposerSubmit(state: *app_state.AppState, button: palette.Rect) void {
+    const size = @min(button.w, button.h);
+    if (size <= 0.0) return;
     if (state.currentThread().isSendPendingForUi()) {
         const pulse = theme.activityPulse(profiler.nowNs());
         queueRounded(state, button, paletteColor(theme.withAlpha(theme.COLOR_YELLOW, @intFromFloat(188.0 + pulse * 67.0))), size * 0.5);
         const stop_side = size * (0.29 + pulse * 0.06);
         const stop = palette.Rect{
-            .x = button.x + (size - stop_side) * 0.5,
-            .y = button.y + (size - stop_side) * 0.5,
+            .x = button.x + (button.w - stop_side) * 0.5,
+            .y = button.y + (button.h - stop_side) * 0.5,
             .w = stop_side,
             .h = stop_side,
         };
@@ -9837,89 +9740,37 @@ fn renderComposerToolbarIcons(state: *app_state.AppState) void {
     defer state.palette_overlay_batch.restoreZIndex(previous_z);
 
     const icon_color = paletteColor(theme.COLOR_TEXT_MUTED);
-    const model_rect = state.composer_controller.composer.modelRect();
-    const fast_rect = state.composer_controller.composer.fastRect();
-    const access_rect = state.composer_controller.composer.accessRect();
+    const composer = &state.composer_controller.composer;
+    const model_rect = composer.modelRect();
+    const fast_rect = composer.fastRect();
+    const access_rect = composer.accessRect();
     const icon_size = theme.scaledUi(22.0);
-    const provider_slot = theme.scaledUi(COMPOSER_PROVIDER_LOGO_SLOT_CSS);
-    // Pad must match the composer's scaled `pill_padding_x` so the logo sits
-    // inside the pill's scaled leading reserve instead of over the label.
-    const model_icon_slot = palette.Rect{
-        .x = model_rect.x + theme.scaledUi(COMPOSER_TOOLBAR_PILL_PAD_X),
-        .y = model_rect.y + (model_rect.h - provider_slot) * 0.5,
-        .w = provider_slot,
-        .h = provider_slot,
-    };
 
+    // The merged model label reserves a small leading cell for the provider
+    // logo; the composer reports it so the logo tracks the right-aligned
+    // label in both the inline and stacked layouts.
     const provider_icon = state.providerLogoTexture(state.currentThread().provider);
     if (provider_icon) |cached| {
-        const r = utils.snapImageRectToPixels(utils.imageRectContain(cached.width, cached.height, model_icon_slot.x, model_icon_slot.y, model_icon_slot.w, model_icon_slot.h));
+        const slot = composer.leadingIconRect(.model);
+        const r = utils.snapImageRectToPixels(utils.imageRectContain(cached.width, cached.height, slot.x, slot.y, slot.w, slot.h));
         queueProviderLogo(state, .{ .x = r.x, .y = r.y, .w = r.w, .h = r.h }, cached, state.currentThread().provider, model_rect);
     }
 
-    // The directory pill reserves the same leading cell as the model pill;
-    // the folder glyph is drawn through the icon font here rather than by
-    // Palette so it shares the sidebar's folder rendering.
-    if (state.composer_controller.composer.showDirectoryToggle()) {
-        const directory_rect = state.composer_controller.composer.directoryRect();
-        // Icon text anchors at the rect origin, so size the rect to the glyph
-        // and center that inside the pill's provider-logo-sized reserve.
-        const glyph_size = theme.scaledUi(COMPOSER_DIRECTORY_GLYPH_CSS);
-        const folder_slot = snapIconRectOrigin(palette.Rect{
-            .x = directory_rect.x + theme.scaledUi(COMPOSER_TOOLBAR_PILL_PAD_X) + (provider_slot - glyph_size) * 0.5,
-            .y = directory_rect.y + (directory_rect.h - glyph_size) * 0.5,
-            .w = glyph_size,
-            .h = glyph_size,
-        });
+    // Strip chips reserve a glyph-sized leading cell; the folder / runtime
+    // glyphs are drawn through the icon font here rather than by Palette so
+    // they share the sidebar's folder rendering.
+    if (composer.showDirectoryToggle()) {
+        const directory_rect = composer.directoryRect();
+        const folder_slot = composer.leadingIconRect(.directory);
         // Workspaces get their own glyph; a workspace may be tied to a
-        // directory, but the pill is about where the chat runs.
+        // directory, but the chip is about where the chat runs.
         const directory_glyph = if (state.currentThreadCwdIsWorkspace()) NF_COD_LAYERS else file_icons.folder.glyph;
-        queueIconText(state, folder_slot, directory_glyph, icon_color, glyph_size, directory_rect);
+        queueIconText(state, snapIconRectOrigin(folder_slot), directory_glyph, icon_color, folder_slot.w, directory_rect);
     }
-    if (state.composer_controller.composer.showRuntimeToggle()) {
-        const runtime_rect = state.composer_controller.composer.runtimeRect();
-        const glyph_size = theme.scaledUi(COMPOSER_DIRECTORY_GLYPH_CSS);
-        const runtime_slot = snapIconRectOrigin(palette.Rect{
-            .x = runtime_rect.x + theme.scaledUi(COMPOSER_TOOLBAR_PILL_PAD_X) + (provider_slot - glyph_size) * 0.5,
-            .y = runtime_rect.y + (runtime_rect.h - glyph_size) * 0.5,
-            .w = glyph_size,
-            .h = glyph_size,
-        });
-        queueIconText(state, runtime_slot, NF_COD_DEVICE_DESKTOP, icon_color, glyph_size, runtime_rect);
-    }
-
-    // The run pill embeds the fast-mode and access state glyphs beside the
-    // label segment each one describes; the composer reserves the cells via
-    // `setReasoningIconSlots` and reports their rects so the glyphs track
-    // label layout and truncation. Each glyph is centered in its cell so the
-    // word→glyph and glyph→separator gaps stay balanced. Slot order matches
-    // `syncPaletteComposerControls`: optional reasoning glyph, then optional
-    // speed glyph, then access.
-    if (state.composer_controller.composer.showReasoningToggle()) {
-        const slots = state.composer_controller.composer.reasoningIconSlotRects();
-        var slot_index: usize = 0;
-        if (state.currentComposerShowsReasoningSegment() and slot_index < slots.count) {
-            const cell = slots.rects[slot_index];
-            slot_index += 1;
-            // The brain glyph inks its full em square while the bolt/lock
-            // carry ~7-12% built-in side bearings; draw it smaller so the
-            // three glyphs read as the same visual weight.
-            drawThinkingIcon(state, composerIconRectInCell(cell, icon_size * 0.85), icon_color);
-        }
-        if (state.currentComposerShowsFastToggle() and slot_index < slots.count) {
-            const cell = slots.rects[slot_index];
-            slot_index += 1;
-            const fast_icon_rect = composerIconRectInCell(cell, icon_size);
-            if (state.currentThread().fast_mode == .on) {
-                drawBoltIcon(state, fast_icon_rect, icon_color);
-            } else {
-                drawDefaultModeIcon(state, fast_icon_rect, icon_color);
-            }
-        }
-        if (slot_index < slots.count) {
-            const cell = slots.rects[slot_index];
-            drawAccessIcon(state, composerIconRectInCell(cell, icon_size), icon_color);
-        }
+    if (composer.showRuntimeToggle()) {
+        const runtime_rect = composer.runtimeRect();
+        const runtime_slot = composer.leadingIconRect(.runtime);
+        queueIconText(state, snapIconRectOrigin(runtime_slot), NF_COD_DEVICE_DESKTOP, icon_color, runtime_slot.w, runtime_rect);
     }
 
     if (state.composer_controller.composer.showFastToggle()) {
