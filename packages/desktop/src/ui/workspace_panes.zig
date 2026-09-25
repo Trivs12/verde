@@ -43,7 +43,8 @@ const FOCUS_BORDER_WIDTH_CSS: f32 = 1.0;
 const ZOOM_BORDER_WIDTH_CSS: f32 = 1.0;
 const STATUS_BORDER_WIDTH_CSS: f32 = 1.5;
 const STATUS_ZOOM_BORDER_WIDTH_CSS: f32 = 2.0;
-const ZOOM_ICON_FOREGROUND_MIX: f32 = 0.30;
+const PANE_CHROME_CONTROL_RADIUS_CSS: f32 = 5.0;
+const PANE_CHROME_HOVER_ALPHA: u8 = 16;
 const DONE_PULSE_PERIOD_MS: i64 = 2800;
 const WORKING_PULSE_PERIOD_MS: i64 = 2200;
 const QUICK_PANE_MIN_W_CSS: f32 = 320.0;
@@ -3161,12 +3162,13 @@ fn renderZoomControl(
     const previous_z = state.palette_overlay_batch.setZIndex(PANE_ZOOM_CONTROL_Z);
     defer state.palette_overlay_batch.restoreZIndex(previous_z);
 
-    const icon_color = if (maximized)
-        zoomIconAccent()
-    else if (hovered)
-        zoomIconAccent()
+    // Neutral like the chat header controls: subtle at rest, text colour with
+    // a soft fill on hover. The compress glyph already marks the zoomed state.
+    if (hovered) queuePaneChromeHoverFill(state, control_rect);
+    const icon_color = if (hovered or maximized)
+        theme.COLOR_WHITE
     else
-        theme.COLOR_TEXT_MUTED;
+        theme.COLOR_TEXT_SUBTLE;
     const icon_size = theme.scaledUi(ZOOM_ICON_SIZE_CSS);
     const icon_rect: palette.Rect = .{
         .x = control_rect.x + (control_rect.w - icon_size) * 0.5,
@@ -3228,8 +3230,9 @@ fn renderPaneShortcutKeyTip(state: *runtime.AppState, target: palette.Rect, clip
     }, label, paletteColor(theme.accent()), font_size, clip);
 }
 
-fn zoomIconAccent() [4]f32 {
-    return theme.mix(theme.accent(), theme.current_colors.text, ZOOM_ICON_FOREGROUND_MIX);
+/// Soft neutral hover fill for pane chrome icon controls (zoom, split).
+fn queuePaneChromeHoverFill(state: *runtime.AppState, rect: palette.Rect) void {
+    queueRounded(state, rect, paletteColor(theme.withAlpha(theme.COLOR_WHITE, PANE_CHROME_HOVER_ALPHA)), theme.scaledUi(PANE_CHROME_CONTROL_RADIUS_CSS));
 }
 
 fn renderInactivePaneFade(state: *runtime.AppState, pane_id: runtime.WorkspacePaneId, rect: palette.Rect) void {
@@ -3266,13 +3269,7 @@ fn renderPaneOverlay(state: *runtime.AppState, pane_id: runtime.WorkspacePaneId,
 
 fn renderSplitTriggerButton(state: *runtime.AppState, rect: palette.Rect, active: bool, emphasized: bool, clip: palette.Rect) void {
     _ = clip;
-    if (active) {
-        queueRounded(state, rect, paletteColor(theme.raise(theme.COLOR_PANEL_ALT, 0.08)), theme.scaledUi(5.0));
-        queueBorder(state, rect, paletteColor(theme.accent()), theme.scaledUi(5.0), theme.scaledUi(1.0));
-    } else if (emphasized) {
-        queueRounded(state, rect, paletteColor(theme.COLOR_PANEL_ALT), theme.scaledUi(5.0));
-        queueBorder(state, rect, paletteColor(theme.COLOR_PANEL_MUTED), theme.scaledUi(5.0), theme.scaledUi(1.0));
-    }
+    if (active or emphasized) queuePaneChromeHoverFill(state, rect);
     const icon_color = if (active or emphasized)
         theme.COLOR_WHITE
     else
