@@ -17,6 +17,10 @@ const RoleFonts = struct {
 };
 
 var fonts: ?RoleFonts = null;
+/// Whether chat headings use `.ui_bold` (the family's SemiBold) instead of
+/// `.ui`. Set by the renderer for the loaded family: Verde Classic keeps Cal
+/// Sans headings, text families need the weight to stand out.
+pub var headings_use_bold: bool = true;
 var gpu_renderer: ?*palette.renderer.Renderer = null;
 var prefix_cache: ?PrefixWidthCache = null;
 // Bumped whenever the measuring backend changes so width memos keyed on it

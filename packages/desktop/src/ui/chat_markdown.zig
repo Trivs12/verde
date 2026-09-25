@@ -3645,15 +3645,15 @@ fn isInlineWhitespace(byte: u8) bool {
 }
 
 /// Map a markdown block + inline style to the Palette FontRole that should
-/// render it. Chat headings stay on the chrome face (`.ui`, CalSans in Verde
-/// Classic) so they read as part of the same design language as the
-/// surrounding chrome. Body prose uses the family's prose face; strong/italic
+/// render it. Chat headings use the chrome family: Cal Sans (`.ui`) in Verde
+/// Classic, the family's SemiBold (`.ui_bold`) otherwise, so they read as part
+/// of the same design language as the surrounding chrome. Body prose uses the family's prose face; strong/italic
 /// emphasis selects the matching weight; inline code switches to the family's
 /// code face.
 fn markdownFontRole(block_style: TextStyle, inline_style: InlineStyle) palette.FontRole {
     if (inline_style.code) return .code;
     switch (block_style) {
-        .heading_1, .heading_2, .heading_3, .heading_4, .heading_5, .heading_6 => return .ui,
+        .heading_1, .heading_2, .heading_3, .heading_4, .heading_5, .heading_6 => return if (text_measure.headings_use_bold) .ui_bold else .ui,
         else => {},
     }
     if (inline_style.strong and inline_style.emphasis) return .prose_bold_italic;
@@ -4304,4 +4304,16 @@ test "unicode arrows survive markdown flatten for chat prose" {
         .text => |text| try std.testing.expectEqualStrings(source, text.text),
         else => unreachable,
     }
+}
+
+test "markdown headings use SemiBold except in the classic family" {
+    const previous = text_measure.headings_use_bold;
+    defer text_measure.headings_use_bold = previous;
+
+    text_measure.headings_use_bold = true;
+    try std.testing.expectEqual(palette.FontRole.ui_bold, markdownFontRole(.heading_2, .{}));
+    text_measure.headings_use_bold = false;
+    try std.testing.expectEqual(palette.FontRole.ui, markdownFontRole(.heading_2, .{}));
+    // Inline code inside a heading still switches to the code face.
+    try std.testing.expectEqual(palette.FontRole.code, markdownFontRole(.heading_2, .{ .code = true }));
 }
