@@ -55,7 +55,7 @@ A complete example:
   },
   "ui": {
     "font_size": 20,
-    "font_family": "classic",
+    "font_family": "geist",
     "workspace_pane_gap": 12,
     "workspace_panes_per_view": 2,
     "workspace_split_default_pane": "chat",
@@ -132,8 +132,9 @@ workspace closes that workspace too. The example above opts `close` back to
 Most of these options also appear in Settings:
 
 - **Appearance** — theme, UI font size, and UI font family (`ui.font_family`):
-  `classic` (Cal Sans chrome, Noto Sans prose; default), `inter`, `geist`,
-  `ibm_plex`, or `system` (SF Pro / SF Mono from macOS, Inter elsewhere). The
+  `geist` (Geist with Geist Mono code; default), `classic` (Cal Sans chrome,
+  Noto Sans prose), `inter`, `ibm_plex`, or `system` (SF Pro / SF Mono from
+  macOS, Inter elsewhere). The
   family covers chrome, chat prose, and chat code blocks and applies without a
   restart; terminals keep their own font.
 - **Transcript** — tool-call groups: `collapsed`, `expanded`, or

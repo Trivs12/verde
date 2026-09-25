@@ -345,7 +345,7 @@ pub const InstalledTheme = struct {
 
 pub const AppConfig = struct {
     font_size: f32 = theme.DEFAULT_FONT_SIZE,
-    ui_font_family: UiFontFamily = .classic,
+    ui_font_family: UiFontFamily = .geist,
     terminal_font_size: f32 = DEFAULT_TERMINAL_FONT_SIZE,
     workspace_pane_gap: f32 = DEFAULT_WORKSPACE_PANE_GAP,
     workspace_panes_per_view: u8 = DEFAULT_WORKSPACE_PANES_PER_VIEW,
@@ -1395,13 +1395,13 @@ fn applyUiOverrides(config: *AppConfig, ui_value: std.json.Value) void {
     }
     if (ui_value.object.get("font_family")) |family_value| {
         if (family_value != .string) {
-            config.ui_font_family = .classic;
+            config.ui_font_family = .geist;
             log.warn("ui.font_family must be a string when provided", .{});
         } else if (UiFontFamily.parse(family_value.string)) |family| {
             config.ui_font_family = family;
         } else {
-            config.ui_font_family = .classic;
-            log.warn("ignoring unsupported ui.font_family; using classic", .{});
+            config.ui_font_family = .geist;
+            log.warn("ignoring unsupported ui.font_family; using geist", .{});
         }
     }
     if (ui_value.object.get("workspace_pane_gap")) |gap_value| {
@@ -1812,13 +1812,13 @@ test "app config ui.font_family round trips every family" {
     }
 }
 
-test "app config ui.font_family defaults and falls back to classic" {
+test "app config ui.font_family defaults and falls back to geist" {
     var missing = try parseTestRoot("{\"ui\":{\"font_size\":22}}");
     defer missing.deinit();
     var defaulted: AppConfig = .{};
     defer defaulted.deinit(std.testing.allocator);
     applyAppOverrides(std.testing.allocator, &defaulted, missing.value);
-    try std.testing.expectEqual(UiFontFamily.classic, defaulted.ui_font_family);
+    try std.testing.expectEqual(UiFontFamily.geist, defaulted.ui_font_family);
 
     var named = try parseTestRoot("{\"ui\":{\"font_family\":\"IBM_Plex\"}}");
     defer named.deinit();
@@ -1834,10 +1834,10 @@ test "app config ui.font_family defaults and falls back to classic" {
     for (invalid_roots) |raw| {
         var bad = try parseTestRoot(raw);
         defer bad.deinit();
-        var loaded: AppConfig = .{ .ui_font_family = .geist };
+        var loaded: AppConfig = .{ .ui_font_family = .inter };
         defer loaded.deinit(std.testing.allocator);
         applyAppOverrides(std.testing.allocator, &loaded, bad.value);
-        try std.testing.expectEqual(UiFontFamily.classic, loaded.ui_font_family);
+        try std.testing.expectEqual(UiFontFamily.geist, loaded.ui_font_family);
     }
 }
 
