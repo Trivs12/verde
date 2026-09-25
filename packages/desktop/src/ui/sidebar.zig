@@ -84,6 +84,8 @@ const SIDEBAR_ACTIVE_LABEL_H_CSS: f32 = 20.0;
 const SIDEBAR_RAIL_ACTION_ROW_CSS: f32 = 32.0;
 /// Pinned section caption band ("Projects").
 const SIDEBAR_SECTION_CAPTION_H_CSS: f32 = 26.0;
+/// Hover action buttons on workspace rows.
+const SIDEBAR_ROW_ACTION_CSS: f32 = 24.0;
 /// Section caption text ("Active", "Projects").
 const SIDEBAR_SECTION_CAPTION_FONT_CSS: f32 = 13.0;
 /// Hairline divider plus trailing gap that separates ACTIVE from the tree.
@@ -117,6 +119,8 @@ const SidebarHitKind = enum {
     command_palette,
     /// Expanded rail "New chat" row; starts a chat in the selected workspace.
     new_chat_trigger,
+    /// Per-workspace "…" hover action; opens the workspace context menu.
+    workspace_more,
     /// Per-workspace gear icon; opens Workspace Settings bound to that
     /// workspace (distinct from global `settings` below).
     workspace_settings,
@@ -227,6 +231,7 @@ const SidebarContextMenuAction = enum {
     workspace_new_chat,
     workspace_open_codex_tui,
     workspace_open_terminal,
+    workspace_history,
     workspace_herdr_handoff,
     workspace_herdr_focus_terminal,
     workspace_herdr_unlink,
@@ -258,6 +263,7 @@ var history_action_hovered: ?usize = null;
 var workspace_settings_action_hovered: ?usize = null;
 var search_trigger_hovered: bool = false;
 var new_chat_trigger_hovered: bool = false;
+var workspace_more_hovered: ?usize = null;
 
 const WorkspaceDragState = struct {
     pending: bool = false,
@@ -374,6 +380,7 @@ pub fn handlePaletteMouseMotion(state: *runtime.AppState, x: f32, y: f32) void {
     var new_terminal_hover: ?usize = null;
     var new_history_hover: ?usize = null;
     var new_workspace_settings_hover: ?usize = null;
+    var new_workspace_more_hover: ?usize = null;
     var new_search_hover = false;
     var new_chat_hover = false;
     var new_settings_hover = false;
@@ -401,6 +408,9 @@ pub fn handlePaletteMouseMotion(state: *runtime.AppState, x: f32, y: f32) void {
                 .workspace_settings => {
                     if (!state.isSidebarCollapsed() and new_workspace_settings_hover == null) new_workspace_settings_hover = hit.project_index;
                 },
+                .workspace_more => {
+                    if (!state.isSidebarCollapsed() and new_workspace_more_hover == null) new_workspace_more_hover = hit.project_index;
+                },
                 .command_palette => new_search_hover = true,
                 .new_chat_trigger => new_chat_hover = true,
                 .settings => new_settings_hover = true,
@@ -413,12 +423,13 @@ pub fn handlePaletteMouseMotion(state: *runtime.AppState, x: f32, y: f32) void {
     const new_thread_changed = state.sidebar_new_thread_hover != new_new_thread_hover;
     const terminal_changed = terminal_action_hovered != new_terminal_hover;
     const history_changed = history_action_hovered != new_history_hover;
-    const workspace_settings_changed = workspace_settings_action_hovered != new_workspace_settings_hover;
+    const workspace_settings_changed = workspace_settings_action_hovered != new_workspace_settings_hover or workspace_more_hovered != new_workspace_more_hover;
     const search_changed = search_trigger_hovered != new_search_hover or new_chat_trigger_hovered != new_chat_hover;
     const settings_changed = settings_hovered != new_settings_hover;
     terminal_action_hovered = new_terminal_hover;
     history_action_hovered = new_history_hover;
     workspace_settings_action_hovered = new_workspace_settings_hover;
+    workspace_more_hovered = new_workspace_more_hover;
     search_trigger_hovered = new_search_hover;
     new_chat_trigger_hovered = new_chat_hover;
     settings_hovered = new_settings_hover;
@@ -485,6 +496,18 @@ pub fn handlePaletteMouseButton(state: *runtime.AppState, x: f32, y: f32, down: 
             },
             .new_chat_trigger => {
                 if (state.project_controller.projects.items.len > 0) state.createThreadForProject(@min(state.project_controller.selected_index, state.project_controller.projects.items.len - 1));
+            },
+            .workspace_more => {
+                state.workspace_header_open_menu_open = false;
+                state.sidebar_context_menu_anchor_x = hit.rect.x;
+                state.sidebar_context_menu_anchor_y = hit.rect.y + hit.rect.h;
+                state.sidebar_context_menu_project_index = hit.project_index;
+                state.sidebar_context_menu_thread_index = 0;
+                state.sidebar_context_menu_kind = .project;
+                state.sidebar_context_menu_open = true;
+                state.blurPaletteComposer();
+                state.noteInteraction();
+                state.markDirty();
             },
             .settings => {
                 state.openSettingsModal();
@@ -922,6 +945,7 @@ fn handleSidebarContextMenuPrimary(state: *runtime.AppState, x: f32, y: f32) boo
                 },
                 .workspace_open_codex_tui => _ = state.openAgentTui(pi, .codex) catch false,
                 .workspace_open_terminal => _ = state.openTerminalPaneForProjectIndex(pi),
+                .workspace_history => state.openCommandPalette(pi),
                 .workspace_herdr_handoff => state.handoffProjectToLocalHerdrFromUi(pi),
                 .workspace_herdr_focus_terminal => _ = state.focusProjectHerdrAttachTerminal(pi),
                 .workspace_herdr_unlink => state.unlinkProjectHerdrFromUi(pi),
@@ -1001,6 +1025,7 @@ fn renderSidebarContextMenu(state: *runtime.AppState, sidebar_rect: palette.Rect
             appendSidebarContextMenuRow(.workspace_new_chat, true, "Start a new chat");
             appendSidebarContextMenuRow(.workspace_open_codex_tui, pi < state.project_controller.projects.items.len, "Open Codex TUI");
             appendSidebarContextMenuRow(.workspace_open_terminal, pi < state.project_controller.projects.items.len, "Open terminal");
+            appendSidebarContextMenuRow(.workspace_history, pi < state.project_controller.projects.items.len, "Chat history");
             if (herdr_link) |link| {
                 appendSidebarContextMenuRow(.workspace_herdr_focus_terminal, pi < state.project_controller.projects.items.len, if (link.attach_dock_id != null) "Focus Herdr terminal" else "Open Herdr terminal");
                 appendSidebarContextMenuRow(.workspace_herdr_handoff, pi < state.project_controller.projects.items.len, "Refresh Herdr handoff");
@@ -1230,18 +1255,18 @@ fn renderPaletteExpandedSidebar(state: *runtime.AppState, rect: palette.Rect) vo
         if (project_visible) queuePaletteFolderIcon(state, tx, cy, theme.scaledUi(14.0), theme.scaledUi(10.0), if (selected or project_hovered) theme.COLOR_WHITE else theme.COLOR_TEXT_SUBTLE, selected);
         tx += theme.scaledUi(20.0);
 
-        // Trailing action cluster (new chat, new terminal, history, workspace
-        // settings) renders only on hover to keep quiet rows quiet,
-        // but its width is always reserved so the workspace label never
-        // reflows on hover.
-        const action_w = theme.scaledUi(30.0);
+        // Trailing hover actions: new chat and "…" (the workspace menu, which
+        // holds terminal, history, settings and the rest). They render only
+        // on hover to keep quiet rows quiet, but their width is always
+        // reserved so the workspace label never reflows on hover.
+        const action_w = theme.scaledUi(SIDEBAR_ROW_ACTION_CSS);
         const action_gap = theme.scaledUi(2.0);
-        const action_cluster_w = action_w * 4.0 + action_gap * 3.0;
+        const action_cluster_w = action_w * 2.0 + action_gap;
         const show_actions = workspace_shortcut.len == 0 and project_hovered;
         const content_right = if (workspace_shortcut.len > 0)
             row_rect.x + row_rect.w - theme.scaledUi(32.0)
         else
-            row_rect.x + row_rect.w - action_cluster_w - theme.scaledUi(6.0);
+            row_rect.x + row_rect.w - action_cluster_w - theme.scaledUi(8.0);
         const badge_label = herdrRuntimeBadgeLabel(project);
         const badge_w = theme.scaledUi(SIDEBAR_HERDR_BADGE_W_CSS);
         const badge_gap = theme.scaledUi(6.0);
@@ -1254,19 +1279,14 @@ fn renderPaletteExpandedSidebar(state: *runtime.AppState, rect: palette.Rect) vo
             if (workspace_shortcut.len > 0) renderSidebarShortcutKeyTip(state, row_rect, workspace_clip, workspace_shortcut);
         }
         if (project_visible and show_actions) {
-            const action_x = row_rect.x + row_rect.w - action_cluster_w;
-            const new_rect: palette.Rect = .{ .x = action_x, .y = y, .w = action_w, .h = row_h };
-            const terminal_rect: palette.Rect = .{ .x = action_x + action_w + action_gap, .y = y, .w = action_w, .h = row_h };
-            const history_rect: palette.Rect = .{ .x = action_x + (action_w + action_gap) * 2.0, .y = y, .w = action_w, .h = row_h };
-            renderPaletteSidebarActionIcon(state, new_rect, NF_COD_EDIT, state.sidebar_new_thread_hover == project_index, workspace_clip);
+            const action_x = row_rect.x + row_rect.w - action_cluster_w - theme.scaledUi(2.0);
+            const action_y = y + (row_h - action_w) * 0.5;
+            const new_rect: palette.Rect = .{ .x = action_x, .y = action_y, .w = action_w, .h = action_w };
+            const more_rect: palette.Rect = .{ .x = action_x + action_w + action_gap, .y = action_y, .w = action_w, .h = action_w };
+            renderPaletteSidebarRowAction(state, new_rect, NF_COD_ADD, state.sidebar_new_thread_hover == project_index, workspace_clip);
             addClippedPaletteHit(new_rect, workspace_clip, .new_thread, project_index, 0);
-            renderPaletteSidebarActionIcon(state, terminal_rect, NF_COD_TERMINAL, terminal_action_hovered == project_index, workspace_clip);
-            addClippedPaletteHit(terminal_rect, workspace_clip, .new_terminal, project_index, 0);
-            renderPaletteSidebarActionIcon(state, history_rect, NF_COD_HISTORY, history_action_hovered == project_index, workspace_clip);
-            addClippedPaletteHit(history_rect, workspace_clip, .history, project_index, 0);
-            const workspace_settings_rect: palette.Rect = .{ .x = action_x + (action_w + action_gap) * 3.0, .y = y, .w = action_w, .h = row_h };
-            renderPaletteSidebarActionIcon(state, workspace_settings_rect, NF_COD_GEAR, workspace_settings_action_hovered == project_index, workspace_clip);
-            addClippedPaletteHit(workspace_settings_rect, workspace_clip, .workspace_settings, project_index, 0);
+            renderPaletteSidebarRowAction(state, more_rect, NF_COD_ELLIPSIS, workspace_more_hovered == project_index, workspace_clip);
+            addClippedPaletteHit(more_rect, workspace_clip, .workspace_more, project_index, 0);
         }
         y += row_h + theme.scaledUi(4.0);
 
@@ -1974,6 +1994,19 @@ fn renderPaletteSidebarActionIcon(state: *runtime.AppState, rect: palette.Rect, 
         .w = icon_font,
         .h = icon_font,
     }, glyph, icon_font, paletteColor(fg), clip);
+}
+
+/// Compact hover action on a workspace row (new chat, "…"): a 14px glyph in a
+/// small rounded hit box, quieter than the header's 17px controls.
+fn renderPaletteSidebarRowAction(state: *runtime.AppState, rect: palette.Rect, glyph: []const u8, hovered: bool, clip: ?palette.Rect) void {
+    if (hovered) queuePaletteRoundedRect(state, rect, paletteColor(sidebarTint(SIDEBAR_ICON_HOVER_TINT)), theme.scaledUi(6.0));
+    const icon_font = theme.scaledUi(14.0);
+    queuePaletteIcon(state, .{
+        .x = rect.x + (rect.w - icon_font) * 0.5,
+        .y = rect.y + (rect.h - icon_font) * 0.5,
+        .w = icon_font,
+        .h = icon_font,
+    }, glyph, icon_font, paletteColor(if (hovered) theme.COLOR_WHITE else theme.COLOR_TEXT_SUBTLE), clip);
 }
 
 /// Renders the sidebar settings gear button used by both expanded and collapsed rails.
@@ -2811,6 +2844,7 @@ const NF_COD_CHEVRON_RIGHT = "\u{EAB6}";
 const NF_COD_CHEVRON_DOWN = "\u{EAB4}";
 const NF_COD_ADD = "\u{EA60}";
 const NF_COD_EDIT = "\u{EA73}";
+const NF_COD_ELLIPSIS = "\u{EA7C}";
 const NF_COD_GEAR = "\u{EB51}";
 const NF_COD_TERMINAL = "\u{EA85}";
 const NF_COD_HISTORY = "\u{EA82}";
@@ -3403,9 +3437,10 @@ test "ACTIVE wheel stays in the pinned cluster when it overflows" {
 
 test "workspace settings entry points bind to the invoked workspace" {
     const source = @embedFile("sidebar.zig");
-    // Gear icon in the per-workspace action cluster registers its own hit
-    // kind, distinct from the global settings gear in the footer.
-    try std.testing.expect(std.mem.indexOf(u8, source, "addClippedPaletteHit(workspace_settings_rect, workspace_clip, .workspace_settings, project_index, 0)") != null);
+    // The per-workspace "…" action opens the menu bound to that workspace,
+    // distinct from the global settings gear in the footer.
+    try std.testing.expect(std.mem.indexOf(u8, source, "addClippedPaletteHit(more_rect, workspace_clip, .workspace_more, project_index, 0)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, source, "state.sidebar_context_menu_project_index = hit.project_index;") != null);
     // Both the icon and the labelled context-menu row route through the
     // id-bound opener, never through the currently-selected workspace.
     try std.testing.expect(std.mem.indexOf(u8, source, "state.openWorkspaceSettingsForProject(hit.project_index)") != null);
