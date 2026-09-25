@@ -31,6 +31,9 @@ const TOP_BAR_HEIGHT: f32 = 57.0; // ~70% of legacy 82px cap
 const WORKSPACE_HEADER_ICON_CONTROL_CSS: f32 = 30.0;
 const WORKSPACE_HEADER_CHEVRON_CONTROL_CSS: f32 = 22.0;
 const WORKSPACE_HEADER_CONTROL_GAP_CSS: f32 = 6.0;
+const WORKSPACE_HEADER_CONTROL_RADIUS_CSS: f32 = 5.0;
+const WORKSPACE_HEADER_HOVER_ALPHA: u8 = 16;
+const WORKSPACE_HEADER_TITLE_FONT_CSS: f32 = 14.5;
 /// Total composer footprint: the framed editor plus the directory strip
 /// under it (toolbar_height 32 + toolbar_gap 10 in the composer config).
 const COMPOSER_HEIGHT: f32 = 262.0;
@@ -2623,40 +2626,118 @@ pub fn transcriptMarkdownSelectionPlainText(state: *app_state.AppState) std.mem.
     return try out.toOwnedSlice(state.allocator);
 }
 
-fn truncateWorkspaceTitle(buf: []u8, title: []const u8, max_width: f32, font_size: f32) []const u8 {
-    const gw = font_size * 0.52;
-    if (max_width <= 0.0 or buf.len == 0) return "";
-    var total: f32 = 0;
-    var i: usize = 0;
+const HEADER_TITLE_BUF_LEN: usize = 512;
+
+const HeaderTitleDisplay = struct {
+    text: []const u8,
+    /// The cleaned title did not fit `buf`; the caller must ellipsize.
+    clipped: bool,
+};
+
+/// Display form of a thread title for the pane header. Auto-titles are often
+/// the first line of a pasted prompt, so leading markdown syntax (headings,
+/// quotes, list bullets, emphasis) and inline backticks are dropped and
+/// whitespace runs collapse to single spaces. Stored titles are unchanged.
+fn headerTitleDisplayText(buf: []u8, title: []const u8) HeaderTitleDisplay {
+    var start: usize = 0;
+    while (start < title.len) : (start += 1) {
+        switch (title[start]) {
+            '#', '>', '-', '*', '`', '+', '_', ' ', '\t', '\n', '\r' => {},
+            else => break,
+        }
+    }
+    var len: usize = 0;
+    var pending_space = false;
+    var i = start;
     while (i < title.len) {
-        const seq = std.unicode.utf8ByteSequenceLength(title[i]) catch return title;
+        const byte = title[i];
+        if (byte == '`') {
+            i += 1;
+            continue;
+        }
+        if (byte < 0x20 or byte == ' ' or byte == 0x7f) {
+            pending_space = len > 0;
+            i += 1;
+            continue;
+        }
+        const seq = std.unicode.utf8ByteSequenceLength(byte) catch 1;
         const end = @min(i + seq, title.len);
-        total += gw * @max(1.0, @as(f32, @floatFromInt(end - i)));
+        const needed = (end - i) + @as(usize, if (pending_space) 1 else 0);
+        if (len + needed > buf.len) return .{ .text = buf[0..len], .clipped = true };
+        if (pending_space) {
+            buf[len] = ' ';
+            len += 1;
+            pending_space = false;
+        }
+        @memcpy(buf[len..][0 .. end - i], title[i..end]);
+        len += end - i;
         i = end;
     }
-    if (total <= max_width) {
-        const n = @min(title.len, buf.len);
-        @memcpy(buf[0..n], title[0..n]);
-        return buf[0..n];
-    }
-    const ellipsis = "...";
-    const ellipsis_w = @as(f32, @floatFromInt(ellipsis.len)) * gw;
+    return .{ .text = buf[0..len], .clipped = false };
+}
+
+/// Ellipsizes `display` to `max_width` using measured `.ui_medium` advances,
+/// cutting only at UTF-8 codepoint boundaries.
+fn ellipsizeHeaderTitle(buf: []u8, display: HeaderTitleDisplay, max_width: f32, font_size: f32) []const u8 {
+    const text = display.text;
+    if (max_width <= 0.0 or text.len == 0) return "";
+    if (!display.clipped and text_measure.textWidth(.ui_medium, font_size, text) <= max_width) return text;
+    const ellipsis = "\u{2026}";
+    if (buf.len < ellipsis.len) return "";
+    const ellipsis_w = text_measure.textWidth(.ui_medium, font_size, ellipsis);
     if (ellipsis_w > max_width) return "";
-    i = 0;
-    total = 0;
-    while (i < title.len) {
-        const seq = std.unicode.utf8ByteSequenceLength(title[i]) catch break;
-        const end = @min(i + seq, title.len);
-        const adv = gw * @max(1.0, @as(f32, @floatFromInt(end - i)));
-        if (total + adv + ellipsis_w > max_width) break;
-        total += adv;
-        i = end;
+    // Prefix width grows monotonically, so binary-search the longest
+    // codepoint-aligned prefix that still fits beside the ellipsis.
+    const limit = @min(text.len, buf.len - ellipsis.len);
+    var boundaries: [HEADER_TITLE_BUF_LEN + 1]u16 = undefined;
+    var count: usize = 0;
+    var i: usize = 0;
+    while (i <= limit and count < boundaries.len) {
+        boundaries[count] = @intCast(i);
+        count += 1;
+        if (i == limit) break;
+        const seq = std.unicode.utf8ByteSequenceLength(text[i]) catch 1;
+        if (i + seq > limit) break;
+        i += seq;
     }
-    const prefix_len = i;
-    if (prefix_len + ellipsis.len > buf.len) return title;
-    @memcpy(buf[0..prefix_len], title[0..prefix_len]);
-    @memcpy(buf[prefix_len..][0..ellipsis.len], ellipsis);
-    return buf[0 .. prefix_len + ellipsis.len];
+    var lo: usize = 0;
+    var hi: usize = count - 1;
+    while (lo < hi) {
+        const mid = lo + (hi - lo + 1) / 2;
+        if (text_measure.textPrefixWidth(.ui_medium, text, font_size, boundaries[mid]) + ellipsis_w <= max_width) lo = mid else hi = mid - 1;
+    }
+    const fit: usize = boundaries[lo];
+    const prefix = std.mem.trimEnd(u8, text[0..fit], " ");
+    @memcpy(buf[0..prefix.len], prefix);
+    @memcpy(buf[prefix.len..][0..ellipsis.len], ellipsis);
+    return buf[0 .. prefix.len + ellipsis.len];
+}
+
+test "header title display strips leading markdown and collapses whitespace" {
+    var buf: [128]u8 = undefined;
+    const handoff = headerTitleDisplayText(&buf, "# Verde agent handoff\n\nContinue   the `work`\tbelow.");
+    try std.testing.expectEqualStrings("Verde agent handoff Continue the work below.", handoff.text);
+    try std.testing.expect(!handoff.clipped);
+    try std.testing.expectEqualStrings("Quoted note", headerTitleDisplayText(&buf, ">  Quoted   note  ").text);
+    try std.testing.expectEqualStrings("List item", headerTitleDisplayText(&buf, "- **List item").text);
+    try std.testing.expectEqualStrings("Fix caf\u{00E9} bug", headerTitleDisplayText(&buf, "`Fix caf\u{00E9} bug`").text);
+    try std.testing.expectEqualStrings("", headerTitleDisplayText(&buf, "### ").text);
+
+    var small: [8]u8 = undefined;
+    const clipped = headerTitleDisplayText(&small, "Twelve chars long");
+    try std.testing.expect(clipped.clipped);
+    try std.testing.expectEqualStrings("Twelve c", clipped.text);
+}
+
+/// Header icon controls rest in the subtle text colour and lift to the
+/// primary text colour on hover.
+fn workspaceHeaderIconColor(hovered: bool) palette.Color {
+    return paletteColor(if (hovered) theme.COLOR_WHITE else theme.COLOR_TEXT_SUBTLE);
+}
+
+/// Soft neutral hover fill shared by the header icon controls.
+fn queueWorkspaceHeaderHoverFill(state: *app_state.AppState, rect: palette.Rect) void {
+    queueRounded(state, snapRect(rect), paletteColor(theme.withAlpha(theme.COLOR_WHITE, WORKSPACE_HEADER_HOVER_ALPHA)), theme.scaledUi(WORKSPACE_HEADER_CONTROL_RADIUS_CSS));
 }
 
 fn queueWorkspaceHeaderFolderIcon(state: *app_state.AppState, x: f32, center_y: f32, color: palette.Color) void {
@@ -2732,20 +2813,10 @@ fn renderHeader(state: *app_state.AppState, rect: palette.Rect, right_reserve: f
 
     const thread = state.currentThread();
     const subagent = thread.isSubagentView();
-    const header_fill = if (subagent)
-        theme.mix(theme.background(), theme.accent(), 0.08)
-    else
-        theme.background();
-    queueRect(state, rect, paletteColor(header_fill));
-    if (subagent) {
-        queueRect(state, .{
-            .x = rect.x,
-            .y = rect.y,
-            .w = theme.scaledUi(3.0),
-            .h = rect.h,
-        }, paletteColor(theme.accent()));
-    }
-    queueRect(state, .{ .x = rect.x, .y = rect.y + rect.h - 1.0, .w = rect.w, .h = 1.0 }, paletteColor(if (subagent) theme.accent() else theme.borderMuted()));
+    // Quiet strip: page background with a neutral hairline. The subagent pill
+    // below is the only accent, since it signals a distinct thread mode.
+    queueRect(state, rect, paletteColor(theme.background()));
+    queueRect(state, .{ .x = rect.x, .y = rect.y + rect.h - 1.0, .w = rect.w, .h = 1.0 }, paletteColor(theme.restingEdge()));
 
     const padding_x = theme.scaledUi(28.0);
     const title_src: []const u8 = if (thread.committed)
@@ -2753,11 +2824,11 @@ fn renderHeader(state: *app_state.AppState, rect: palette.Rect, right_reserve: f
     else
         "New chat";
 
-    const button_h = theme.scaledUi(30.0);
+    const button_h = theme.scaledUi(WORKSPACE_HEADER_ICON_CONTROL_CSS);
     const button_gap = theme.scaledUi(WORKSPACE_HEADER_CONTROL_GAP_CSS);
     const title_gap = theme.scaledUi(16.0);
     const label_font = theme.scaledUi(14.0);
-    const title_font = theme.scaledUi(18.0);
+    const title_font = theme.scaledUi(WORKSPACE_HEADER_TITLE_FONT_CSS);
 
     const open_folder = state.defaultOpenShowsFolderIcon();
     const open_tex = state.defaultOpenIconTexture();
@@ -2776,33 +2847,44 @@ fn renderHeader(state: *app_state.AppState, rect: palette.Rect, right_reserve: f
     const badge_w: f32 = if (subagent) chromeLabelWidth(badge_font, "Subagent") + badge_pad_x * 2.0 else 0.0;
     const badge_gap: f32 = if (subagent) theme.scaledUi(12.0) else 0.0;
     const title_x = rect.x + padding_x + badge_w + badge_gap;
-    const title_max_w = @max(actions_x - title_x - title_gap, theme.scaledUi(96.0));
+    // No minimum width: in a narrow split the title ellipsizes down to nothing
+    // rather than running under the header controls.
+    const title_max_w = @max(actions_x - title_x - title_gap, 0.0);
 
-    var title_buf: [256]u8 = undefined;
-    const title_display = truncateWorkspaceTitle(&title_buf, title_src, title_max_w, title_font);
-    const title_line_h = theme.scaledUi(32.0);
-    const title_y = rect.y + @max((rect.h - title_line_h) * 0.5, theme.scaledUi(4.0));
-    if (subagent) {
+    // Title, pill, and controls share the header's vertical centre line.
+    const center_y = rect.y + rect.h * 0.5;
+    const title_line_h = title_font * 1.4;
+    const title_y = center_y - title_line_h * 0.5;
+    if (subagent and rect.x + padding_x + badge_w + title_gap <= actions_x) {
         const badge_h = theme.scaledUi(22.0);
-        // Center on the title's line box so the pill and title share a baseline
-        // band rather than drifting apart when the header height changes.
-        const badge_y = title_y + @max((title_line_h - badge_h) * 0.5, 0.0);
-        const badge_rect = snapRect(.{ .x = rect.x + padding_x, .y = badge_y, .w = badge_w, .h = badge_h });
+        const badge_rect = snapRect(.{ .x = rect.x + padding_x, .y = center_y - badge_h * 0.5, .w = badge_w, .h = badge_h });
         queueRounded(state, badge_rect, paletteColor(theme.withAlpha(theme.accent(), 46)), badge_h * 0.5);
         queueCenteredChromeLabel(state, badge_rect, "Subagent", paletteColor(theme.accent()), badge_font, rect);
     }
-    queueText(state, .{
-        .x = title_x,
-        .y = title_y,
-        .w = title_max_w,
-        .h = title_line_h,
-    }, stableText(state, title_display), paletteColor(theme.COLOR_WHITE), title_font, rect);
+    var clean_buf: [HEADER_TITLE_BUF_LEN]u8 = undefined;
+    var title_buf: [HEADER_TITLE_BUF_LEN]u8 = undefined;
+    var cleaned = headerTitleDisplayText(&clean_buf, title_src);
+    if (cleaned.text.len == 0 and !cleaned.clipped) cleaned = .{ .text = "New chat", .clipped = false };
+    const title_display = ellipsizeHeaderTitle(&title_buf, cleaned, title_max_w, title_font);
+    if (title_display.len > 0) {
+        const title_rect: palette.Rect = .{ .x = title_x, .y = title_y, .w = title_max_w, .h = title_line_h };
+        state.palette_overlay_batch.roleText(
+            state.allocator,
+            snapRect(title_rect),
+            stableText(state, title_display),
+            paletteColor(theme.COLOR_WHITE),
+            title_font,
+            .ui_medium,
+            null,
+            title_rect,
+        ) catch {};
+    }
 
     const mx = state.transcript_controller.palette_mouse_x;
     const my = state.transcript_controller.palette_mouse_y;
     const mouse_ok = state.transcript_controller.palette_mouse_in_workspace;
 
-    const actions_y = rect.y + @max((rect.h - button_h) * 0.5, theme.scaledUi(4.0));
+    const actions_y = center_y - button_h * 0.5;
     const open_combo_x = actions_x;
     const open_main_rect = palette.Rect{ .x = open_combo_x, .y = actions_y, .w = open_main_w, .h = button_h };
     const chevron_rect = palette.Rect{ .x = open_combo_x + open_main_w, .y = actions_y, .w = chevron_w, .h = button_h };
@@ -2812,19 +2894,19 @@ fn renderHeader(state: *app_state.AppState, rect: palette.Rect, right_reserve: f
     header_hit.chevron_rect = chevron_rect;
     header_hit.browser_rect = browser_rect;
 
-    const open_main_hover = mouse_ok and rectContains(open_main_rect, mx, my);
-    const chevron_hover = mouse_ok and rectContains(chevron_rect, mx, my);
+    const can_open = state.canRunDefaultOpenAction();
+    const menu_open_here = state.workspace_header_open_menu_open and paneIdEqual(state.workspace_header_open_menu_pane_id, pane_id);
+    const open_main_hover = mouse_ok and can_open and rectContains(open_main_rect, mx, my);
+    const chevron_hover = (mouse_ok and rectContains(chevron_rect, mx, my)) or menu_open_here;
     const browser_hover = mouse_ok and rectContains(browser_rect, mx, my);
+    if (open_main_hover) queueWorkspaceHeaderHoverFill(state, open_main_rect);
+    if (chevron_hover) queueWorkspaceHeaderHoverFill(state, chevron_rect);
+    if (browser_hover) queueWorkspaceHeaderHoverFill(state, browser_rect);
 
     const icon_slot = theme.scaledUi(16.0);
     const icon_x = open_main_rect.x + (open_main_rect.w - icon_slot) * 0.5;
     const icon_cy = open_main_rect.y + button_h * 0.5;
-    const text_color_open: palette.Color = paletteColor(if (!state.canRunDefaultOpenAction())
-        theme.COLOR_TEXT_MUTED
-    else if (open_main_hover)
-        theme.COLOR_WHITE
-    else
-        theme.COLOR_TEXT_MUTED);
+    const text_color_open = workspaceHeaderIconColor(open_main_hover);
     if (open_folder) {
         const folder_w = theme.scaledUi(13.0);
         queueWorkspaceHeaderFolderIcon(state, open_main_rect.x + (open_main_rect.w - folder_w) * 0.5, icon_cy, text_color_open);
@@ -2851,7 +2933,7 @@ fn renderHeader(state: *app_state.AppState, rect: palette.Rect, right_reserve: f
         .y = chevron_rect.y + (chevron_rect.h - chevron_size) * 0.5,
         .w = chevron_size,
         .h = chevron_size,
-    }, NF_COD_CHEVRON_DOWN, paletteColor(if (chevron_hover) theme.COLOR_WHITE else theme.COLOR_TEXT_SUBTLE), chevron_size, rect);
+    }, NF_COD_CHEVRON_DOWN, workspaceHeaderIconColor(chevron_hover), chevron_size, rect);
 
     const globe_size = theme.scaledUi(16.0);
     const browser_cy = browser_rect.y + browser_rect.h * 0.5;
@@ -2860,7 +2942,7 @@ fn renderHeader(state: *app_state.AppState, rect: palette.Rect, right_reserve: f
         browser_rect.x + browser_rect.w * 0.5,
         browser_cy,
         globe_size,
-        paletteColor(if (browser_hover) theme.COLOR_WHITE else theme.COLOR_TEXT_MUTED),
+        workspaceHeaderIconColor(browser_hover),
     );
 
     const pane_focused = if (pane_id) |id| state.isCurrentProjectWorkspacePaneFocused(id) else true;
