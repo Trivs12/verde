@@ -57,6 +57,7 @@ export const ROOT_KEYS = [
 
 export const UI_KEYS = [
   'font_size',
+  'font_family',
   'workspace_pane_gap',
   'workspace_panes_per_view',
   'workspace_split_default_pane',
@@ -510,6 +511,13 @@ const uiSchema = closedObject(
       maximum: 32,
       default: 24,
       description: 'UI font size in points. Range 10–32; default 24.',
+    },
+    font_family: {
+      type: 'string',
+      enum: ['classic', 'inter', 'geist', 'ibm_plex', 'system'],
+      default: 'classic',
+      description:
+        'Typeface family for chrome, chat prose, and chat code. `system` uses SF Pro / SF Mono on macOS and Inter elsewhere. Terminals keep their own font.',
     },
     workspace_pane_gap: {
       type: 'number',

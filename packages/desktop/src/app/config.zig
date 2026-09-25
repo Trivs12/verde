@@ -258,6 +258,36 @@ pub const ReducedMotion = struct {
     }
 };
 
+/// Typeface family for chrome, transcript prose and transcript code. The
+/// terminal keeps its own face (JetBrains Mono Nerd or the Ghostty font) in
+/// every family.
+pub const UiFontFamily = enum {
+    /// Cal Sans chrome, Noto Sans prose, terminal mono for code.
+    classic,
+    inter,
+    geist,
+    ibm_plex,
+    /// SF Pro / SF Mono read from macOS at runtime; Inter elsewhere.
+    system,
+
+    pub fn parse(value: []const u8) ?UiFontFamily {
+        inline for (std.meta.fields(UiFontFamily)) |field| {
+            if (std.ascii.eqlIgnoreCase(value, field.name)) return @enumFromInt(field.value);
+        }
+        return null;
+    }
+
+    pub fn label(self: UiFontFamily) []const u8 {
+        return switch (self) {
+            .classic => "Verde Classic",
+            .inter => "Inter",
+            .geist => "Geist",
+            .ibm_plex => "IBM Plex",
+            .system => "System (macOS)",
+        };
+    }
+};
+
 pub const WorkspaceTabsMode = enum {
     automatic,
     always,
@@ -315,6 +345,7 @@ pub const InstalledTheme = struct {
 
 pub const AppConfig = struct {
     font_size: f32 = theme.DEFAULT_FONT_SIZE,
+    ui_font_family: UiFontFamily = .classic,
     terminal_font_size: f32 = DEFAULT_TERMINAL_FONT_SIZE,
     workspace_pane_gap: f32 = DEFAULT_WORKSPACE_PANE_GAP,
     workspace_panes_per_view: u8 = DEFAULT_WORKSPACE_PANES_PER_VIEW,
@@ -664,6 +695,7 @@ fn objectSection(allocator: std.mem.Allocator, object: *std.json.ObjectMap, key:
 fn writeUiSection(allocator: std.mem.Allocator, object: *std.json.ObjectMap, config: *const AppConfig) !void {
     const ui_object = try objectSection(allocator, object, "ui");
     try ui_object.put(allocator, "font_size", .{ .float = config.font_size });
+    try ui_object.put(allocator, "font_family", .{ .string = @tagName(config.ui_font_family) });
     try ui_object.put(allocator, "workspace_pane_gap", .{ .float = config.workspace_pane_gap });
     try ui_object.put(allocator, "workspace_panes_per_view", .{ .integer = config.workspace_panes_per_view });
     try ui_object.put(allocator, "workspace_split_default_pane", .{ .string = @tagName(config.workspace_split_default_pane) });
@@ -1361,6 +1393,17 @@ fn applyUiOverrides(config: *AppConfig, ui_value: std.json.Value) void {
             else => log.warn("ui.font_size must be a number when provided", .{}),
         }
     }
+    if (ui_value.object.get("font_family")) |family_value| {
+        if (family_value != .string) {
+            config.ui_font_family = .classic;
+            log.warn("ui.font_family must be a string when provided", .{});
+        } else if (UiFontFamily.parse(family_value.string)) |family| {
+            config.ui_font_family = family;
+        } else {
+            config.ui_font_family = .classic;
+            log.warn("ignoring unsupported ui.font_family; using classic", .{});
+        }
+    }
     if (ui_value.object.get("workspace_pane_gap")) |gap_value| {
         switch (gap_value) {
             .integer => |value| applyWorkspacePaneGap(config, @floatFromInt(value)),
@@ -1749,6 +1792,53 @@ test "app config accepts ui.font_size override" {
     applyAppOverrides(std.testing.allocator, &config, root.value);
 
     try std.testing.expectEqual(@as(f32, 22.0), config.font_size);
+}
+
+test "app config ui.font_family round trips every family" {
+    for (std.enums.values(UiFontFamily)) |family| {
+        var root = try parseTestRoot("{}");
+        defer root.deinit();
+        const config: AppConfig = .{ .ui_font_family = family };
+        try writeUiSection(root.arena.allocator(), &root.value.object, &config);
+        const encoded = try std.json.Stringify.valueAlloc(std.testing.allocator, root.value, .{});
+        defer std.testing.allocator.free(encoded);
+
+        var saved = try parseTestRoot(encoded);
+        defer saved.deinit();
+        var loaded: AppConfig = .{};
+        defer loaded.deinit(std.testing.allocator);
+        applyAppOverrides(std.testing.allocator, &loaded, saved.value);
+        try std.testing.expectEqual(family, loaded.ui_font_family);
+    }
+}
+
+test "app config ui.font_family defaults and falls back to classic" {
+    var missing = try parseTestRoot("{\"ui\":{\"font_size\":22}}");
+    defer missing.deinit();
+    var defaulted: AppConfig = .{};
+    defer defaulted.deinit(std.testing.allocator);
+    applyAppOverrides(std.testing.allocator, &defaulted, missing.value);
+    try std.testing.expectEqual(UiFontFamily.classic, defaulted.ui_font_family);
+
+    var named = try parseTestRoot("{\"ui\":{\"font_family\":\"IBM_Plex\"}}");
+    defer named.deinit();
+    var parsed: AppConfig = .{};
+    defer parsed.deinit(std.testing.allocator);
+    applyAppOverrides(std.testing.allocator, &parsed, named.value);
+    try std.testing.expectEqual(UiFontFamily.ibm_plex, parsed.ui_font_family);
+
+    const invalid_roots = [_][]const u8{
+        "{\"ui\":{\"font_family\":\"comic_sans\"}}",
+        "{\"ui\":{\"font_family\":3}}",
+    };
+    for (invalid_roots) |raw| {
+        var bad = try parseTestRoot(raw);
+        defer bad.deinit();
+        var loaded: AppConfig = .{ .ui_font_family = .geist };
+        defer loaded.deinit(std.testing.allocator);
+        applyAppOverrides(std.testing.allocator, &loaded, bad.value);
+        try std.testing.expectEqual(UiFontFamily.classic, loaded.ui_font_family);
+    }
 }
 
 test "app config ignores out-of-range ui.font_size" {

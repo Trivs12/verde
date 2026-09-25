@@ -55,6 +55,7 @@ A complete example:
   },
   "ui": {
     "font_size": 20,
+    "font_family": "classic",
     "workspace_pane_gap": 12,
     "workspace_panes_per_view": 2,
     "workspace_split_default_pane": "chat",
@@ -130,7 +131,11 @@ workspace closes that workspace too. The example above opts `close` back to
 
 Most of these options also appear in Settings:
 
-- **Appearance** — theme and UI font size.
+- **Appearance** — theme, UI font size, and UI font family (`ui.font_family`):
+  `classic` (Cal Sans chrome, Noto Sans prose; default), `inter`, `geist`,
+  `ibm_plex`, or `system` (SF Pro / SF Mono from macOS, Inter elsewhere). The
+  family covers chrome, chat prose, and chat code blocks and applies without a
+  restart; terminals keep their own font.
 - **Transcript** — tool-call groups: `collapsed`, `expanded`, or
   `remember_last`.
 - **Chat** — generate concise chat titles automatically after the opening
@@ -472,7 +477,7 @@ Main third-party components used by the desktop app:
 - `zqlite` by Karl Seguin for SQLite access. License: MIT-style.
 - `zig_dif` and `zig_markdown` for chat markdown and code rendering.
 - `stb_image` by Sean Barrett and contributors for image decoding, vendored in [`vendor/stb_image.h`](https://github.com/JonathanRiche/verde/blob/master/vendor/stb_image.h). License: public domain or MIT.
-- Codicon, Nerd Fonts, Noto Sans, JetBrains Mono Nerd Font, and Cal Sans font assets for the native UI. See notices in [`packages/desktop/src/assets/fonts`](https://github.com/JonathanRiche/verde/tree/master/packages/desktop/src/assets/fonts).
+- Codicon, Nerd Fonts, Noto Sans, JetBrains Mono Nerd Font, Cal Sans, Inter, Geist / Geist Mono, and IBM Plex Sans / Mono font assets for the native UI. See notices in [`packages/desktop/src/assets/fonts`](https://github.com/JonathanRiche/verde/tree/master/packages/desktop/src/assets/fonts).
 
 If you redistribute Verde, keep the relevant upstream notices and license
 texts with the distributed app and any vendored source. Verde is licensed

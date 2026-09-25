@@ -6,6 +6,7 @@ const chat_types = @import("chat_types.zig");
 const provider_models = @import("provider_models.zig");
 const diff_view_cache = @import("../ui/diff_view_cache.zig");
 const chat_markdown = @import("../ui/chat_markdown.zig");
+const text_measure = @import("../ui/text_measure.zig");
 const theme = @import("../ui/theme.zig");
 const workspace_layout = @import("workspace_layout.zig");
 
@@ -621,6 +622,7 @@ pub fn cachedTranscriptMessageHeight(
     if (entry.body_hash != std.hash.Wyhash.hash(0, body)) return null;
     if (entry.author_hash != std.hash.Wyhash.hash(0, author)) return null;
     if (entry.image_present != image_present) return null;
+    if (entry.font_generation != text_measure.fontGeneration()) return null;
     return entry.height;
 }
 
@@ -648,6 +650,7 @@ pub fn putTranscriptMessageHeight(
         .body_hash = std.hash.Wyhash.hash(0, body),
         .author_hash = std.hash.Wyhash.hash(0, author),
         .image_present = image_present,
+        .font_generation = text_measure.fontGeneration(),
         .height = height,
     };
 }

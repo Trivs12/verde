@@ -151,6 +151,7 @@ pub const Category = enum(u8) {
 
 pub const Draft = struct {
     font_size: f32 = theme.DEFAULT_FONT_SIZE,
+    ui_font_family: app_config.UiFontFamily = .classic,
     terminal_font_size: f32 = app_config.DEFAULT_TERMINAL_FONT_SIZE,
     workspace_pane_gap: f32 = app_config.DEFAULT_WORKSPACE_PANE_GAP,
     workspace_panes_per_view: u8 = app_config.DEFAULT_WORKSPACE_PANES_PER_VIEW,
@@ -280,6 +281,8 @@ pub const State = struct {
     close_hovered: bool = false,
     companion_character_dropdown_open: bool = false,
     companion_character_hover_index: ?usize = null,
+    ui_font_family_dropdown_open: bool = false,
+    ui_font_family_hover_index: ?usize = null,
     theme_dropdown_open: bool = false,
     theme_hover_index: ?usize = null,
     theme_menu_scroll: usize = 0,
@@ -387,6 +390,7 @@ pub fn syncSettingsDraftFromConfig(self: anytype) void {
     // live on the workspace sheet, not in this draft.
     self.settings_controller.draft = .{
         .font_size = self.app_config.font_size,
+        .ui_font_family = self.app_config.ui_font_family,
         .terminal_font_size = self.app_config.terminal_font_size,
         .workspace_pane_gap = self.app_config.workspace_pane_gap,
         .workspace_panes_per_view = self.app_config.workspace_panes_per_view,
@@ -434,6 +438,7 @@ pub fn syncSettingsDraftFromConfig(self: anytype) void {
 pub fn isSettingsDraftDirty(self: anytype) bool {
     const draft = self.settings_controller.draft;
     if (draft.font_size != self.app_config.font_size) return true;
+    if (draft.ui_font_family != self.app_config.ui_font_family) return true;
     if (draft.terminal_font_size != self.app_config.terminal_font_size) return true;
     if (draft.workspace_pane_gap != self.app_config.workspace_pane_gap) return true;
     if (draft.workspace_panes_per_view != self.app_config.workspace_panes_per_view) return true;
@@ -540,6 +545,8 @@ pub fn selectSettingsCategory(self: anytype, category: Category) void {
 fn closeSettingsDropdowns(self: anytype) void {
     self.settings_controller.companion_character_dropdown_open = false;
     self.settings_controller.companion_character_hover_index = null;
+    self.settings_controller.ui_font_family_dropdown_open = false;
+    self.settings_controller.ui_font_family_hover_index = null;
     self.settings_controller.theme_dropdown_open = false;
     self.settings_controller.theme_hover_index = null;
     self.settings_controller.theme_menu_scroll = 0;
@@ -623,6 +630,7 @@ pub fn closeSettingsPanel(self: anytype) void {
 fn applySettingsDraftToConfig(self: anytype) !void {
     try self.app_config.selectThemeChoice(self.allocator, self.settings_controller.draft.theme_choice);
     self.app_config.font_size = theme.clampf(self.settings_controller.draft.font_size, app_config.MIN_FONT_SIZE, app_config.MAX_FONT_SIZE);
+    self.app_config.ui_font_family = self.settings_controller.draft.ui_font_family;
     self.app_config.terminal_font_size = theme.clampf(self.settings_controller.draft.terminal_font_size, app_config.MIN_TERMINAL_FONT_SIZE, app_config.MAX_TERMINAL_FONT_SIZE);
     self.app_config.workspace_pane_gap = theme.clampf(self.settings_controller.draft.workspace_pane_gap, app_config.MIN_WORKSPACE_PANE_GAP, app_config.MAX_WORKSPACE_PANE_GAP);
     const next_panes_per_view = std.math.clamp(self.settings_controller.draft.workspace_panes_per_view, app_config.MIN_WORKSPACE_PANES_PER_VIEW, app_config.MAX_WORKSPACE_PANES_PER_VIEW);

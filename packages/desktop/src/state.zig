@@ -2439,11 +2439,12 @@ pub const PaletteComposerPrompt = palette.composerPrompt(.{
     .border_color = paletteColor(theme.default_colors.panel_muted),
     .focus_border_color = paletteColor(theme.mix(theme.default_colors.background, theme.default_colors.text, 0.30)),
     .focus_border_width = 1.0,
-    // Force the bold pill labels (GPT-5.5, Medium, Fast, Full access) onto the
-    // .ui role too so they share CalSans-Regular with the placeholder and the
-    // workspace header buttons. The default `.ui_bold` falls through to the
-    // renderer's heavy NotoSans-Bold, which reads as a different typeface.
-    .bold_font_role = .ui,
+    // Pill labels (GPT-5.5, Medium, Fast, Full access) use the chrome
+    // emphasis role rather than `.ui_bold`: Verde Classic aliases it to
+    // CalSans-Regular (matching the placeholder and workspace header buttons,
+    // where NotoSans-Bold would read as a different typeface), and the other
+    // families map it to their Medium cut.
+    .bold_font_role = .ui_medium,
     .control_background_color = paletteColor(theme.withAlpha(theme.default_colors.text, 0)),
     .control_hover_color = paletteColor(theme.withAlpha(theme.default_colors.text, 16)),
     .separator_color = paletteColor(theme.withAlpha(theme.default_colors.text_subtle, 0)),
@@ -2582,6 +2583,8 @@ const PaletteAdvanceCacheEntry = struct {
     text: std.ArrayListUnmanaged(u8) = .empty,
     advances: std.ArrayListUnmanaged(f32) = .empty,
     font_size: f32 = 0.0,
+    /// `text_measure.fontGeneration()` the advances were shaped under.
+    font_generation: u32 = 0,
     last_offset: usize = std.math.maxInt(usize),
     stamp: u64 = 0,
 };
@@ -2596,6 +2599,7 @@ fn paletteCachedGlyphAdvance(text: []const u8, byte_offset: usize, font_size: f3
     for (&palette_advance_cache) |*entry| {
         if (entry.stamp < oldest.stamp) oldest = entry;
         if (entry.font_size != font_size) continue;
+        if (entry.font_generation != text_measure.fontGeneration()) continue;
         if (entry.ptr != @intFromPtr(text.ptr) or entry.text.items.len != text.len) continue;
         // A walk restarted (offset went backward): the buffer may have been
         // edited in place since this entry was built, so re-verify content.
@@ -2630,6 +2634,7 @@ fn rebuildPaletteAdvanceEntry(entry: *PaletteAdvanceCacheEntry, text: []const u8
     @memset(entry.advances.items, 0.0);
     entry.ptr = @intFromPtr(text.ptr);
     entry.font_size = font_size;
+    entry.font_generation = text_measure.fontGeneration();
 
     var line_start: usize = 0;
     var i: usize = 0;
