@@ -1204,7 +1204,8 @@ pub fn isComposerMenuOpen(self: anytype) bool {
         self.composer_controller.model_picker.isOpen() or
         self.composer_controller.directory_picker.isOpen() or
         self.composer_controller.runtime_picker.isOpen() or
-        self.composer_controller.run_config_open;
+        self.composer_controller.run_config_open or
+        self.composer_controller.settings_open;
 }
 
 /// Opens or closes the browser inspector mode menu for live parity smokes.
@@ -1248,16 +1249,15 @@ pub fn setSidebarContextMenuOpen(self: anytype, open: bool) void {
 /// Opens or closes a composer-owned menu for live overlay parity smokes.
 pub fn setComposerMenuOpen(self: anytype, open: bool) void {
     if (open) {
-        self.openRunConfigPopover();
-        // Empty workspaces cannot host the run-config popover (no current
+        self.openComposerSettingsMenu(null);
+        // Empty workspaces cannot host the settings menu (no current
         // thread), but live parity smokes still expect the overlay flag to
         // report open; fall back to the composer's inert menu marker.
-        if (!self.composer_controller.run_config_open) {
+        if (!self.composer_controller.settings_open) {
             self.composer_controller.composer.active_menu = .reasoning;
             self.composer_controller.composer.hovered_menu_index = 0;
         }
         self.composer_controller.locked_model_picker_open = false;
-        self.closePaletteModelPicker();
         self.closePaletteDirectoryPicker();
         self.closePaletteRuntimePicker();
         self.browser_controller.inspector_menu_open = false;
@@ -1570,7 +1570,8 @@ pub fn browserBlockedByPaletteOverlay(self: anytype) bool {
         self.composer_controller.model_picker.isOpen() or
         self.composer_controller.directory_picker.isOpen() or
         self.composer_controller.runtime_picker.isOpen() or
-        self.composer_controller.run_config_open;
+        self.composer_controller.run_config_open or
+        self.composer_controller.settings_open;
 }
 
 fn companionSidecarBlocksBrowser(companion_enabled: bool, sidecar_open: bool) bool {

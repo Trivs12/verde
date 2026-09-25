@@ -8993,16 +8993,18 @@ fn renderComposer(state: *app_state.AppState, rect: palette.Rect) void {
 /// pane's own labels, so the preview matches the live slim bar exactly.
 fn renderInactiveComposer(state: *app_state.AppState, rect: palette.Rect) void {
     const thread = state.currentThread();
-    var detail_buf: [128]u8 = undefined;
     const model_label = state.currentComposerModelLabel();
-    const detail_label = state.composerModelDetailText(&detail_buf);
     const directory_label = state.directoryPillLabel(state.currentThreadEffectiveCwd());
     const runtime_label = state.currentRuntimePickerLabel();
+    // The label carries no detail words (run settings live in the model &
+    // settings menu), and the stop button only shows for this pane's own
+    // running turn.
     const layout = state.composer_controller.composer.previewGeometry(rect, .{
         .model = model_label,
-        .detail = detail_label,
+        .detail = "",
         .directory = directory_label,
         .runtime = runtime_label,
+        .send_state = if (thread.isSendPendingForUi()) .stop else .send,
     });
     queuePanel(
         state,
@@ -9026,12 +9028,11 @@ fn renderInactiveComposer(state: *app_state.AppState, rect: palette.Rect) void {
         paletteColor(theme.COLOR_WHITE);
     queueInactiveComposerLabel(state, layout.text, text, color, theme.scaledUi(app_state.PALETTE_COMPOSER_FONT_SIZE));
 
-    // Merged model label: provider logo, name, muted variant words, chevron.
+    // Merged model label: provider logo, name, chevron.
     const toolbar_font = theme.scaledUi(app_state.PALETTE_COMPOSER_TOOLBAR_FONT_SIZE);
     if (layout.model.w > 0.0) {
         renderInactiveComposerProviderIcon(state, layout.model_icon, layout.model, thread.provider);
         queueInactiveComposerLabel(state, layout.model_text, model_label, paletteColor(theme.COLOR_WHITE), toolbar_font);
-        queueInactiveComposerLabel(state, layout.detail_text, detail_label, paletteColor(theme.COLOR_TEXT_SUBTLE), toolbar_font);
         if (layout.chevron.w > 0.0) {
             const glyph = theme.scaledUi(12.0);
             queueIconText(state, snapIconRectOrigin(.{
@@ -9812,13 +9813,16 @@ fn renderComposerShortcutHints(state: *app_state.AppState, directory_rect: palet
         if (show_directory) {
             renderShortcutKeyTip(state, directory_rect, keybinds.formatAltKeyTip(&directory_buf, config.chat_directory_picker));
         }
-        renderShortcutKeyTip(state, model_rect, keybinds.formatAltKeyTip(&model_buf, config.chat_model_picker));
+        // The label opens the model & settings menu, which the run-config
+        // shortcut opens too.
+        renderShortcutKeyTip(state, model_rect, keybinds.formatAltKeyTip(&model_buf, config.chat_run_config));
         if (state.composer_controller.composer.showReasoningToggle()) {
             renderShortcutKeyTip(state, run_rect, keybinds.formatAltKeyTip(&run_buf, config.chat_run_config));
         }
         return;
     }
-    if (state.composer_controller.model_picker.isOpen() or state.composer_controller.directory_picker.isOpen() or state.composer_controller.run_config_open) return;
+    if (state.composer_controller.model_picker.isOpen() or state.composer_controller.directory_picker.isOpen() or
+        state.composer_controller.run_config_open or state.composer_controller.settings_open) return;
     const point: palette.draw.Vec2 = .{
         .x = state.transcript_controller.palette_mouse_x,
         .y = state.transcript_controller.palette_mouse_y,
@@ -9828,7 +9832,7 @@ fn renderComposerShortcutHints(state: *app_state.AppState, directory_rect: palet
         // The pill only shows the basename; hovering reveals the full path.
         renderComposerSelectorTooltip(state, directory_rect, state.currentThreadEffectiveCwd(), keybinds.formatFirstKeybind(&shortcut_buf, config.chat_directory_picker));
     } else if (model_rect.contains(point)) {
-        renderComposerSelectorTooltip(state, model_rect, "Choose model", keybinds.formatFirstKeybind(&shortcut_buf, config.chat_model_picker));
+        renderComposerSelectorTooltip(state, model_rect, "Model & settings", keybinds.formatFirstKeybind(&shortcut_buf, config.chat_run_config));
     } else if (state.composer_controller.composer.showReasoningToggle() and run_rect.contains(point)) {
         renderComposerSelectorTooltip(state, run_rect, "Run settings", keybinds.formatFirstKeybind(&shortcut_buf, config.chat_run_config));
     }

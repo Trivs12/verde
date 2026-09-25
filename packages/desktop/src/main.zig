@@ -2931,8 +2931,10 @@ fn handleGuiChatAction(state: *AppState, action: keybinds.NativeChatAction) bool
     if (state.terminal_controller.focused or state.isBrowserPaneFocused() or state.browser_controller.address_focused) return false;
     if (state.focusedWorkspacePaneKind() != .chat and state.focusedWorkspaceChatPaneId() == null) return false;
     switch (action) {
-        .model_picker => state.togglePaletteModelPickerFromShortcut(),
-        .run_config => state.toggleRunConfigPopoverFromShortcut(),
+        // Both land in the model & settings menu; the model shortcut opens
+        // its Model submenu.
+        .model_picker => state.toggleComposerSettingsMenuFromShortcut(.model),
+        .run_config => state.toggleComposerSettingsMenuFromShortcut(null),
         .directory_picker => state.togglePaletteDirectoryPickerFromShortcut(),
     }
     return true;
