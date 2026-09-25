@@ -515,7 +515,7 @@ const uiSchema = closedObject(
     font_family: {
       type: 'string',
       enum: ['classic', 'inter', 'geist', 'ibm_plex', 'system'],
-      default: 'classic',
+      default: 'geist',
       description:
         'Typeface family for chrome, chat prose, and chat code. `system` uses SF Pro / SF Mono on macOS and Inter elsewhere. Terminals keep their own font.',
     },
