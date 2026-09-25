@@ -630,7 +630,8 @@ pub fn build(b: *std.Build) void {
         } else {
             addMacOSWebViewTestStub(b, exe_tests);
         }
-        exe_tests.root_module.linkSystemLibrary("sdl3", .{ .use_pkg_config = .yes });
+        // sdl3-ttf's pkg-config already links SDL3; linking both repeats
+        // -lSDL3 and newer dyld aborts on the duplicate load command.
         exe_tests.root_module.linkSystemLibrary("sdl3-ttf", .{ .use_pkg_config = .yes });
         exe_tests.root_module.linkFramework("AppKit", .{});
         exe_tests.root_module.linkFramework("WebKit", .{});

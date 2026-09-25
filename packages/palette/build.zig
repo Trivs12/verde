@@ -362,7 +362,9 @@ fn linkSdl(module: *std.Build.Module, os_tag: std.Target.Os.Tag) void {
             linkSdlPkgConfig(module);
         },
         .macos => {
-            linkSdlPkgConfig(module);
+            // sdl3-ttf's pkg-config already links SDL3; linking both repeats
+            // -lSDL3 and newer dyld aborts on the duplicate load command.
+            module.linkSystemLibrary("sdl3-ttf", .{ .use_pkg_config = .yes });
             module.linkFramework("Metal", .{});
             module.linkFramework("QuartzCore", .{});
         },
