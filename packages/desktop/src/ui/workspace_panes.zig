@@ -1025,14 +1025,15 @@ pub fn renderAtWithTranscriptLayoutWidth(state: *runtime.AppState, rect: palette
         if (scrollingLayoutActive(state, layout)) {
             renderScrollingStrip(state, layout, rect, target_workspace_width);
         } else {
-            // Unzoomed tiles always sit inside the workspace margin, even when
-            // only one pane is open, so zooming reads as a distinct state.
+            // Split tiles sit inside a gap-wide workspace margin; a lone pane
+            // fills the workspace flush, like a zoomed one.
             const gap = theme.scaledUi(state.app_config.workspace_pane_gap);
+            const inset = tiledRootUsesMargins(root);
             renderNode(
                 state,
                 root,
-                tiledContentRect(rect, gap, true),
-                tiledContentExtent(target_workspace_width, gap, true),
+                tiledContentRect(rect, gap, inset),
+                tiledContentExtent(target_workspace_width, gap, inset),
             );
         }
     } else if (state.project_controller.projects.items.len > 0) {
@@ -2196,10 +2197,10 @@ fn renderScrollingGroup(
     };
     if (intersectRects(rect, workspace) == null) return;
     // The viewport margin already insets the strip; margin-less strips (one
-    // pane per view) inset every group, single-pane included, so an unzoomed
-    // pane never sits edge-to-edge like a zoomed one.
+    // pane per view, or a single tab) inset only groups that tile several
+    // panes, so a lone pane fills its slot flush.
     const pane_count = layout.scrollGroupPaneCount(group_id);
-    const inset_group = !viewport_has_margins;
+    const inset_group = scrollGroupUsesMargins(viewport_has_margins, pane_count);
     if (zoomedPaneInScrollGroup(layout, group_id)) |zoomed_pane_id| {
         // Zoom is contained to the tab: the zoomed pane takes the whole slot
         // edge-to-edge and its tile siblings stay hidden, while the rest of
@@ -2837,6 +2838,18 @@ fn verticalSplitWidths(total_width: f32, ratio: f32, gap: f32) VerticalSplitWidt
     };
 }
 
+/// Only a split root gets the four-sided workspace margin; a single pane is
+/// flush with the workspace edges.
+fn tiledRootUsesMargins(root: *const runtime.WorkspaceNode) bool {
+    return root.* == .split;
+}
+
+/// A strip group insets its own tiles only when the viewport has no margin and
+/// the group tiles more than one pane.
+fn scrollGroupUsesMargins(viewport_has_margins: bool, group_pane_count: usize) bool {
+    return !viewport_has_margins and group_pane_count > 1;
+}
+
 fn tiledContentExtent(extent: f32, gap: f32, inset: bool) f32 {
     if (!inset) return extent;
     const margin = @min(gap, @max((extent - 1.0) * 0.5, 0.0));
@@ -2893,6 +2906,18 @@ test "tiled content adds four-sided margins when inset" {
     try std.testing.expectEqual(@as(f32, 976.0), tiled.w);
     try std.testing.expectEqual(@as(f32, 676.0), tiled.h);
     try std.testing.expectEqual(@as(f32, 976.0), tiledContentExtent(rect.w, 12.0, true));
+}
+
+test "lone panes are flush while tiled groups keep the workspace margin" {
+    const leaf: runtime.WorkspaceNode = .{ .leaf = 1 };
+    try std.testing.expect(!tiledRootUsesMargins(&leaf));
+
+    // Strip: a single-pane tab is flush whether or not other tabs exist.
+    try std.testing.expect(!scrollGroupUsesMargins(false, 1));
+    try std.testing.expect(scrollGroupUsesMargins(false, 2));
+    // The viewport already carries the margin when several tabs share a view.
+    try std.testing.expect(!scrollGroupUsesMargins(true, 2));
+    try std.testing.expect(!scrollGroupUsesMargins(true, 1));
 }
 
 test "target split widths finish without a corrective transcript reflow" {

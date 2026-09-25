@@ -3268,6 +3268,10 @@ fn renderSelectablePaletteCodeBlock(
     const lines = try buildSelectableCodeLinesWithWrap(allocator, block, options, text_width_sel);
     defer deinitSelectableCodeLines(allocator, lines);
 
+    // Code text clips to the block *and* the transcript viewport; the block
+    // rect alone let scrolled-away lines paint above the pane. Every line
+    // still runs for selection bounds, hover, and copy even when invisible.
+    const code_clip = intersectClipRect(context.clip, rect) orelse rect;
     const content_start = .{ start[0] + pad_x, start[1] + pad_y };
     for (lines, 0..) |line, index| {
         renderSelectableCodeLine(
@@ -3284,7 +3288,7 @@ fn renderSelectablePaletteCodeBlock(
             global_line_index.* + index,
             line,
             options,
-            rect,
+            code_clip,
         );
     }
 
@@ -4232,6 +4236,58 @@ test "static and selectable plain transcript rendering share layout height" {
     defer output.deinit(allocator);
 
     try std.testing.expectApproxEqAbs(static_context.cursor.y, selectable_context.cursor.y, 0.001);
+}
+
+test "fenced code text stays inside the transcript clip on every render path" {
+    const allocator = std.testing.allocator;
+    var body = try buildBodyView(allocator,
+        \\```
+        \\kanagawa.json   200
+        \\gruvbox.json    200
+        \\nord.json       404
+        \\dracula.json    200
+        \\```
+    );
+    defer body.deinit(allocator);
+
+    // Viewport starts mid-block, as when the transcript scrolls a code block
+    // past the pane's top edge.
+    const viewport: palette.Rect = .{ .x = 0.0, .y = 40.0, .w = 320.0, .h = 200.0 };
+    const options: RenderOptions = .{ .base_font_size = 16.0, .line_height = 22.0 };
+
+    for ([_]bool{ false, true }) |selectable| {
+        var batch: palette.RenderBatch = .{};
+        defer batch.deinit(allocator);
+        var frame_text: std.ArrayList(u8) = .empty;
+        defer frame_text.deinit(allocator);
+        var arena = std.heap.ArenaAllocator.init(allocator);
+        defer arena.deinit();
+        var context: PaletteRenderContext = .{
+            .allocator = allocator,
+            .batch = &batch,
+            .frame_text = &frame_text,
+            .text_arena = &arena,
+            .cursor = .{ .x = 0.0, .y = 0.0, .w = viewport.w, .h = 600.0 },
+            .available_width = viewport.w,
+            .clip = viewport,
+        };
+        if (selectable) {
+            var output = renderSelectablePaletteBody(&context, allocator, body, options, null, false);
+            output.deinit(allocator);
+        } else {
+            renderPaletteBody(&context, body, options);
+        }
+
+        var text_commands: usize = 0;
+        for (batch.commands.items) |command| {
+            if (command.kind != .text) continue;
+            text_commands += 1;
+            const clip = command.clip orelse return error.TestUnexpectedResult;
+            try std.testing.expect(clip.y >= viewport.y);
+            try std.testing.expect(clip.y + clip.h <= viewport.y + viewport.h);
+        }
+        try std.testing.expect(text_commands > 0);
+    }
 }
 
 test "unicode arrows survive markdown flatten for chat prose" {
