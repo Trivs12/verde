@@ -26,6 +26,37 @@ pub const ComposerPromptConfig = struct {
     /// Horizontal inset of the outside directory strip relative to the frame
     /// edge, in CSS units; keeps the pill from kissing the frame corner.
     directory_outside_inset_x: f32 = 4.0,
+    /// Opt-in single-row layout: while the draft fits on one line (and holds
+    /// no newline) the prompt text shares one slim bar with the right-aligned
+    /// toolbar cluster. Longer drafts stack the text above a toolbar row that
+    /// keeps the bar's bottom edge and control positions.
+    inline_toolbar: bool = false,
+    /// Frame corner radius while the single-row bar is active.
+    inline_corner_radius: f32 = 22.0,
+    /// Narrowest inline text column; narrower composers always stack.
+    inline_min_text_width: f32 = 140.0,
+    /// Draws the model and run pills as one right-aligned ghost label:
+    /// `[icon] Model detail ⌄`. The name half still hit-tests as `.model` and
+    /// the detail + chevron half as `.reasoning`, so hosts keep their popover
+    /// anchors. The fast/access pills are not drawn in this mode.
+    merged_model_label: bool = false,
+    /// Host-drawn leading icon cell and gap in the merged label; fall back to
+    /// `pill_overlay_icon_reserve` / `pill_icon_gap`.
+    merged_icon_reserve: ?f32 = null,
+    merged_icon_gap: ?f32 = null,
+    /// Renders the outside directory strip as small muted text chips instead
+    /// of full toolbar pills.
+    strip_chips: bool = false,
+    /// Outside strip height; falls back to `toolbar_height`.
+    strip_height: ?f32 = null,
+    /// Strip chip label size; falls back to `toolbar_font_size`.
+    strip_font_size: ?f32 = null,
+    strip_padding_x: ?f32 = null,
+    /// Host-drawn icon cell and gap in strip chips; fall back to
+    /// `pill_overlay_icon_reserve` / `pill_icon_gap`.
+    strip_icon_reserve: ?f32 = null,
+    strip_icon_gap: ?f32 = null,
+    strip_chevron: bool = true,
     control_gap: f32 = 8.0,
     separator_width: f32 = 1.0,
     corner_radius: f32 = 14.0,
@@ -49,6 +80,8 @@ pub const ComposerPromptConfig = struct {
     text_color: draw.Color = draw.Color.white,
     placeholder_color: draw.Color = .{ .r = 0.58, .g = 0.62, .b = 0.68, .a = 0.82 },
     icon_color: draw.Color = .{ .r = 0.78, .g = 0.82, .b = 0.88, .a = 1.0 },
+    /// Merged-label detail words; falls back to `icon_color`.
+    muted_text_color: ?draw.Color = null,
     font_size: f32 = 16.0,
     toolbar_font_size: f32 = 14.0,
     icon_font_size: f32 = 16.0,
@@ -142,6 +175,8 @@ pub const ComposerPromptStyle = struct {
     text_color: draw.Color,
     placeholder_color: draw.Color,
     icon_color: draw.Color,
+    /// Merged-label detail words; null falls back to `icon_color`.
+    muted_text_color: ?draw.Color = null,
     cursor_color: draw.Color,
     selection_color: draw.Color,
     scrollbar_track_color: draw.Color,
@@ -196,6 +231,44 @@ pub const ComposerPromptIconSlot = struct {
 pub const ComposerPromptIconSlotRects = struct {
     rects: [MAX_PILL_ICON_SLOTS]draw.Rect = undefined,
     count: usize = 0,
+};
+
+/// Full resolved layout of a composer for a given bounds rect; see
+/// `previewGeometry`. Zero-width rects mark controls that are not shown.
+pub const ComposerPromptGeometry = struct {
+    frame: draw.Rect,
+    text: draw.Rect,
+    toolbar: draw.Rect,
+    strip: draw.Rect,
+    directory: draw.Rect,
+    runtime: draw.Rect,
+    model: draw.Rect,
+    reasoning: draw.Rect,
+    fast: draw.Rect,
+    access: draw.Rect,
+    send: draw.Rect,
+    /// Host-drawn leading icon cells (provider logo, folder, runtime).
+    model_icon: draw.Rect,
+    directory_icon: draw.Rect,
+    runtime_icon: draw.Rect,
+    /// Label cells: merged model name / detail words / chevron, and the
+    /// strip chip labels. Zero width outside the matching mode.
+    model_text: draw.Rect,
+    detail_text: draw.Rect,
+    chevron: draw.Rect,
+    directory_text: draw.Rect,
+    runtime_text: draw.Rect,
+    corner_radius: f32,
+    inline_active: bool,
+};
+
+/// Label overrides for `previewGeometry`, so an unfocused pane's preview is
+/// laid out for its own thread's labels instead of the live composer's.
+pub const ComposerPromptPreviewLabels = struct {
+    model: ?[]const u8 = null,
+    detail: ?[]const u8 = null,
+    directory: ?[]const u8 = null,
+    runtime: ?[]const u8 = null,
 };
 
 pub const ComposerPromptInput = union(enum) {
@@ -347,11 +420,15 @@ pub fn ComposerPrompt(comptime config: ComposerPromptConfig) type {
         directory_label_buffer: std.ArrayList(u8) = .empty,
         runtime_label_buffer: std.ArrayList(u8) = .empty,
         model_label_buffer: std.ArrayList(u8) = .empty,
+        /// Muted variant words after the model name in the merged label.
+        model_detail_label_buffer: std.ArrayList(u8) = .empty,
         reasoning_label_buffer: std.ArrayList(u8) = .empty,
         fast_label_buffer: std.ArrayList(u8) = .empty,
         access_label_buffer: std.ArrayList(u8) = .empty,
         model_options: Options = .{},
         reasoning_options: Options = .{},
+        /// Only set on the throwaway copy `previewGeometry` lays out.
+        preview_labels: ComposerPromptPreviewLabels = .{},
         model_index: ?usize = null,
         reasoning_index: ?usize = null,
         active_menu: ?ComposerPromptOptionTarget = null,
@@ -434,7 +511,8 @@ pub fn ComposerPrompt(comptime config: ComposerPromptConfig) type {
         /// with the words they annotate even as the label or pill width change.
         pub fn reasoningIconSlotRects(self: *const Component) ComposerPromptIconSlotRects {
             var result: ComposerPromptIconSlotRects = .{};
-            if (!self.show_reasoning_toggle) return result;
+            // The merged label carries no embedded glyph cells.
+            if (!self.show_reasoning_toggle or config.merged_model_label) return result;
             const rect = self.toolbarGeometry().reasoning;
             if (rect.w <= 0.0 or rect.h <= 0.0) return result;
             const label = self.reasoningLabel();
@@ -550,6 +628,7 @@ pub fn ComposerPrompt(comptime config: ComposerPromptConfig) type {
                 .text_color = config.text_color,
                 .placeholder_color = config.placeholder_color,
                 .icon_color = config.icon_color,
+                .muted_text_color = config.muted_text_color,
                 .cursor_color = config.cursor_color,
                 .selection_color = config.selection_color,
                 .scrollbar_track_color = config.scrollbar_track_color,
@@ -569,6 +648,7 @@ pub fn ComposerPrompt(comptime config: ComposerPromptConfig) type {
             self.buffer.deinit(allocator);
             self.placeholder_buffer.deinit(allocator);
             self.model_label_buffer.deinit(allocator);
+            self.model_detail_label_buffer.deinit(allocator);
             self.reasoning_label_buffer.deinit(allocator);
             self.fast_label_buffer.deinit(allocator);
             self.directory_label_buffer.deinit(allocator);
@@ -670,6 +750,12 @@ pub fn ComposerPrompt(comptime config: ComposerPromptConfig) type {
 
         pub fn setModelLabel(self: *Component, allocator: std.mem.Allocator, value: []const u8) !void {
             try setOwnedString(allocator, &self.model_label_buffer, value);
+        }
+
+        /// Muted words shown after the model name in the merged label (e.g.
+        /// "High Fast"); clicking them hit-tests as `.reasoning`.
+        pub fn setModelDetailLabel(self: *Component, allocator: std.mem.Allocator, value: []const u8) !void {
+            try setOwnedString(allocator, &self.model_detail_label_buffer, value);
         }
 
         pub fn setReasoningLabel(self: *Component, allocator: std.mem.Allocator, value: []const u8) !void {
@@ -806,12 +892,11 @@ pub fn ComposerPrompt(comptime config: ComposerPromptConfig) type {
         pub fn frameRect(self: *const Component) draw.Rect {
             const bounds_rect = self.bounds();
             if (!self.directoryOutside()) return bounds_rect;
-            const reserve = self.scaled(config.toolbar_height) + self.scaled(config.toolbar_gap);
             return snapRect(.{
                 .x = bounds_rect.x,
                 .y = bounds_rect.y,
                 .w = bounds_rect.w,
-                .h = @max(bounds_rect.h - reserve, 0.0),
+                .h = @max(bounds_rect.h - self.stripReserve(), 0.0),
             });
         }
 
@@ -823,9 +908,9 @@ pub fn ComposerPrompt(comptime config: ComposerPromptConfig) type {
             const inset = self.scaled(config.directory_outside_inset_x);
             return snapRect(.{
                 .x = bounds_rect.x + inset,
-                .y = bounds_rect.y + bounds_rect.h - self.scaled(config.toolbar_height),
+                .y = bounds_rect.y + bounds_rect.h - self.stripHeight(),
                 .w = @max(bounds_rect.w - inset * 2.0, 0.0),
-                .h = self.scaled(config.toolbar_height),
+                .h = self.stripHeight(),
             });
         }
 
@@ -835,16 +920,36 @@ pub fn ComposerPrompt(comptime config: ComposerPromptConfig) type {
         pub fn preferredHeight(self: *const Component, width: f32, empty: bool, min_lines: f32, max_lines: f32) f32 {
             const metrics = self.textMetrics();
             const value = if (empty or self.buffer.items.len == 0) self.placeholderText() else self.buffer.items;
+            if (config.inline_toolbar) {
+                // Same decision as `inlineActive`; the placeholder never
+                // forces stacking (it clips inside the inline column).
+                if (self.inlineFitsAt(width, if (empty) "" else self.buffer.items)) return @ceil(self.inlineBarHeight() + self.stripReserve());
+                const stacked_text_w = @max(width - self.scaled(config.padding_x) * 2.0, 1.0);
+                const stacked_content = text_layout.contentHeight(value, metrics, stacked_text_w, true);
+                return @ceil(self.scaled(config.padding_y) +
+                    std.math.clamp(stacked_content, metrics.line_height * min_lines, metrics.line_height * max_lines) +
+                    self.scaled(config.toolbar_gap) + self.scaled(config.toolbar_height) + self.controlInset() +
+                    self.stripReserve());
+            }
             const text_w = @max(width - self.scaled(config.padding_x) * 2.0, 1.0);
             const content = text_layout.contentHeight(value, metrics, text_w, true);
-            var height = self.scaled(config.padding_y) * 2.0 +
+            const height = self.scaled(config.padding_y) * 2.0 +
                 std.math.clamp(content, metrics.line_height * min_lines, metrics.line_height * max_lines) +
-                self.scaled(config.toolbar_gap) + self.scaled(config.toolbar_height);
-            if (self.directoryOutside()) height += self.scaled(config.toolbar_height) + self.scaled(config.toolbar_gap);
+                self.scaled(config.toolbar_gap) + self.scaled(config.toolbar_height) +
+                self.stripReserve();
             return @ceil(height);
         }
 
+        /// True while the single-row bar is active. The one place the
+        /// inline/stacked mode is decided: it reads only the bounds width,
+        /// labels and draft (never the current height), so resizing the
+        /// bounds to `preferredHeight` cannot flip it back and forth.
+        pub fn inlineActive(self: *const Component) bool {
+            return self.inlineFitsAt(self.rect.w, self.buffer.items);
+        }
+
         pub fn textRect(self: *const Component) draw.Rect {
+            if (config.inline_toolbar) return self.rowLayout(self.frameRect(), self.inlineActive()).text;
             const frame = self.frameRect();
             return snapRect(.{
                 .x = frame.x + self.scaled(config.padding_x),
@@ -855,6 +960,7 @@ pub fn ComposerPrompt(comptime config: ComposerPromptConfig) type {
         }
 
         pub fn toolbarRect(self: *const Component) draw.Rect {
+            if (config.inline_toolbar) return self.rowLayout(self.frameRect(), self.inlineActive()).toolbar;
             const frame = self.frameRect();
             return snapRect(.{
                 .x = frame.x + self.scaled(config.padding_x),
@@ -862,6 +968,218 @@ pub fn ComposerPrompt(comptime config: ComposerPromptConfig) type {
                 .w = @max(frame.w - self.scaled(config.padding_x) * 2.0, 0.0),
                 .h = self.scaled(config.toolbar_height),
             });
+        }
+
+        /// Frame corner radius for the current mode.
+        pub fn cornerRadius(self: *const Component) f32 {
+            return self.scaled(if (config.inline_toolbar and self.inlineActive()) config.inline_corner_radius else config.corner_radius);
+        }
+
+        /// Pure layout of this composer at `rect` with an empty draft, as the
+        /// placeholder preview of an unfocused pane would show it (matches
+        /// `preferredHeight(width, true, ...)`). Uses the current metrics and
+        /// toggles, `labels` over the live ones, and never mutates the live
+        /// component.
+        pub fn previewGeometry(self: *const Component, rect: draw.Rect, labels: ComposerPromptPreviewLabels) ComposerPromptGeometry {
+            var preview = self.*;
+            preview.preview_labels = labels;
+            preview.rect = rect;
+            preview.buffer = .empty;
+            preview.scroll_y = 0.0;
+            return preview.layoutGeometry();
+        }
+
+        /// Full resolved layout at the current bounds.
+        pub fn layoutGeometry(self: *const Component) ComposerPromptGeometry {
+            const toolbar = self.toolbarGeometry();
+            const zero: draw.Rect = .{ .x = 0.0, .y = 0.0, .w = 0.0, .h = 0.0 };
+            const merged = if (config.merged_model_label) self.mergedLabelCells(toolbar.model, toolbar.reasoning) else MergedLabelCells{ .name = zero, .detail = zero, .chevron = zero };
+            const chips = config.strip_chips and self.directoryOutside();
+            return .{
+                .frame = self.frameRect(),
+                .text = self.textRect(),
+                .toolbar = toolbar.toolbar,
+                .strip = self.directoryStripRect(),
+                .directory = toolbar.directory,
+                .runtime = toolbar.runtime,
+                .model = toolbar.model,
+                .reasoning = toolbar.reasoning,
+                .fast = toolbar.fast,
+                .access = toolbar.access,
+                .send = toolbar.send,
+                .model_icon = self.leadingIconCell(.model, toolbar.model),
+                .directory_icon = self.leadingIconCell(.directory, toolbar.directory),
+                .runtime_icon = self.leadingIconCell(.runtime, toolbar.runtime),
+                .model_text = merged.name,
+                .detail_text = merged.detail,
+                .chevron = merged.chevron,
+                .directory_text = if (chips) self.stripChipTextRect(toolbar.directory) else zero,
+                .runtime_text = if (chips) self.stripChipTextRect(toolbar.runtime) else zero,
+                .corner_radius = self.cornerRadius(),
+                .inline_active = config.inline_toolbar and self.inlineActive(),
+            };
+        }
+
+        /// Cell reserved for the host-drawn leading glyph of a toolbar
+        /// control (provider logo, folder, runtime), centred vertically in it.
+        pub fn leadingIconRect(self: *const Component, part: ComposerPromptPart) draw.Rect {
+            const toolbar = self.toolbarGeometry();
+            const rect = switch (part) {
+                .directory => toolbar.directory,
+                .runtime => toolbar.runtime,
+                .model => toolbar.model,
+                .reasoning => toolbar.reasoning,
+                .fast => toolbar.fast,
+                .access => toolbar.access,
+                .send => toolbar.send,
+            };
+            return self.leadingIconCell(part, rect);
+        }
+
+        fn leadingIconCell(self: *const Component, part: ComposerPromptPart, rect: draw.Rect) draw.Rect {
+            const chip = config.strip_chips and self.directoryOutside() and (part == .directory or part == .runtime);
+            const merged = config.merged_model_label and part == .model;
+            const pad = if (chip) self.stripPadX() else self.scaled(config.pill_padding_x);
+            const reserve = if (chip) self.stripIconReserve() else if (merged) self.mergedIconReserve() else self.scaled(config.pill_overlay_icon_reserve);
+            return .{ .x = rect.x + pad, .y = rect.y + (rect.h - reserve) * 0.5, .w = reserve, .h = reserve };
+        }
+
+        fn stripHeight(self: *const Component) f32 {
+            return self.scaled(config.strip_height orelse config.toolbar_height);
+        }
+
+        /// Vertical room the outside strip takes under the frame, gap
+        /// included; shared by `frameRect`, the strip rect and
+        /// `preferredHeight` so the three can never disagree.
+        fn stripReserve(self: *const Component) f32 {
+            if (!self.directoryOutside()) return 0.0;
+            return self.stripHeight() + self.scaled(config.toolbar_gap);
+        }
+
+        /// Single-row bar height: the taller of the toolbar row and one text
+        /// line, with half `padding_y` of air above and below.
+        fn inlineBarHeight(self: *const Component) f32 {
+            return @max(self.scaled(config.toolbar_height), self.textMetrics().line_height) + self.scaled(config.padding_y);
+        }
+
+        /// Right/bottom inset of the toolbar row in `inline_toolbar` layouts.
+        /// Stacked mode reuses the inline value so the controls stay put when
+        /// the text grows above them.
+        fn controlInset(self: *const Component) f32 {
+            return @max((self.inlineBarHeight() - self.scaled(config.toolbar_height)) * 0.5, 0.0);
+        }
+
+        fn sendSize(self: *const Component, toolbar_h: f32) f32 {
+            return @round(@min(toolbar_h, self.scaled(38.0)));
+        }
+
+        /// Gap between the send button and the pill it follows, beyond the
+        /// shared `control_gap`; the merged label sits flush.
+        fn sendOffset(self: *const Component) f32 {
+            return if (config.merged_model_label) 0.0 else self.scaled(2.0);
+        }
+
+        /// Natural width of the right-aligned inline cluster (controls plus
+        /// send button), independent of the current mode.
+        fn inlineClusterWidth(self: *const Component) f32 {
+            const gap = self.scaled(config.control_gap);
+            const send = self.sendSize(self.scaled(config.toolbar_height)) + self.sendOffset();
+            if (config.merged_model_label) return self.mergedLabelNaturalWidth() + gap + send;
+            const model_w = self.pillWidth(true, 0.0, config.model_icon, self.modelLabel(), config.chevron_icon, config.model_min_width, config.model_max_width);
+            const reasoning_w: f32 = if (self.show_reasoning_toggle)
+                self.pillWidth(false, self.reasoningIconSlotsWidth(), "", self.reasoningLabel(), config.chevron_icon, config.reasoning_min_width, config.reasoning_max_width)
+            else
+                0.0;
+            const fast_w: f32 = if (self.show_fast_toggle) self.pillWidth(true, 0.0, config.fast_icon, self.fastLabel(), "", config.fast_min_width, config.fast_max_width) else 0.0;
+            const access_w: f32 = if (self.show_access_toggle) self.pillWidth(true, 0.0, config.access_icon, self.accessLabel(), "", config.access_min_width, config.access_max_width) else 0.0;
+            var width = self.toolbarPillsTotalWidth(model_w, reasoning_w, fast_w, access_w) + gap * 2.0 + send;
+            if (self.show_directory_toggle and !self.directoryOutside()) {
+                width += self.pillWidth(true, 0.0, config.directory_icon, self.directoryLabel(), config.chevron_icon, config.directory_min_width, config.directory_max_width) + gap;
+            }
+            return width;
+        }
+
+        const RowLayout = struct { text: draw.Rect, toolbar: draw.Rect };
+
+        /// Text and toolbar rows of an `inline_toolbar` frame. Inline: text
+        /// vertically centred left of the right-aligned cluster. Stacked:
+        /// text over the full inner width above a toolbar row that keeps the
+        /// inline bar's bottom/right insets.
+        fn rowLayout(self: *const Component, frame: draw.Rect, inline_mode: bool) RowLayout {
+            const pad_x = self.scaled(config.padding_x);
+            const toolbar_h = self.scaled(config.toolbar_height);
+            const inset = self.controlInset();
+            const line_h = self.textMetrics().line_height;
+            if (inline_mode) {
+                const cluster_w = self.inlineClusterWidth();
+                const text_w = frame.w - pad_x - self.scaled(config.control_gap) - cluster_w - inset;
+                return .{
+                    .text = snapRect(.{
+                        .x = frame.x + pad_x,
+                        .y = frame.y + (frame.h - line_h) * 0.5,
+                        .w = @max(text_w, 0.0),
+                        .h = line_h,
+                    }),
+                    .toolbar = snapRect(.{
+                        .x = frame.x + frame.w - inset - cluster_w,
+                        .y = frame.y + (frame.h - toolbar_h) * 0.5,
+                        .w = cluster_w,
+                        .h = toolbar_h,
+                    }),
+                };
+            }
+            const toolbar_y = frame.y + frame.h - inset - toolbar_h;
+            const text_y = frame.y + self.scaled(config.padding_y);
+            return .{
+                .text = snapRect(.{
+                    .x = frame.x + pad_x,
+                    .y = text_y,
+                    .w = @max(frame.w - pad_x * 2.0, 0.0),
+                    .h = @max(toolbar_y - self.scaled(config.toolbar_gap) - text_y, 0.0),
+                }),
+                .toolbar = snapRect(.{
+                    .x = frame.x + pad_x,
+                    .y = toolbar_y,
+                    .w = @max(frame.w - pad_x - inset, 0.0),
+                    .h = toolbar_h,
+                }),
+            };
+        }
+
+        /// Whether `value` fits the inline text column of a `width`-wide
+        /// composer. Mirrors `text_layout` wrapping (a line breaks once the
+        /// running advance exceeds the column) but stops at the first
+        /// overflow, since this runs on every geometry query.
+        fn inlineFitsAt(self: *const Component, width: f32, value: []const u8) bool {
+            if (!config.inline_toolbar) return false;
+            if (std.mem.findScalar(u8, value, '\n') != null) return false;
+            // `frameRect` snaps its width only when the strip is outside;
+            // match it so the probe column equals the rendered one exactly.
+            const frame_w = if (self.directoryOutside()) @round(width) else width;
+            const probe_frame: draw.Rect = .{ .x = 0.0, .y = 0.0, .w = frame_w, .h = self.inlineBarHeight() };
+            const text_w = self.rowLayout(probe_frame, true).text.w;
+            if (text_w < self.scaled(config.inline_min_text_width)) return false;
+            const metrics = self.textMetrics();
+            const max_w = @max(text_w, 1.0);
+            var run_w: f32 = 0.0;
+            var index: usize = 0;
+            while (index < value.len) {
+                const advance = metrics.nextAdvance(value, index);
+                if (index > 0 and run_w + advance.width > max_w) return false;
+                run_w += advance.width;
+                index += @max(advance.byte_len, 1);
+            }
+            return true;
+        }
+
+        /// Click target that focuses the editor; inline mode widens it to
+        /// the bar's full height left of the cluster so the slim bar's
+        /// vertical padding still places the caret.
+        fn textHitRect(self: *const Component) draw.Rect {
+            const text_rect = self.textRect();
+            if (!(config.inline_toolbar and self.inlineActive())) return text_rect;
+            const frame = self.frameRect();
+            return .{ .x = frame.x, .y = frame.y, .w = @max(text_rect.x + text_rect.w - frame.x, 0.0), .h = frame.h };
         }
 
         pub fn sendButtonRect(self: *const Component) draw.Rect {
@@ -900,7 +1218,7 @@ pub fn ComposerPrompt(comptime config: ComposerPromptConfig) type {
 
             const active_border_color = if (self.focused) (self.style.focus_border_color orelse self.style.border_color) else self.style.border_color;
             const active_border_width = self.scaled(if (self.focused) (self.style.focus_border_width orelse config.border_width) else config.border_width);
-            try batch.panel(allocator, self.frameRect(), self.style.background_color, active_border_color, self.scaled(config.corner_radius), active_border_width);
+            try batch.panel(allocator, self.frameRect(), self.style.background_color, active_border_color, self.cornerRadius(), active_border_width);
             try self.renderPromptText(allocator, batch);
             try self.renderToolbar(allocator, batch);
             try self.renderMenu(allocator, batch);
@@ -933,32 +1251,47 @@ pub fn ComposerPrompt(comptime config: ComposerPromptConfig) type {
             if (self.show_directory_toggle and !self.directoryOutside()) {
                 try self.renderSeparator(allocator, batch, separatorX(geometry.directory, geometry.model), geometry.toolbar);
             }
-            if (self.show_reasoning_toggle) {
-                try self.renderSeparator(allocator, batch, separatorX(geometry.model, geometry.reasoning), geometry.toolbar);
-            }
-            if (self.show_fast_toggle) {
-                try self.renderSeparator(allocator, batch, separatorX(left_before_fast, geometry.fast), geometry.toolbar);
-            }
-            if (self.show_access_toggle) {
-                const left_before_access: draw.Rect = if (self.show_fast_toggle) geometry.fast else left_before_fast;
-                try self.renderSeparator(allocator, batch, separatorX(left_before_access, geometry.access), geometry.toolbar);
+            if (!config.merged_model_label) {
+                if (self.show_reasoning_toggle) {
+                    try self.renderSeparator(allocator, batch, separatorX(geometry.model, geometry.reasoning), geometry.toolbar);
+                }
+                if (self.show_fast_toggle) {
+                    try self.renderSeparator(allocator, batch, separatorX(left_before_fast, geometry.fast), geometry.toolbar);
+                }
+                if (self.show_access_toggle) {
+                    const left_before_access: draw.Rect = if (self.show_fast_toggle) geometry.fast else left_before_fast;
+                    try self.renderSeparator(allocator, batch, separatorX(left_before_access, geometry.access), geometry.toolbar);
+                }
             }
 
+            const strip_chips = config.strip_chips and self.directoryOutside();
             if (self.show_directory_toggle) {
-                try self.renderPill(allocator, batch, true, &.{}, geometry.directory, config.directory_icon, self.directoryLabel(), config.chevron_icon, self.hovered_part == .directory);
+                if (strip_chips) {
+                    try self.renderStripChip(allocator, batch, geometry.directory, self.directoryLabel(), self.hovered_part == .directory);
+                } else {
+                    try self.renderPill(allocator, batch, true, &.{}, geometry.directory, config.directory_icon, self.directoryLabel(), config.chevron_icon, self.hovered_part == .directory);
+                }
             }
             if (geometry.runtime.w > 0.0) {
-                try self.renderPill(allocator, batch, true, &.{}, geometry.runtime, config.runtime_icon, self.runtimeLabel(), config.chevron_icon, self.hovered_part == .runtime);
+                if (strip_chips) {
+                    try self.renderStripChip(allocator, batch, geometry.runtime, self.runtimeLabel(), self.hovered_part == .runtime);
+                } else {
+                    try self.renderPill(allocator, batch, true, &.{}, geometry.runtime, config.runtime_icon, self.runtimeLabel(), config.chevron_icon, self.hovered_part == .runtime);
+                }
             }
-            try self.renderPill(allocator, batch, true, &.{}, geometry.model, config.model_icon, self.modelLabel(), config.chevron_icon, self.hovered_part == .model or self.active_menu == .model);
-            if (self.show_reasoning_toggle) {
-                try self.renderPill(allocator, batch, false, self.reasoningIconSlots(), geometry.reasoning, "", self.reasoningLabel(), config.chevron_icon, self.hovered_part == .reasoning or self.active_menu == .reasoning);
-            }
-            if (self.show_fast_toggle) {
-                try self.renderPill(allocator, batch, true, &.{}, geometry.fast, config.fast_icon, self.fastLabel(), "", self.hovered_part == .fast or self.fast_enabled);
-            }
-            if (self.show_access_toggle) {
-                try self.renderPill(allocator, batch, true, &.{}, geometry.access, config.access_icon, self.accessLabel(), "", self.hovered_part == .access or self.access_enabled);
+            if (config.merged_model_label) {
+                try self.renderMergedLabel(allocator, batch, geometry);
+            } else {
+                try self.renderPill(allocator, batch, true, &.{}, geometry.model, config.model_icon, self.modelLabel(), config.chevron_icon, self.hovered_part == .model or self.active_menu == .model);
+                if (self.show_reasoning_toggle) {
+                    try self.renderPill(allocator, batch, false, self.reasoningIconSlots(), geometry.reasoning, "", self.reasoningLabel(), config.chevron_icon, self.hovered_part == .reasoning or self.active_menu == .reasoning);
+                }
+                if (self.show_fast_toggle) {
+                    try self.renderPill(allocator, batch, true, &.{}, geometry.fast, config.fast_icon, self.fastLabel(), "", self.hovered_part == .fast or self.fast_enabled);
+                }
+                if (self.show_access_toggle) {
+                    try self.renderPill(allocator, batch, true, &.{}, geometry.access, config.access_icon, self.accessLabel(), "", self.hovered_part == .access or self.access_enabled);
+                }
             }
 
             const send_disabled = self.send_state == .disabled or self.send_state == .pending;
@@ -1046,7 +1379,67 @@ pub fn ComposerPrompt(comptime config: ComposerPromptConfig) type {
             try batch.textRuns(allocator, rect, label, runs[0..count], self.style.text_color, text_metrics.font_size, rect, text_metrics.line_height, text_metrics.fixedAdvance());
         }
 
+        // Merged model label: one ghost control, `[logo] Name detail ⌄`. The
+        // name and detail halves hover independently because they open
+        // different host popovers (model picker vs run settings).
+        fn renderMergedLabel(self: *const Component, allocator: std.mem.Allocator, batch: *draw.RenderBatch, geometry: ToolbarGeometry) !void {
+            const model = geometry.model;
+            if (model.w <= 0.0 or model.h <= 0.0) return;
+            const has_detail = self.show_reasoning_toggle and geometry.reasoning.w > 0.0;
+            if (self.hovered_part == .model or self.active_menu == .model) {
+                try batch.panel(allocator, model, self.style.control_hover_color, null, model.h * 0.5, 0.0);
+            } else if (has_detail and (self.hovered_part == .reasoning or self.active_menu == .reasoning)) {
+                try batch.panel(allocator, geometry.reasoning, self.style.control_hover_color, null, geometry.reasoning.h * 0.5, 0.0);
+            }
+            const metrics = self.toolbarMetrics();
+            const cells = self.mergedLabelCells(model, geometry.reasoning);
+            const name = self.modelLabel();
+            if (cells.name.w > 0.0) {
+                const runs = [_]draw.TextRun{self.coloredLabelRun(name, 0, name.len, cells.name.x, cells.name, cells.name, metrics, self.style.text_color)};
+                try batch.textRuns(allocator, cells.name, name, &runs, self.style.text_color, metrics.font_size, cells.name, metrics.line_height, metrics.fixedAdvance());
+            }
+            const detail = self.mergedDetailLabel();
+            if (cells.detail.w > 0.0 and detail.len > 0) {
+                const muted = self.style.muted_text_color orelse self.style.icon_color;
+                const runs = [_]draw.TextRun{self.coloredLabelRun(detail, 0, detail.len, cells.detail.x, cells.detail, cells.detail, metrics, muted)};
+                try batch.textRuns(allocator, cells.detail, detail, &runs, muted, metrics.font_size, cells.detail, metrics.line_height, metrics.fixedAdvance());
+            }
+            if (cells.chevron.w > 0.0) try self.renderChevron(allocator, batch, cells.chevron, config.chevron_icon);
+        }
+
+        // Strip chip: small muted `[icon] label` text control under the
+        // frame, with a hover lift only (no resting fill).
+        fn renderStripChip(self: *const Component, allocator: std.mem.Allocator, batch: *draw.RenderBatch, rect: draw.Rect, label: []const u8, hovered: bool) !void {
+            if (rect.w <= 0.0 or rect.h <= 0.0) return;
+            if (hovered) try batch.panel(allocator, rect, self.style.control_hover_color, null, rect.h * 0.5, 0.0);
+            const metrics = self.stripMetrics();
+            const color = if (hovered) self.style.text_color else self.style.icon_color;
+            const text_rect = self.stripChipTextRect(rect);
+            if (text_rect.w > 0.0) {
+                const runs = [_]draw.TextRun{self.coloredLabelRun(label, 0, label.len, text_rect.x, rect, text_rect, metrics, color)};
+                try batch.textRuns(allocator, rect, label, &runs, color, metrics.font_size, text_rect, metrics.line_height, metrics.fixedAdvance());
+            }
+            if (config.strip_chevron and config.chevron_icon.len > 0) {
+                const cell = self.trailingChevronReserve(config.chevron_icon) - self.scaled(config.pill_chevron_gap);
+                const cell_rect: draw.Rect = .{ .x = rect.x + rect.w - self.stripPadX() - cell, .y = rect.y, .w = cell, .h = rect.h };
+                try self.renderChevron(allocator, batch, clippedRect(rect, cell_rect) orelse cell_rect, config.chevron_icon);
+            }
+        }
+
+        fn renderChevron(self: *const Component, allocator: std.mem.Allocator, batch: *draw.RenderBatch, cell: draw.Rect, icon: []const u8) !void {
+            if (config.chevron_glyph) {
+                try self.renderCenteredIconScaled(allocator, batch, cell, icon, self.style.icon_color, config.chevron_glyph_scale);
+            } else {
+                try renderDisclosureArrow(allocator, batch, cell, self.style.icon_color);
+            }
+        }
+
         fn pillLabelRun(self: *const Component, label: []const u8, byte_start: usize, byte_end: usize, x: f32, rect: draw.Rect, clip: draw.Rect, metrics: text_layout.FontMetrics) draw.TextRun {
+            return self.coloredLabelRun(label, byte_start, byte_end, x, rect, clip, metrics, self.style.text_color);
+        }
+
+        fn coloredLabelRun(self: *const Component, label: []const u8, byte_start: usize, byte_end: usize, x: f32, rect: draw.Rect, clip: draw.Rect, metrics: text_layout.FontMetrics, color: draw.Color) draw.TextRun {
+            _ = self;
             return .{
                 .text = label,
                 .byte_start = byte_start,
@@ -1055,7 +1448,7 @@ pub fn ComposerPrompt(comptime config: ComposerPromptConfig) type {
                 .y = rect.y + @max((rect.h - metrics.line_height) * 0.5, 0.0),
                 .font_size = metrics.font_size,
                 .line_height = metrics.line_height,
-                .color = self.style.text_color,
+                .color = color,
                 .clip = clip,
                 .font_role = config.bold_font_role,
                 .font_id = config.font_id,
@@ -1363,7 +1756,7 @@ pub fn ComposerPrompt(comptime config: ComposerPromptConfig) type {
                     self.hovered_menu_index = null;
                 }
             }
-            if (self.textRect().contains(point)) {
+            if (self.textHitRect().contains(point)) {
                 self.setFocused(true);
                 self.cursor = text_layout.offsetForPoint(self.textLayoutOptions(self.buffer.items, self.style.text_color), point);
                 self.selection_anchor = self.cursor;
@@ -1691,14 +2084,17 @@ pub fn ComposerPrompt(comptime config: ComposerPromptConfig) type {
         }
 
         fn directoryLabel(self: *const Component) []const u8 {
+            if (self.preview_labels.directory) |label| return label;
             return if (self.directory_label_buffer.items.len > 0) self.directory_label_buffer.items else config.directory_label;
         }
 
         fn runtimeLabel(self: *const Component) []const u8 {
+            if (self.preview_labels.runtime) |label| return label;
             return if (self.runtime_label_buffer.items.len > 0) self.runtime_label_buffer.items else config.runtime_label;
         }
 
         fn modelLabel(self: *const Component) []const u8 {
+            if (self.preview_labels.model) |label| return label;
             return if (self.model_label_buffer.items.len > 0) self.model_label_buffer.items else config.model_label;
         }
 
@@ -1954,7 +2350,7 @@ pub fn ComposerPrompt(comptime config: ComposerPromptConfig) type {
             }
         }
 
-        fn toolbarGeometry(self: *const Component) struct {
+        const ToolbarGeometry = struct {
             toolbar: draw.Rect,
             directory: draw.Rect,
             runtime: draw.Rect,
@@ -1963,17 +2359,20 @@ pub fn ComposerPrompt(comptime config: ComposerPromptConfig) type {
             fast: draw.Rect,
             access: draw.Rect,
             send: draw.Rect,
-        } {
+        };
+
+        fn toolbarGeometry(self: *const Component) ToolbarGeometry {
             const toolbar = self.toolbarRect();
             const control_h = @round(@min(toolbar.h, self.scaled(34.0)));
             const y = @round(toolbar.y + (toolbar.h - control_h) * 0.5);
-            const send_size = @round(@min(toolbar.h, self.scaled(38.0)));
+            const send_size = self.sendSize(toolbar.h);
             const send: draw.Rect = snapRect(.{
-                .x = toolbar.x + toolbar.w - send_size - self.scaled(2.0),
+                .x = toolbar.x + toolbar.w - send_size - self.sendOffset(),
                 .y = toolbar.y + (toolbar.h - send_size) * 0.5,
                 .w = send_size,
                 .h = send_size,
             });
+            if (config.merged_model_label) return self.mergedToolbarGeometry(toolbar, y, control_h, send);
             // Extra air before the send control so the rightmost pill is not visually glued to the button.
             const max_x = send.x - self.scaled(config.control_gap) * 2.0;
             const avail_total = @max(max_x - toolbar.x, 0.0);
@@ -2016,33 +2415,9 @@ pub fn ComposerPrompt(comptime config: ComposerPromptConfig) type {
             var directory: draw.Rect = undefined;
             var runtime: draw.Rect = snapRect(.{ .x = toolbar.x + toolbar.w, .y = y, .w = 0.0, .h = control_h });
             if (directory_outside) {
-                // Own strip under the frame: the directory pill leads at its
-                // natural width and the runtime pill trails at the far edge;
-                // the directory pill yields first if both cannot fit.
-                const strip = self.directoryStripRect();
-                const strip_control_h = @round(@min(strip.h, self.scaled(34.0)));
-                const strip_y = @round(strip.y + (strip.h - strip_control_h) * 0.5);
-                var runtime_w: f32 = if (self.show_runtime_toggle)
-                    @min(self.pillWidth(true, 0.0, config.runtime_icon, self.runtimeLabel(), config.chevron_icon, config.runtime_min_width, config.runtime_max_width), strip.w)
-                else
-                    0.0;
-                const runtime_span = if (self.show_runtime_toggle) runtime_w + self.scaled(config.control_gap) else 0.0;
-                const strip_directory_w = @min(directory_w, @max(strip.w - runtime_span, 0.0));
-                if (self.show_runtime_toggle) {
-                    runtime_w = @min(runtime_w, @max(strip.w - strip_directory_w - self.scaled(config.control_gap), 0.0));
-                    runtime = snapRect(.{
-                        .x = strip.x + strip.w - runtime_w,
-                        .y = strip_y,
-                        .w = runtime_w,
-                        .h = strip_control_h,
-                    });
-                }
-                directory = snapRect(.{
-                    .x = strip.x,
-                    .y = strip_y,
-                    .w = strip_directory_w,
-                    .h = strip_control_h,
-                });
+                const strip = self.stripRects(directory_w);
+                directory = strip.directory;
+                runtime = strip.runtime;
             } else if (self.show_directory_toggle) {
                 directory = snapRect(.{ .x = x, .y = y, .w = directory_w, .h = control_h });
                 x += directory_w + self.scaled(config.control_gap);
@@ -2080,6 +2455,215 @@ pub fn ComposerPrompt(comptime config: ComposerPromptConfig) type {
                 .access = access,
                 .send = send,
             };
+        }
+
+        const StripRects = struct { directory: draw.Rect, runtime: draw.Rect };
+
+        /// Controls on the strip under the frame: the directory control
+        /// leads at its natural width and the runtime control trails at the
+        /// far edge; the directory control yields first if both cannot fit.
+        fn stripRects(self: *const Component, pill_directory_w: f32) StripRects {
+            const strip = self.directoryStripRect();
+            const strip_control_h = @round(@min(strip.h, self.scaled(34.0)));
+            const strip_y = @round(strip.y + (strip.h - strip_control_h) * 0.5);
+            const directory_w = if (config.strip_chips)
+                @min(self.stripChipWidth(self.directoryLabel()), self.scaled(config.directory_max_width))
+            else
+                pill_directory_w;
+            const natural_runtime_w: f32 = if (config.strip_chips)
+                @min(self.stripChipWidth(self.runtimeLabel()), self.scaled(config.runtime_max_width))
+            else
+                self.pillWidth(true, 0.0, config.runtime_icon, self.runtimeLabel(), config.chevron_icon, config.runtime_min_width, config.runtime_max_width);
+            var runtime_w: f32 = if (self.show_runtime_toggle) @min(natural_runtime_w, strip.w) else 0.0;
+            const runtime_span = if (self.show_runtime_toggle) runtime_w + self.scaled(config.control_gap) else 0.0;
+            const strip_directory_w = @min(directory_w, @max(strip.w - runtime_span, 0.0));
+            var runtime: draw.Rect = snapRect(.{ .x = strip.x + strip.w, .y = strip_y, .w = 0.0, .h = strip_control_h });
+            if (self.show_runtime_toggle) {
+                runtime_w = @min(runtime_w, @max(strip.w - strip_directory_w - self.scaled(config.control_gap), 0.0));
+                runtime = snapRect(.{
+                    .x = strip.x + strip.w - runtime_w,
+                    .y = strip_y,
+                    .w = runtime_w,
+                    .h = strip_control_h,
+                });
+            }
+            return .{
+                .directory = snapRect(.{ .x = strip.x, .y = strip_y, .w = strip_directory_w, .h = strip_control_h }),
+                .runtime = runtime,
+            };
+        }
+
+        /// Toolbar layout for `merged_model_label`: an optional inline
+        /// directory pill on the left and the merged label flush against the
+        /// send button on the right, split into the `.model` (logo + name)
+        /// and `.reasoning` (detail + chevron) hit halves.
+        fn mergedToolbarGeometry(self: *const Component, toolbar: draw.Rect, y: f32, control_h: f32, send: draw.Rect) ToolbarGeometry {
+            const gap = self.scaled(config.control_gap);
+            var left = toolbar.x;
+            var directory: draw.Rect = snapRect(.{ .x = toolbar.x, .y = y, .w = 0.0, .h = control_h });
+            var runtime: draw.Rect = snapRect(.{ .x = toolbar.x + toolbar.w, .y = y, .w = 0.0, .h = control_h });
+            if (self.show_directory_toggle) {
+                const directory_w = self.pillWidth(true, 0.0, config.directory_icon, self.directoryLabel(), config.chevron_icon, config.directory_min_width, config.directory_max_width);
+                if (self.directoryOutside()) {
+                    const strip = self.stripRects(directory_w);
+                    directory = strip.directory;
+                    runtime = strip.runtime;
+                } else {
+                    directory.w = @round(@min(directory_w, @max(send.x - gap - toolbar.x, 0.0)));
+                    left += directory.w + gap;
+                }
+            }
+            const label_right = @round(send.x - gap);
+            const width = @round(@min(self.mergedLabelNaturalWidth(), @max(label_right - left, 0.0)));
+            const label_x = label_right - width;
+            const layout = self.mergedLabelLayout(width);
+            const split_x = @round(label_x + layout.split);
+            const rest: draw.Rect = snapRect(.{ .x = label_right, .y = y, .w = 0.0, .h = control_h });
+            return .{
+                .toolbar = toolbar,
+                .directory = directory,
+                .runtime = runtime,
+                .model = snapRect(.{ .x = label_x, .y = y, .w = split_x - label_x, .h = control_h }),
+                .reasoning = snapRect(.{ .x = split_x, .y = y, .w = label_right - split_x, .h = control_h }),
+                .fast = rest,
+                .access = rest,
+                .send = send,
+            };
+        }
+
+        const MergedLabelLayout = struct {
+            name_x: f32,
+            name_w: f32,
+            detail_x: f32,
+            detail_w: f32,
+            /// Boundary between the `.model` and `.reasoning` hit halves.
+            split: f32,
+            /// End of the label text area, before the chevron reserve.
+            area_right: f32,
+            chevron_x: f32,
+            chevron_w: f32,
+        };
+
+        /// Offsets (from the label's left edge) of the merged label parts at
+        /// `width`. A short label clips the detail words first, then the name.
+        fn mergedLabelLayout(self: *const Component, width: f32) MergedLabelLayout {
+            const metrics = self.toolbarMetrics();
+            const pad = self.scaled(config.pill_padding_x);
+            const chevron_reserve = self.trailingChevronReserve(config.chevron_icon);
+            const detail = self.mergedDetailLabel();
+            const space_w = if (detail.len > 0) metrics.measureSlice(" ") else 0.0;
+            const area_right = @max(width - pad - chevron_reserve, 0.0);
+            const name_x = pad + self.mergedIconReserve() + self.mergedIconGap();
+            const content = @max(area_right - name_x, 0.0);
+            const name_w = @min(metrics.measureSlice(self.modelLabel()), content);
+            const detail_w = if (detail.len > 0) @min(metrics.measureSlice(detail), @max(content - name_w - space_w, 0.0)) else 0.0;
+            const chevron_w = if (chevron_reserve > 0.0) chevron_reserve - self.scaled(config.pill_chevron_gap) else 0.0;
+            const split = if (!self.show_reasoning_toggle)
+                width
+            else if (detail_w > 0.0)
+                name_x + name_w + space_w * 0.5
+            else
+                area_right;
+            return .{
+                .name_x = name_x,
+                .name_w = name_w,
+                .detail_x = name_x + name_w + space_w,
+                .detail_w = detail_w,
+                .split = split,
+                .area_right = area_right,
+                .chevron_x = width - pad - chevron_w,
+                .chevron_w = chevron_w,
+            };
+        }
+
+        fn mergedLabelNaturalWidth(self: *const Component) f32 {
+            const metrics = self.toolbarMetrics();
+            const detail = self.mergedDetailLabel();
+            const detail_w = if (detail.len > 0) metrics.measureSlice(" ") + metrics.measureSlice(detail) else 0.0;
+            return self.scaled(config.pill_padding_x) * 2.0 + self.mergedIconReserve() + self.mergedIconGap() +
+                metrics.measureSlice(self.modelLabel()) + detail_w +
+                self.pillToolbarLabelSlack(metrics) + self.scaled(config.pill_label_width_fudge) +
+                self.trailingChevronReserve(config.chevron_icon);
+        }
+
+        const MergedLabelCells = struct { name: draw.Rect, detail: draw.Rect, chevron: draw.Rect };
+
+        /// Absolute text/chevron cells of the merged label spanning the
+        /// `.model` and `.reasoning` halves. Text cells run to the chevron
+        /// reserve so measurement rounding never clips the last glyph.
+        fn mergedLabelCells(self: *const Component, model: draw.Rect, reasoning: draw.Rect) MergedLabelCells {
+            const right = if (reasoning.w > 0.0) reasoning.x + reasoning.w else model.x + model.w;
+            const width = @max(right - model.x, 0.0);
+            const layout = self.mergedLabelLayout(width);
+            const area_right = model.x + layout.area_right;
+            const name_x = model.x + layout.name_x;
+            const detail_x = model.x + layout.detail_x;
+            // With detail words the name stops at the hit split so each text
+            // cell stays inside its own half.
+            const name_right = if (layout.detail_w > 0.0) model.x + model.w else area_right;
+            return .{
+                .name = .{ .x = name_x, .y = model.y, .w = if (layout.name_w > 0.0) @max(name_right - name_x, 0.0) else 0.0, .h = model.h },
+                .detail = .{ .x = detail_x, .y = model.y, .w = if (layout.detail_w > 0.0) @max(area_right - detail_x, 0.0) else 0.0, .h = model.h },
+                .chevron = .{ .x = model.x + layout.chevron_x, .y = model.y, .w = layout.chevron_w, .h = model.h },
+            };
+        }
+
+        fn mergedDetailLabel(self: *const Component) []const u8 {
+            if (!self.show_reasoning_toggle) return "";
+            return self.preview_labels.detail orelse self.model_detail_label_buffer.items;
+        }
+
+        fn mergedIconReserve(self: *const Component) f32 {
+            return self.scaled(config.merged_icon_reserve orelse config.pill_overlay_icon_reserve);
+        }
+
+        fn mergedIconGap(self: *const Component) f32 {
+            if (self.mergedIconReserve() <= 0.0) return 0.0;
+            return self.scaled(config.merged_icon_gap orelse config.pill_icon_gap);
+        }
+
+        /// Toolbar metrics resized to `strip_font_size`; the advance callback
+        /// receives the font size, so scaled metrics still measure shaped text.
+        fn stripMetrics(self: *const Component) text_layout.FontMetrics {
+            var metrics = self.toolbarMetrics();
+            const size = config.strip_font_size orelse return metrics;
+            const ratio = size / config.toolbar_font_size;
+            metrics.font_size *= ratio;
+            metrics.line_height *= ratio;
+            if (metrics.fixed_advance) |advance| metrics.fixed_advance = advance * ratio;
+            if (metrics.ascent) |ascent| metrics.ascent = ascent * ratio;
+            if (metrics.descent) |descent| metrics.descent = descent * ratio;
+            if (metrics.baseline) |baseline| metrics.baseline = baseline * ratio;
+            return metrics;
+        }
+
+        fn stripPadX(self: *const Component) f32 {
+            return self.scaled(config.strip_padding_x orelse config.pill_padding_x);
+        }
+
+        fn stripIconReserve(self: *const Component) f32 {
+            return self.scaled(config.strip_icon_reserve orelse config.pill_overlay_icon_reserve);
+        }
+
+        fn stripIconGap(self: *const Component) f32 {
+            if (self.stripIconReserve() <= 0.0) return 0.0;
+            return self.scaled(config.strip_icon_gap orelse config.pill_icon_gap);
+        }
+
+        fn stripChevronReserve(self: *const Component) f32 {
+            return if (config.strip_chevron) self.trailingChevronReserve(config.chevron_icon) else 0.0;
+        }
+
+        fn stripChipWidth(self: *const Component, label: []const u8) f32 {
+            const metrics = self.stripMetrics();
+            // Small slack covers renderer rounding; chips hug their label.
+            const slack = self.scaled(config.pill_label_width_fudge) + metrics.font_size * 0.15;
+            return self.stripPadX() * 2.0 + self.stripIconReserve() + self.stripIconGap() + metrics.measureSlice(label) + slack + self.stripChevronReserve();
+        }
+
+        fn stripChipTextRect(self: *const Component, chip: draw.Rect) draw.Rect {
+            const x = chip.x + self.stripPadX() + self.stripIconReserve() + self.stripIconGap();
+            return .{ .x = x, .y = chip.y, .w = @max(chip.x + chip.w - self.stripPadX() - self.stripChevronReserve() - x, 0.0), .h = chip.h };
         }
 
         fn separatorX(left: draw.Rect, right: draw.Rect) f32 {
@@ -2407,7 +2991,8 @@ test "composer prompt sizes toolbar pills from measured content" {
     const slack = @max(8.0, 14.0 * 0.28) * 1.28;
     const trailing = 3.0 + @max(6.0, @max(16.0 * 0.82, 16.0));
     const expected = 12 * 2 + 6 + 4 + @as(f32, @floatFromInt("GPT-5.5".len)) * 5 + slack + trailing;
-    try std.testing.expectEqual(expected, model.w);
+    // Toolbar rects are pixel-snapped.
+    try std.testing.expectEqual(@round(expected), model.w);
 }
 
 test "composer prompt external menus emit clicks without opening dropdowns" {
@@ -2574,4 +3159,201 @@ test "composer prompt blur clears selection drag and menus" {
     try std.testing.expect(!prompt.dragging_selection);
     try std.testing.expect(prompt.active_menu == null);
     try std.testing.expect(prompt.hovered_menu_index == null);
+}
+
+const InlineTestPrompt = ComposerPrompt(.{
+    .inline_toolbar = true,
+    .merged_model_label = true,
+    .directory_outside = true,
+    .strip_chips = true,
+    .strip_height = 24,
+    .strip_font_size = 12,
+    .strip_icon_reserve = 14,
+    .strip_chevron = false,
+    .font_size = 10,
+    .fixed_advance = 5,
+    .toolbar_fixed_advance = 5,
+    .padding_x = 16,
+    .padding_y = 14,
+    .toolbar_height = 32,
+    .toolbar_gap = 10,
+    .control_gap = 6,
+    .pill_overlay_icon_reserve = 18,
+});
+
+fn initInlineTestPrompt(prompt: *InlineTestPrompt) !void {
+    prompt.setShowDirectoryToggle(true);
+    prompt.setShowRuntimeToggle(true);
+    try prompt.setModelDetailLabel(std.testing.allocator, "High Fast");
+    prompt.setBounds(.{ .x = 0, .y = 0, .w = 600, .h = prompt.preferredHeight(600, false, 1, 10) });
+}
+
+fn setTestRepeated(prompt: *InlineTestPrompt, byte: u8, count: usize) !void {
+    var buf: [256]u8 = undefined;
+    @memset(buf[0..count], byte);
+    try prompt.setText(std.testing.allocator, buf[0..count]);
+}
+
+fn expectRectInside(inner: draw.Rect, outer: draw.Rect) !void {
+    try std.testing.expect(inner.x >= outer.x and inner.y >= outer.y);
+    try std.testing.expect(inner.x + inner.w <= outer.x + outer.w and inner.y + inner.h <= outer.y + outer.h);
+}
+
+test "composer prompt inline bar lays text and cluster on one row without overlap" {
+    var prompt = InlineTestPrompt.init();
+    defer prompt.deinit(std.testing.allocator);
+    try initInlineTestPrompt(&prompt);
+
+    try std.testing.expect(prompt.inlineActive());
+    // Bar = toolbar row + padding_y; strip = strip_height + toolbar_gap.
+    try std.testing.expectEqual(@as(f32, 80.0), prompt.bounds().h);
+    const frame = prompt.frameRect();
+    try std.testing.expectEqual(@as(f32, 46.0), frame.h);
+    try std.testing.expectEqual(@as(f32, 22.0), prompt.cornerRadius());
+
+    const text_rect = prompt.textRect();
+    const model = prompt.modelRect();
+    const reasoning = prompt.reasoningRect();
+    const send = prompt.sendButtonRect();
+    try expectRectInside(text_rect, frame);
+    try expectRectInside(model, frame);
+    try expectRectInside(send, frame);
+    try std.testing.expect(text_rect.x + text_rect.w <= model.x);
+    try std.testing.expectEqual(model.x + model.w, reasoning.x);
+    try std.testing.expect(reasoning.x + reasoning.w <= send.x);
+    try std.testing.expect(reasoning.w > 0.0);
+    // Text and controls share one vertical centre (within pixel snapping).
+    try std.testing.expect(@abs(frame.y + frame.h * 0.5 - (text_rect.y + text_rect.h * 0.5)) <= 1.0);
+    try std.testing.expectEqual(frame.y + frame.h * 0.5, send.y + send.h * 0.5);
+
+    // Strip chips sit under the frame at the configured strip height.
+    const strip = prompt.directoryStripRect();
+    try std.testing.expectEqual(@as(f32, 24.0), strip.h);
+    try std.testing.expect(strip.y >= frame.y + frame.h);
+    try expectRectInside(prompt.directoryRect(), strip);
+    try expectRectInside(prompt.runtimeRect(), strip);
+    try std.testing.expect(prompt.directoryRect().x + prompt.directoryRect().w < prompt.runtimeRect().x);
+
+    // The caret sits inside the inline column.
+    try prompt.setText(std.testing.allocator, "hello");
+    try expectRectInside(prompt.cursorRect(), prompt.textRect());
+}
+
+test "composer prompt stacks when the draft outgrows the inline column without oscillating" {
+    var prompt = InlineTestPrompt.init();
+    defer prompt.deinit(std.testing.allocator);
+    try initInlineTestPrompt(&prompt);
+    const inline_frame = prompt.frameRect();
+    const inline_send = prompt.sendButtonRect();
+    const inline_text_w = prompt.textRect().w;
+    const fit_count: usize = @intFromFloat(@floor(inline_text_w / 5.0));
+
+    // Exactly filling the inline column stays inline at the bar height.
+    try setTestRepeated(&prompt, 'a', fit_count);
+    try std.testing.expect(prompt.inlineActive());
+    try std.testing.expectEqual(@as(f32, 80.0), prompt.preferredHeight(600, false, 1, 10));
+
+    // One more glyph stacks, both at the old bar height and after the host
+    // resizes to the stacked preferred height.
+    try setTestRepeated(&prompt, 'a', fit_count + 1);
+    try std.testing.expect(!prompt.inlineActive());
+    const stacked_h = prompt.preferredHeight(600, false, 1, 10);
+    try std.testing.expect(stacked_h > 80.0);
+    prompt.setBounds(.{ .x = 0, .y = 80 - stacked_h, .w = 600, .h = stacked_h });
+    try std.testing.expect(!prompt.inlineActive());
+    try std.testing.expectEqual(stacked_h, prompt.preferredHeight(600, false, 1, 10));
+    try std.testing.expectEqual(@as(f32, 14.0), prompt.cornerRadius());
+
+    // Full-width text over a toolbar row that keeps the inline insets.
+    const frame = prompt.frameRect();
+    const text_rect = prompt.textRect();
+    const send = prompt.sendButtonRect();
+    try std.testing.expectEqual(frame.w - 32.0, text_rect.w);
+    try std.testing.expect(text_rect.y + text_rect.h <= prompt.toolbarRect().y);
+    try std.testing.expectEqual(inline_frame.y + inline_frame.h - (inline_send.y + inline_send.h), frame.y + frame.h - (send.y + send.h));
+    try std.testing.expectEqual(inline_frame.x + inline_frame.w - (inline_send.x + inline_send.w), frame.x + frame.w - (send.x + send.w));
+    try std.testing.expectEqual(prompt.modelRect().y + prompt.modelRect().h * 0.5, send.y + send.h * 0.5);
+    try expectRectInside(prompt.cursorRect(), text_rect);
+
+    // Deleting back under the limit returns to inline at any bounds height.
+    try setTestRepeated(&prompt, 'a', fit_count);
+    try std.testing.expect(prompt.inlineActive());
+    prompt.setBounds(.{ .x = 0, .y = 0, .w = 600, .h = prompt.preferredHeight(600, false, 1, 10) });
+    try std.testing.expect(prompt.inlineActive());
+
+    // A newline always stacks, even for a short draft.
+    try prompt.setText(std.testing.allocator, "a\nb");
+    try std.testing.expect(!prompt.inlineActive());
+}
+
+test "composer prompt placeholder never forces the stacked layout" {
+    var prompt = InlineTestPrompt.init();
+    defer prompt.deinit(std.testing.allocator);
+    try initInlineTestPrompt(&prompt);
+    var long_placeholder: [240]u8 = undefined;
+    @memset(&long_placeholder, 'p');
+    try prompt.setPlaceholder(std.testing.allocator, &long_placeholder);
+
+    try std.testing.expect(prompt.inlineActive());
+    try std.testing.expectEqual(@as(f32, 80.0), prompt.preferredHeight(600, false, 1, 10));
+    try std.testing.expectEqual(@as(f32, 80.0), prompt.preferredHeight(600, true, 1, 10));
+
+    // Previews ignore the live draft and mirror preferredHeight(empty).
+    try setTestRepeated(&prompt, 'a', 200);
+    try std.testing.expect(!prompt.inlineActive());
+    const preview = prompt.previewGeometry(.{ .x = 10, .y = 20, .w = 600, .h = 80 }, .{ .model = "Other model", .detail = "Low" });
+    try std.testing.expect(preview.inline_active);
+    try std.testing.expectEqual(@as(f32, 46.0), preview.frame.h);
+    try std.testing.expect(preview.text.x + preview.text.w <= preview.model.x);
+    try std.testing.expect(preview.model_text.w > 0.0 and preview.detail_text.w > 0.0);
+    try std.testing.expect(!prompt.inlineActive());
+
+    // Too narrow for the minimum inline column: always stacked.
+    try std.testing.expect(!prompt.previewGeometry(.{ .x = 0, .y = 0, .w = 300, .h = 120 }, .{}).inline_active);
+}
+
+test "composer prompt merged label maps name to model and detail to reasoning" {
+    var prompt = InlineTestPrompt.init();
+    defer prompt.deinit(std.testing.allocator);
+    try initInlineTestPrompt(&prompt);
+    const layout = prompt.layoutGeometry();
+
+    try expectRectInside(layout.model_text, layout.model);
+    try std.testing.expect(layout.detail_text.x >= layout.reasoning.x);
+    try std.testing.expect(layout.chevron.x >= layout.reasoning.x);
+    try expectRectInside(layout.model_icon, layout.model);
+    try std.testing.expectEqual(@as(f32, 18.0), layout.model_icon.w);
+    try std.testing.expectEqual(@as(f32, 14.0), layout.directory_icon.w);
+    try std.testing.expect(layout.directory_text.x > layout.directory_icon.x + layout.directory_icon.w);
+    try std.testing.expectEqual(@as(usize, 0), prompt.reasoningIconSlotRects().count);
+
+    const name_point: draw.Vec2 = .{ .x = layout.model_text.x + 2, .y = layout.model_text.y + layout.model_text.h * 0.5 };
+    const detail_point: draw.Vec2 = .{ .x = layout.detail_text.x + 2, .y = layout.detail_text.y + layout.detail_text.h * 0.5 };
+    try std.testing.expectEqual(@as(?ComposerPromptPart, .model), prompt.hitTest(name_point));
+    try std.testing.expectEqual(@as(?ComposerPromptPart, .reasoning), prompt.hitTest(detail_point));
+    try std.testing.expect(try prompt.handleInput(std.testing.allocator, .{ .mouse_down = detail_point }));
+    try std.testing.expect(prompt.active_menu == .reasoning);
+    try std.testing.expect(try prompt.handleInput(std.testing.allocator, .{ .mouse_down = name_point }));
+    try std.testing.expect(prompt.active_menu == .model);
+
+    // Without detail words the chevron alone opens run settings.
+    try prompt.setModelDetailLabel(std.testing.allocator, "");
+    const bare = prompt.layoutGeometry();
+    try std.testing.expectEqual(@as(f32, 0.0), bare.detail_text.w);
+    try std.testing.expect(bare.reasoning.w > 0.0);
+    try std.testing.expectEqual(@as(?ComposerPromptPart, .reasoning), prompt.hitTest(.{ .x = bare.chevron.x + 1, .y = bare.chevron.y + 2 }));
+
+    // Rendering emits the muted detail run.
+    try prompt.setModelDetailLabel(std.testing.allocator, "High");
+    var batch: draw.RenderBatch = .{};
+    defer batch.deinit(std.testing.allocator);
+    try prompt.render(std.testing.allocator, &batch);
+    var detail_runs: usize = 0;
+    for (batch.commands.items) |command| {
+        if (command.kind != .text) continue;
+        for (command.text_runs) |run| {
+            if (std.mem.eql(u8, run.text[run.byte_start..run.byte_end], "High")) detail_runs += 1;
+        }
+    }
+    try std.testing.expectEqual(@as(usize, 1), detail_runs);
 }

@@ -2291,7 +2291,10 @@ pub const PaletteModalTextFocus = enum {
 /// the transcript's bubble body text keys off it (`chat_panel.zig`) so the
 /// prompt box and the chat thread always read at the same size.
 pub const PALETTE_COMPOSER_FONT_SIZE: f32 = 18.0;
-const PALETTE_COMPOSER_TOOLBAR_FONT_SIZE: f32 = 16.0;
+/// Toolbar label and strip chip sizes; public so the unfocused-pane preview
+/// in `chat_panel.zig` draws its labels at the live composer's sizes.
+pub const PALETTE_COMPOSER_TOOLBAR_FONT_SIZE: f32 = 16.0;
+pub const PALETTE_COMPOSER_STRIP_FONT_SIZE: f32 = 13.0;
 const PALETTE_COMPOSER_ICON_FONT_SIZE: f32 = 18.0;
 const PALETTE_COMPOSER_TEXT_ADVANCE_SCALE: f32 = 1.0;
 
@@ -2319,6 +2322,8 @@ fn paletteComposerStyle() PaletteComposerPrompt.Style {
         .text_color = paletteColor(theme.COLOR_WHITE),
         .placeholder_color = paletteColor(theme.withAlpha(theme.COLOR_TEXT_SUBTLE, 220)),
         .icon_color = paletteColor(theme.COLOR_TEXT_MUTED),
+        // Variant words ("High Fast") after the model name.
+        .muted_text_color = paletteColor(theme.COLOR_TEXT_SUBTLE),
         .cursor_color = paletteColor(theme.COLOR_WHITE),
         .selection_color = paletteColor(theme.withAlpha(theme.selection(), 140)),
         .scrollbar_track_color = paletteColor(theme.withAlpha(theme.COLOR_PANEL_MUTED, 110)),
@@ -2372,6 +2377,24 @@ pub const PaletteComposerPrompt = palette.composerPrompt(.{
     .directory_outside = true,
     .toolbar_gap = 10.0,
     .control_gap = 6.0,
+    // Single slim bar while the draft fits one line: prompt text on the left,
+    // one merged ghost model label ([logo] Model detail ⌄) plus the round
+    // send button on the right. Longer drafts stack the text above that row.
+    .inline_toolbar = true,
+    .merged_model_label = true,
+    // Small provider logo in the merged label (drawn by the host in
+    // `leadingIconRect(.model)`), with a text-sized gap before the name.
+    .merged_icon_reserve = 18.0,
+    .merged_icon_gap = 7.0,
+    // Directory / runtime render as small muted text chips on the strip
+    // under the bar; their glyphs are host-drawn in `leadingIconRect`.
+    .strip_chips = true,
+    .strip_height = 24.0,
+    .strip_font_size = PALETTE_COMPOSER_STRIP_FONT_SIZE,
+    .strip_padding_x = 6.0,
+    .strip_icon_reserve = 14.0,
+    .strip_icon_gap = 5.0,
+    .strip_chevron = false,
     .pill_padding_x = 13.0,
     // `pill_overlay_icon_reserve + pill_icon_gap` must clear the host-drawn
     // toolbar icon AND leave breathing room at 1× display scale. Provider
@@ -2391,10 +2414,8 @@ pub const PaletteComposerPrompt = palette.composerPrompt(.{
     // Long OpenCode labels include the provider, e.g. "GPT-5.4 (OpenAI)"; cap high enough for measured pill width.
     .model_max_width = 270.0,
     .reasoning_min_width = 74.0,
-    // The run pill now shows a "Reasoning · Speed · Access" summary, so it
-    // needs far more room than the old single reasoning label.
-    // Wide enough for the summary text plus three embedded state-glyph cells
-    // (COMPOSER_RUN_PILL_ICON_CELL each).
+    // Separate run pill caps; unused while `merged_model_label` draws the
+    // run settings as muted detail words after the model name.
     .reasoning_max_width = 360.0,
     .fast_min_width = 80.0,
     .fast_max_width = 180.0,
@@ -2514,12 +2535,6 @@ pub const CompanionComposerPrompt = palette.composerPrompt(.{
 
 // CSS-unit width of the composer model picker popover; the component scales it
 // (and every other geometry token) by `setUiScale` for HiDPI displays.
-/// Width reserved per host-drawn state glyph embedded in the run pill's
-/// summary, beside the segment it describes (brain / bolt / lock, ~22px
-/// drawn, centered). The ~8px spare splits into the word-side and
-/// separator-side gaps, so widening this spaces the glyph away from both
-/// neighbors; mirrors the sizing convention of `pill_overlay_icon_reserve`.
-pub const COMPOSER_RUN_PILL_ICON_CELL: f32 = 30.0;
 const COMPOSER_MODEL_PICKER_WIDTH: f32 = 430.0;
 /// Width of the provider-icon rail on the picker's left edge; the popover's
 /// total width is body + rail.
@@ -12337,9 +12352,8 @@ pub const AppState = struct {
             log.warn("failed to refresh OpenCode reasoning menu: {s}", .{@errorName(err)});
             self.clearOpencodeReasoningMenu();
         };
-        // The run pill (former reasoning pill) is always visible: it anchors
-        // the run-config popover and summarizes reasoning / speed / access.
-        // Its option list stays un-synced on purpose — the built-in dropdown
+        // The run half of the merged model label (detail words + chevron)
+        // is always visible: it anchors the run-config popover. Its option list stays un-synced on purpose — the built-in dropdown
         // is disabled via setExternalReasoningMenu and the run-config steppers
         // own the reasoning data instead.
         self.composer_controller.composer.setShowReasoningToggle(true);
@@ -12354,71 +12368,28 @@ pub const AppState = struct {
                 };
             }
         }
-        // Sized for a worst-case dynamic reasoning-variant label plus both
-        // fixed segments; overflow degrades to a truncated summary.
-        var summary_buf: [192]u8 = undefined;
-        const run_summary = self.composerRunSummaryParts(&summary_buf);
-        self.composer_controller.composer.setReasoningLabel(self.allocator, run_summary.text) catch |err| {
-            log.warn("failed to sync palette composer run summary label: {s}", .{@errorName(err)});
+        // The merged model label shows the variant words after the model
+        // name; clicking them opens the run-config popover (the `.reasoning`
+        // half). Access stays in the popover only.
+        var detail_buf: [128]u8 = undefined;
+        self.composer_controller.composer.setModelDetailLabel(self.allocator, self.composerModelDetailText(&detail_buf)) catch |err| {
+            log.warn("failed to sync palette composer model detail label: {s}", .{@errorName(err)});
         };
-        // Host-drawn state glyphs sit inside the run pill label after the
-        // word each one describes — brain after the reasoning segment,
-        // bolt/circle after speed, lock after access (drawn in
-        // chat_panel.renderComposerToolbarIcons).
-        var run_slots: [3]palette.ComposerPromptIconSlot = undefined;
-        var run_slot_count: usize = 0;
-        if (run_summary.reasoning_offset) |offset| {
-            run_slots[run_slot_count] = .{ .byte_offset = offset, .width = COMPOSER_RUN_PILL_ICON_CELL };
-            run_slot_count += 1;
-        }
-        if (run_summary.fast_offset) |offset| {
-            run_slots[run_slot_count] = .{ .byte_offset = offset, .width = COMPOSER_RUN_PILL_ICON_CELL };
-            run_slot_count += 1;
-        }
-        run_slots[run_slot_count] = .{ .byte_offset = run_summary.access_offset, .width = COMPOSER_RUN_PILL_ICON_CELL };
-        run_slot_count += 1;
-        self.composer_controller.composer.setReasoningIconSlots(run_slots[0..run_slot_count]);
         if (self.composer_controller.run_config_open) self.syncRunConfigSteppers();
     }
 
-    /// Run-config summary text plus the byte offsets of the speed and access
-    /// segments, so `syncPaletteComposerControls` can pin each host-drawn state
-    /// glyph beside the word it describes on the run pill. Offsets point at the
-    /// end of each segment: the glyph trails its word so it cannot read as
-    /// belonging to the preceding segment (e.g. the bolt hugging "High ·").
-    pub const ComposerRunSummary = struct {
-        text: []const u8,
-        /// End of the reasoning segment; null when the provider has no
-        /// reasoning levels.
-        reasoning_offset: ?usize = null,
-        /// End of the speed segment; null when the provider has no speed tier.
-        fast_offset: ?usize = null,
-        /// End of the access segment (always present in the summary).
-        access_offset: usize = 0,
-    };
-
-    /// Compact " · "-joined summary of the run settings (reasoning, speed,
-    /// access) shown on the composer run pill and the inactive preview pill.
-    pub fn composerRunSummaryParts(self: *const AppState, buf: []u8) ComposerRunSummary {
+    /// Space-joined variant words (reasoning level, "Fast" when fast mode is
+    /// on) shown muted after the model name in the composer's merged label.
+    pub fn composerModelDetailText(self: *const AppState, buf: []u8) []const u8 {
         var writer: std.Io.Writer = .fixed(buf);
-        var result: ComposerRunSummary = .{ .text = "" };
-        var wrote_any = false;
         if (self.currentComposerShowsReasoningSegment()) {
             writer.writeAll(self.currentComposerReasoningLabel()) catch {};
-            result.reasoning_offset = writer.buffered().len;
-            wrote_any = true;
         }
-        if (self.currentComposerShowsFastToggle()) {
-            if (wrote_any) writer.writeAll(" · ") catch {};
+        if (self.currentComposerShowsFastToggle() and self.currentThread().fast_mode == .on) {
+            if (writer.buffered().len > 0) writer.writeAll(" ") catch {};
             writer.writeAll(self.currentComposerFastLabel()) catch {};
-            result.fast_offset = writer.buffered().len;
-            wrote_any = true;
         }
-        if (wrote_any) writer.writeAll(" · ") catch {};
-        writer.writeAll(self.currentComposerAccessLabel()) catch {};
-        result.access_offset = writer.buffered().len;
-        result.text = writer.buffered();
-        return result;
+        return writer.buffered();
     }
 
     pub fn syncPaletteModelPicker(self: *AppState) void {
@@ -12617,7 +12588,7 @@ pub const AppState = struct {
         return null;
     }
 
-    fn directoryPillLabel(self: *AppState, cwd: []const u8) []const u8 {
+    pub fn directoryPillLabel(self: *AppState, cwd: []const u8) []const u8 {
         // Managed workspaces live under opaque `workspace-<id>` directories;
         // show the workspace's name rather than that basename.
         if (self.openWorkspaceLabelForPath(cwd)) |label| return label;
@@ -12807,7 +12778,7 @@ pub const AppState = struct {
         return null;
     }
 
-    fn currentRuntimePickerLabel(self: *const AppState) []const u8 {
+    pub fn currentRuntimePickerLabel(self: *const AppState) []const u8 {
         const profile_id = self.currentThread().selectedRuntimeRoute().profile_id;
         if (std.mem.eql(u8, profile_id, chat_types.LOCAL_RUNTIME_PROFILE_ID)) return "Local";
         const service = self.runtime_service orelse return "Runtime unavailable";
