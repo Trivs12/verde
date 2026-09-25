@@ -338,7 +338,7 @@ Main third-party pieces used by the desktop app:
 - `zqlite` — SQLite access (MIT-style)
 - `zig_dif` / `zig_markdown` — chat markdown and code rendering
 - `stb_image` — image decoding ([`vendor/stb_image.h`](vendor/stb_image.h))
-- Font assets (Codicon, Nerd Fonts, Noto Sans, JetBrains Mono Nerd Font, Cal Sans) — see [`packages/desktop/src/assets/fonts`](packages/desktop/src/assets/fonts)
+- Font assets (Codicon, Nerd Fonts, Noto Sans, JetBrains Mono Nerd Font, Cal Sans, Inter, Geist, IBM Plex; SIL OFL 1.1) — see [`packages/desktop/src/assets/fonts`](packages/desktop/src/assets/fonts)
 
 If you redistribute Verde, keep the relevant upstream notices with the distributed app and vendored source.
 

@@ -3090,7 +3090,7 @@ fn buildSelectableCodeLinesWithWrap(
                 const take = @min(remaining.len, room);
                 const slice = remaining[0..take];
                 const slice_cols = countColumns(slice);
-                const slice_width = transcriptTextWidthForRole(codeFontSize(options), .mono, slice);
+                const slice_width = transcriptTextWidthForRole(codeFontSize(options), .code, slice);
                 try chunks.append(allocator, .{
                     .text = slice,
                     .token_kind = token.kind,
@@ -3149,7 +3149,7 @@ fn hoveredColumnForCodeLine(line: SelectableCodeLine, local_x: f32, options: Ren
 
         const chunk_end_x = chunk.x + chunk.width;
         if (x <= chunk_end_x) {
-            return chunk.start_column + columnForX(codeFontSize(options), .mono, chunk.text, x - chunk.x);
+            return chunk.start_column + columnForX(codeFontSize(options), .code, chunk.text, x - chunk.x);
         }
 
         previous_end_x = chunk_end_x;
@@ -3196,8 +3196,8 @@ fn renderSelectableCodeLine(
                     const chunk_end = @min(columns.end, chunk.end_column);
                     if (chunk_start >= chunk_end) continue;
 
-                    const x0 = start[0] + chunk.x + textWidthForColumns(codeFontSize(options), .mono, chunk.text, chunk_start - chunk.start_column);
-                    const x1 = start[0] + chunk.x + textWidthForColumns(codeFontSize(options), .mono, chunk.text, chunk_end - chunk.start_column);
+                    const x0 = start[0] + chunk.x + textWidthForColumns(codeFontSize(options), .code, chunk.text, chunk_start - chunk.start_column);
+                    const x1 = start[0] + chunk.x + textWidthForColumns(codeFontSize(options), .code, chunk.text, chunk_end - chunk.start_column);
                     if (x1 > x0) {
                         const chunk_top = top + chunk.y_offset;
                         queuePaletteRoundedRect(context, .{ .x = x0, .y = chunk_top, .w = x1 - x0, .h = lh }, selection_col, 2.0);
@@ -3227,7 +3227,7 @@ fn renderSelectableCodeLine(
             .y = top + chunk.y_offset,
             .w = @max(clip.x + clip.w - (start[0] + chunk.x), 1.0),
             .h = lh,
-        }, chunk.text, paletteColor(codeTokenColor(chunk.token_kind)), codeFontSize(options), .mono, clip);
+        }, chunk.text, paletteColor(codeTokenColor(chunk.token_kind)), codeFontSize(options), .code, clip);
     }
 }
 
@@ -3498,13 +3498,13 @@ fn renderPaletteCodeLine(context: *PaletteRenderContext, line: CodeLineView, lay
             }
             const take = utf8PrefixByteLenForColumns(remaining, room);
             const slice = remaining[0..take];
-            const slice_width = transcriptTextWidthForRole(code_fs, .mono, slice);
+            const slice_width = transcriptTextWidthForRole(code_fs, .code, slice);
             queuePaletteRoleText(context, .{
                 .x = cursor_x,
                 .y = cursor_y,
                 .w = @max(layout.max_x - cursor_x, 1.0),
                 .h = lh,
-            }, slice, color, code_fs, .mono, clip);
+            }, slice, color, code_fs, .code, clip);
             cursor_x += slice_width;
             col_on_row += utf8ColumnCount(slice);
             remaining = remaining[take..];
@@ -3645,12 +3645,13 @@ fn isInlineWhitespace(byte: u8) bool {
 }
 
 /// Map a markdown block + inline style to the Palette FontRole that should
-/// render it. Chat headings stay on the default UI face (CalSans) so they read
-/// as part of the same design language as the surrounding chrome. Body prose
-/// drops to NotoSans-Regular; strong/italic emphasis selects the matching Noto
-/// weight; inline code switches to mono.
+/// render it. Chat headings stay on the chrome face (`.ui`, CalSans in Verde
+/// Classic) so they read as part of the same design language as the
+/// surrounding chrome. Body prose uses the family's prose face; strong/italic
+/// emphasis selects the matching weight; inline code switches to the family's
+/// code face.
 fn markdownFontRole(block_style: TextStyle, inline_style: InlineStyle) palette.FontRole {
-    if (inline_style.code) return .mono;
+    if (inline_style.code) return .code;
     switch (block_style) {
         .heading_1, .heading_2, .heading_3, .heading_4, .heading_5, .heading_6 => return .ui,
         else => {},
@@ -3802,10 +3803,10 @@ fn codeBlockTextWidth(available_width: f32, options: RenderOptions) f32 {
     return @max(usable - codeBlockPaddingX(options) * 2.0, 1.0);
 }
 
-/// Mono char width at the current code font size. JetBrainsMono is monospaced
-/// so a single 'M' advance is representative.
+/// Mono char width at the current code font size. Every family's code face is
+/// monospaced, so a single 'M' advance is representative.
 fn codeCharWidth(options: RenderOptions) f32 {
-    return text_measure.textWidth(.mono, codeFontSize(options), "M");
+    return text_measure.textWidth(.code, codeFontSize(options), "M");
 }
 
 /// Number of visual rows a single logical code line occupies after soft-wrap.
@@ -3924,16 +3925,16 @@ fn queuePaletteRoleText(
     // scrolled mostly offscreen does not pay per-line text cost every frame.
     if (visibleClipRect(clip, rect) == null) return;
     const stable = stablePaletteText(context, value) catch return;
-    // Palette renders `.mono` text through fixed cells; use the measured mono
+    // Palette renders `.code` text through fixed cells; use the measured code
     // advance so code layout and glyph placement do not drift apart.
-    if (font_role == .mono) {
+    if (font_role == .code) {
         context.batch.fixedRoleText(
             context.allocator,
             rect,
             stable,
             color,
             font_size,
-            .mono,
+            .code,
             null,
             clip,
             .{},
@@ -3956,7 +3957,7 @@ fn queuePaletteRoleText(
 }
 
 fn monoGlyphWidth(font_size: f32) f32 {
-    return @max(text_measure.textWidth(.mono, font_size, "M"), font_size * 0.45);
+    return @max(text_measure.textWidth(.code, font_size, "M"), font_size * 0.45);
 }
 
 fn stablePaletteText(context: *PaletteRenderContext, value: []const u8) ![]const u8 {

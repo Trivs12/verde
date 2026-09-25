@@ -405,6 +405,26 @@ pub fn ttfOpenFont(path: [:0]const u8, point_size: f32) Error!*Font {
     return TTF_OpenFont(path.ptr, point_size) orelse error.SdlError;
 }
 
+/// Opens one face of a font file. `face_index` follows FreeType: the low 16
+/// bits pick a face in a collection and bits 16-30 pick a variable font's
+/// named instance (1-based), so `(3 << 16)` is the third named instance.
+pub fn ttfOpenFontFace(path: [:0]const u8, point_size: f32, face_index: i64) Error!*Font {
+    if (face_index == 0) return ttfOpenFont(path, point_size);
+    const props = SDL_CreateProperties();
+    if (props == 0) return error.SdlError;
+    defer SDL_DestroyProperties(props);
+    if (!SDL_SetStringProperty(props, "SDL_ttf.font.create.filename", path.ptr)) return error.SdlError;
+    if (!SDL_SetFloatProperty(props, "SDL_ttf.font.create.size", point_size)) return error.SdlError;
+    if (!SDL_SetNumberProperty(props, "SDL_ttf.font.create.face", face_index)) return error.SdlError;
+    return TTF_OpenFontWithProperties(props) orelse error.SdlError;
+}
+
+/// Style name of the opened face (for example "Semibold"), or "" when unknown.
+pub fn ttfFontStyleName(font: *Font) []const u8 {
+    const name = TTF_GetFontStyleName(font) orelse return "";
+    return std.mem.span(name);
+}
+
 pub const ttfCloseFont = TTF_CloseFont;
 
 pub fn ttfSetFontSize(font: *Font, point_size: f32) Error!void {
@@ -516,6 +536,13 @@ extern fn TTF_Init() bool;
 extern fn TTF_Quit() void;
 extern fn TTF_OpenFont(file: [*:0]const u8, ptsize: f32) ?*Font;
 extern fn TTF_CloseFont(font: *Font) void;
+extern fn TTF_OpenFontWithProperties(props: u32) ?*Font;
+extern fn TTF_GetFontStyleName(font: *const Font) ?[*:0]const u8;
+extern fn SDL_CreateProperties() u32;
+extern fn SDL_DestroyProperties(props: u32) void;
+extern fn SDL_SetStringProperty(props: u32, name: [*:0]const u8, value: [*:0]const u8) bool;
+extern fn SDL_SetFloatProperty(props: u32, name: [*:0]const u8, value: f32) bool;
+extern fn SDL_SetNumberProperty(props: u32, name: [*:0]const u8, value: i64) bool;
 extern fn TTF_SetFontSize(font: *Font, ptsize: f32) bool;
 extern fn TTF_GetStringSize(font: *Font, text: [*]const u8, length: usize, w: *c_int, h: *c_int) bool;
 extern fn TTF_GetFontAscent(font: *Font) c_int;

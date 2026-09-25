@@ -154,10 +154,13 @@ pub const Renderer = struct {
     text_engine: ?*c.TTF_TextEngine = null,
     font: ?*c.TTF_Font = null,
     ui_font: ?*c.TTF_Font = null,
+    ui_medium_font: ?*c.TTF_Font = null,
+    ui_bold_font: ?*c.TTF_Font = null,
     prose_font: ?*c.TTF_Font = null,
     prose_italic_font: ?*c.TTF_Font = null,
     prose_bold_italic_font: ?*c.TTF_Font = null,
     mono_font: ?*c.TTF_Font = null,
+    code_font: ?*c.TTF_Font = null,
     icon_font: ?*c.TTF_Font = null,
     mono_symbols_font: ?*c.TTF_Font = null,
     symbols_font: ?*c.TTF_Font = null,
@@ -491,6 +494,10 @@ pub const Renderer = struct {
         prose_bold_italic: *sdl.Font,
         mono: ?*sdl.Font,
         icon: ?*sdl.Font,
+        /// Null aliases `ui_medium` to `ui`.
+        ui_medium: ?*sdl.Font = null,
+        /// Null aliases `code` to `mono`.
+        code: ?*sdl.Font = null,
         mono_symbols: ?*sdl.Font = null,
         symbols: ?*sdl.Font = null,
         symbols_alt: ?*sdl.Font = null,
@@ -500,18 +507,7 @@ pub const Renderer = struct {
 
     pub fn configureGpuTextWithAllRoleFonts(self: *Renderer, role_fonts: RoleFonts) !void {
         const device = self.device orelse return error.SdlGpuCreateDeviceFailed;
-        self.font = @ptrCast(role_fonts.prose_bold);
-        self.ui_font = @ptrCast(role_fonts.ui);
-        self.prose_font = @ptrCast(role_fonts.prose);
-        self.prose_italic_font = @ptrCast(role_fonts.prose_italic);
-        self.prose_bold_italic_font = @ptrCast(role_fonts.prose_bold_italic);
-        self.mono_font = if (role_fonts.mono) |fallback| @ptrCast(fallback) else null;
-        self.icon_font = if (role_fonts.icon) |fallback| @ptrCast(fallback) else null;
-        self.mono_symbols_font = if (role_fonts.mono_symbols) |fallback| @ptrCast(fallback) else null;
-        self.symbols_font = if (role_fonts.symbols) |fallback| @ptrCast(fallback) else null;
-        self.symbols_alt_font = if (role_fonts.symbols_alt) |fallback| @ptrCast(fallback) else null;
-        self.math_font = if (role_fonts.math) |fallback| @ptrCast(fallback) else null;
-        self.emoji_font = if (role_fonts.emoji) |fallback| @ptrCast(fallback) else null;
+        self.assignRoleFonts(role_fonts);
         self.text_engine = c.TTF_CreateGPUTextEngine(device) orelse return error.SdlTtfGpuTextEngineFailed;
         c.TTF_SetGPUTextEngineWinding(self.text_engine.?, c.TTF_GPU_TEXTENGINE_WINDING_COUNTER_CLOCKWISE);
         self.sampler = c.SDL_CreateGPUSampler(device, &.{
@@ -538,6 +534,49 @@ pub const Renderer = struct {
             .padding2 = 0,
             .props = 0,
         }) orelse return error.SdlGpuSamplerFailed;
+    }
+
+    /// Swaps the base role fonts after GPU text is configured (for example a
+    /// UI font-family change). Every cached shaped text, sized font copy and
+    /// glyph atlas references the old faces, so this waits for the GPU to go
+    /// idle, drops all of them and recreates the text engine before the new
+    /// faces are installed. The caller keeps ownership of both font sets and
+    /// may close the previous one once this returns.
+    pub fn replaceGpuTextRoleFonts(self: *Renderer, role_fonts: RoleFonts) !void {
+        const device = self.device orelse return error.SdlGpuCreateDeviceFailed;
+        // Fallible steps first so a failure leaves the current fonts intact.
+        const engine = c.TTF_CreateGPUTextEngine(device) orelse return error.SdlTtfGpuTextEngineFailed;
+        if (!c.SDL_WaitForGPUIdle(device)) {
+            c.TTF_DestroyGPUTextEngine(engine);
+            return error.SdlGpuWaitIdleFailed;
+        }
+        c.TTF_SetGPUTextEngineWinding(engine, c.TTF_GPU_TEXTENGINE_WINDING_COUNTER_CLOCKWISE);
+        self.clearTextCache();
+        for (self.retired_text_caches.items) |*retired| retired.deinit();
+        self.retired_text_caches.clearRetainingCapacity();
+        self.text_cache_eviction_pending = false;
+        self.clearFontCache();
+        if (self.text_engine) |previous| c.TTF_DestroyGPUTextEngine(previous);
+        self.text_engine = engine;
+        self.assignRoleFonts(role_fonts);
+    }
+
+    fn assignRoleFonts(self: *Renderer, role_fonts: RoleFonts) void {
+        self.font = @ptrCast(role_fonts.prose_bold);
+        self.ui_font = @ptrCast(role_fonts.ui);
+        self.ui_bold_font = @ptrCast(role_fonts.ui_bold);
+        self.ui_medium_font = if (role_fonts.ui_medium) |face| @ptrCast(face) else null;
+        self.prose_font = @ptrCast(role_fonts.prose);
+        self.prose_italic_font = @ptrCast(role_fonts.prose_italic);
+        self.prose_bold_italic_font = @ptrCast(role_fonts.prose_bold_italic);
+        self.mono_font = if (role_fonts.mono) |fallback| @ptrCast(fallback) else null;
+        self.code_font = if (role_fonts.code) |face| @ptrCast(face) else null;
+        self.icon_font = if (role_fonts.icon) |fallback| @ptrCast(fallback) else null;
+        self.mono_symbols_font = if (role_fonts.mono_symbols) |fallback| @ptrCast(fallback) else null;
+        self.symbols_font = if (role_fonts.symbols) |fallback| @ptrCast(fallback) else null;
+        self.symbols_alt_font = if (role_fonts.symbols_alt) |fallback| @ptrCast(fallback) else null;
+        self.math_font = if (role_fonts.math) |fallback| @ptrCast(fallback) else null;
+        self.emoji_font = if (role_fonts.emoji) |fallback| @ptrCast(fallback) else null;
     }
 
     fn createPipelines(self: *Renderer, packages: PipelineShaderPackages) !void {
@@ -1017,7 +1056,7 @@ pub const Renderer = struct {
             }
             return;
         }
-        if (command.font_role == .mono and command.glyph_width > 0.0 and command.line_height > 0.0) {
+        if (isFixedCellRole(command.font_role) and command.glyph_width > 0.0 and command.line_height > 0.0) {
             try self.appendFixedTextSlice(
                 allocator,
                 frame,
@@ -1167,11 +1206,11 @@ pub const Renderer = struct {
     }
 
     fn fallbackFontRoleForGlyph(self: *Renderer, value: []const u8, font_size: f32, font_role: ?draw.FontRole) ?draw.FontRole {
-        if (font_role != .mono or self.icon_font == null) return font_role;
+        if (!isFixedCellRole(font_role) or self.icon_font == null) return font_role;
         if (value.len == 0 or value[0] < 0x80) return font_role;
         if (!std.unicode.utf8ValidateSlice(value)) return font_role;
         const codepoint = std.unicode.utf8Decode(value) catch return font_role;
-        const mono = self.fontForRoleAndSize(font_size, .mono) catch return font_role;
+        const mono = self.fontForRoleAndSize(font_size, font_role) catch return font_role;
         if (c.TTF_FontHasGlyph(mono, codepoint)) return font_role;
         const icon = self.fontForRoleAndSize(font_size, .icon) catch return font_role;
         if (c.TTF_FontHasGlyph(icon, codepoint)) return .icon;
@@ -1307,7 +1346,7 @@ pub const Renderer = struct {
     // cover dingbats and emoji-styled markers JetBrains omits (➤, ✻, ✨).
     fn addCoverageFallbackFonts(self: *Renderer, font: *c.TTF_Font, font_size: f32, role: ?draw.FontRole) error{ OutOfMemory, SdlTtfTextFailed }!void {
         const wants_fallback = if (role) |font_role| switch (font_role) {
-            .ui, .ui_bold, .prose, .prose_bold, .prose_italic, .prose_bold_italic => true,
+            .ui, .ui_bold, .ui_medium, .prose, .prose_bold, .prose_italic, .prose_bold_italic => true,
             else => false,
         } else true;
         if (!wants_fallback) return;
@@ -1330,11 +1369,14 @@ pub const Renderer = struct {
     fn baseFontForRole(self: *Renderer, role: ?draw.FontRole) *c.TTF_Font {
         if (role) |font_role| switch (font_role) {
             .ui => if (self.ui_font) |font_value| return font_value,
-            .ui_bold, .prose_bold => {},
+            .ui_medium => if (self.ui_medium_font orelse self.ui_font) |font_value| return font_value,
+            .ui_bold => if (self.ui_bold_font) |font_value| return font_value,
+            .prose_bold => {},
             .prose => if (self.prose_font) |font_value| return font_value,
             .prose_italic => if (self.prose_italic_font) |font_value| return font_value,
             .prose_bold_italic => if (self.prose_bold_italic_font) |font_value| return font_value,
             .mono => if (self.mono_font) |font_value| return font_value,
+            .code => if (self.code_font orelse self.mono_font) |font_value| return font_value,
             .icon => if (self.icon_font) |font_value| return font_value,
             .mono_symbols => if (self.mono_symbols_font) |font_value| return font_value,
             .symbols => if (self.symbols_font) |font_value| return font_value,
@@ -2465,7 +2507,15 @@ fn fontRoleCacheValue(font_role: ?draw.FontRole) u8 {
         .symbols_alt => 11,
         .math => 12,
         .emoji => 13,
+        .ui_medium => 14,
+        .code => 15,
     } else 0;
+}
+
+/// Roles drawn through fixed cells with the per-glyph coverage chain.
+fn isFixedCellRole(font_role: ?draw.FontRole) bool {
+    const role = font_role orelse return false;
+    return role == .mono or role == .code;
 }
 
 fn growCapacity(required: usize) usize {

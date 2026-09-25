@@ -81,6 +81,9 @@ pub const CommandKind = enum {
 pub const FontRole = enum {
     ui,
     ui_bold,
+    // Chrome emphasis between `ui` and `ui_bold` (a Medium weight). Hosts
+    // whose chrome face has no medium cut alias it to `ui`.
+    ui_medium,
     icon,
     mono,
     // Coverage-fallback face for `mono`. The user's configured terminal font
@@ -118,6 +121,11 @@ pub const FontRole = enum {
     prose_bold,
     prose_italic,
     prose_bold_italic,
+    // Transcript/markdown code face. Kept distinct from `mono` so document
+    // code can follow the host's font family while terminal cells stay on the
+    // terminal face. Rendered through the same fixed-cell path as `mono`, and
+    // aliases to `mono` when no dedicated code face is configured.
+    code,
 };
 
 pub const TextRun = struct {

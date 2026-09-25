@@ -82,6 +82,8 @@ pub const TranscriptHeightEntry = struct {
     body_hash: u64 = 0,
     author_hash: u64 = 0,
     image_present: bool = false,
+    /// `text_measure.fontGeneration()` the height was measured under.
+    font_generation: u32 = 0,
     height: f32 = 0.0,
 };
 

@@ -3821,6 +3821,9 @@ fn transcriptLayoutVariantHash(state: *app_state.AppState) u64 {
     // the single write path), so hashing it is equivalent to hashing the map's
     // contents without iterating it every frame.
     hasher.update(std.mem.asBytes(&state.expanded_cards_revision));
+    // A UI font-family switch changes every measured row height.
+    const font_generation = text_measure.fontGeneration();
+    hasher.update(std.mem.asBytes(&font_generation));
     return hasher.final();
 }
 
@@ -7459,8 +7462,8 @@ fn renderDiffSplitEmphasis(
 ) void {
     for (cell.emphasis_ranges) |range| {
         if (range.start >= range.end or range.end > cell.text.len) continue;
-        const prefix_w = text_measure.textWidth(.mono, font_size, cell.text[0..range.start]);
-        const range_w = text_measure.textWidth(.mono, font_size, cell.text[range.start..range.end]);
+        const prefix_w = text_measure.textWidth(.code, font_size, cell.text[0..range.start]);
+        const range_w = text_measure.textWidth(.code, font_size, cell.text[range.start..range.end]);
         queueRoundedClipped(state, .{
             .x = code_x + prefix_w,
             .y = y + theme.scaledUi(2.0),
@@ -7642,14 +7645,14 @@ fn renderDiffTokens(
     for (tokens) |token| {
         if (cursor_x >= x + width) break;
         const color = diffTokenColor(token.kind, line_kind);
-        const token_w = text_measure.textWidth(.mono, font_size, token.text);
+        const token_w = text_measure.textWidth(.code, font_size, token.text);
         state.palette_overlay_batch.roleText(
             state.allocator,
             .{ .x = cursor_x, .y = y, .w = @max(token_w, 1.0), .h = line_h },
             stableText(state, token.text),
             paletteColor(color),
             font_size,
-            .mono,
+            .code,
             null,
             clip,
         ) catch {};
@@ -8723,6 +8726,9 @@ fn transcriptBodyRenderStyleHash(kind: chat_types.TranscriptBodyKind, options: c
     hashOptionalFloat(&hasher, options.glyph_width);
     hashOptionalFloat(&hasher, options.code_font_size);
     if (options.text_color) |color| hasher.update(std.mem.asBytes(&color));
+    // Cached batches carry glyph positions measured with the current faces.
+    const font_generation = text_measure.fontGeneration();
+    hasher.update(std.mem.asBytes(&font_generation));
     return hasher.final();
 }
 

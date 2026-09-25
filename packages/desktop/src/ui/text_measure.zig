@@ -3,12 +3,16 @@ const palette = @import("palette");
 
 const RoleFonts = struct {
     ui: *palette.sdl.Font,
+    /// Same handle as `ui` when the family has no medium cut.
+    ui_medium: *palette.sdl.Font,
     ui_bold: *palette.sdl.Font,
     prose: *palette.sdl.Font,
     prose_bold: *palette.sdl.Font,
     prose_italic: *palette.sdl.Font,
     prose_bold_italic: *palette.sdl.Font,
     mono: *palette.sdl.Font,
+    /// Same handle as `mono` when the family has no dedicated code face.
+    code: *palette.sdl.Font,
     icon: *palette.sdl.Font,
 };
 
@@ -155,11 +159,13 @@ fn fontForRole(role_fonts: RoleFonts, role: palette.FontRole) *palette.sdl.Font 
     return switch (role) {
         .ui => role_fonts.ui,
         .ui_bold => role_fonts.ui_bold,
+        .ui_medium => role_fonts.ui_medium,
         .prose => role_fonts.prose,
         .prose_bold => role_fonts.prose_bold,
         .prose_italic => role_fonts.prose_italic,
         .prose_bold_italic => role_fonts.prose_bold_italic,
         .mono => role_fonts.mono,
+        .code => role_fonts.code,
         .icon => role_fonts.icon,
         // mono_symbols / symbols / symbols_alt / math / emoji are coverage fallbacks
         // the renderer picks per-glyph; measurement always reports the primary

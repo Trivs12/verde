@@ -248,6 +248,6 @@ Main upstream components used by the desktop app:
 - `zqlite` by Karl Seguin for SQLite-backed state and persistence. License: MIT-style.
 - `zig_dif` and `zig_markdown` for chat markdown and code rendering.
 - `stb_image` by Sean Barrett and contributors for image decoding, vendored in [`../../vendor/stb_image.h`](../../vendor/stb_image.h). License: public domain or MIT.
-- Codicon, Nerd Fonts, Noto Sans, JetBrains Mono Nerd Font, and Cal Sans font assets for the native UI. See notices in [`src/assets/fonts`](src/assets/fonts).
+- Codicon, Nerd Fonts, Noto Sans, JetBrains Mono Nerd Font, Cal Sans, Inter, Geist / Geist Mono, and IBM Plex Sans / Mono font assets for the native UI. See notices in [`src/assets/fonts`](src/assets/fonts).
 
 When distributing the desktop app, keep the applicable upstream licenses and notices for vendored or bundled components.

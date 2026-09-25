@@ -3,14 +3,73 @@ const builtin = @import("builtin");
 const palette = @import("palette");
 const sdl = @import("zsdl3");
 
+const app_config = @import("../app/config.zig");
 const app_state = @import("../state.zig");
 const browser_texture = @import("../browser/texture.zig");
 const stb_image = @import("../media/stb_image.zig");
+const font_family = @import("font_family.zig");
 const text_measure = @import("text_measure.zig");
 const theme = @import("theme.zig");
 
+const log = std.log.scoped(.palette_frame_renderer);
+
+// Base size for opened faces; sized copies are made per render size.
+const BASE_FONT_POINT_SIZE: f32 = 16.0;
+
 pub const Backend = enum {
     sdl_gpu,
+};
+
+/// Open TTF handles for the roles owned by the UI font family. Null roles
+/// alias (`ui_medium` to `ui`, `code` to the terminal mono face).
+const FamilyFonts = struct {
+    ui: *palette.sdl.Font,
+    ui_medium: ?*palette.sdl.Font,
+    ui_bold: *palette.sdl.Font,
+    prose: *palette.sdl.Font,
+    prose_bold: *palette.sdl.Font,
+    prose_italic: *palette.sdl.Font,
+    prose_bold_italic: *palette.sdl.Font,
+    code: ?*palette.sdl.Font,
+
+    fn open(faces: *const font_family.Faces) !FamilyFonts {
+        const ui = try font_family.openFace(faces.ui, BASE_FONT_POINT_SIZE);
+        errdefer palette.sdl.ttfCloseFont(ui);
+        const ui_medium = if (faces.ui_medium) |face| try font_family.openFace(face, BASE_FONT_POINT_SIZE) else null;
+        errdefer if (ui_medium) |font| palette.sdl.ttfCloseFont(font);
+        const ui_bold = try font_family.openFace(faces.ui_bold, BASE_FONT_POINT_SIZE);
+        errdefer palette.sdl.ttfCloseFont(ui_bold);
+        const prose = try font_family.openFace(faces.prose, BASE_FONT_POINT_SIZE);
+        errdefer palette.sdl.ttfCloseFont(prose);
+        const prose_bold = try font_family.openFace(faces.prose_bold, BASE_FONT_POINT_SIZE);
+        errdefer palette.sdl.ttfCloseFont(prose_bold);
+        const prose_italic = try font_family.openFace(faces.prose_italic, BASE_FONT_POINT_SIZE);
+        errdefer palette.sdl.ttfCloseFont(prose_italic);
+        const prose_bold_italic = try font_family.openFace(faces.prose_bold_italic, BASE_FONT_POINT_SIZE);
+        errdefer palette.sdl.ttfCloseFont(prose_bold_italic);
+        const code = if (faces.code) |face| try font_family.openFace(face, BASE_FONT_POINT_SIZE) else null;
+        return .{
+            .ui = ui,
+            .ui_medium = ui_medium,
+            .ui_bold = ui_bold,
+            .prose = prose,
+            .prose_bold = prose_bold,
+            .prose_italic = prose_italic,
+            .prose_bold_italic = prose_bold_italic,
+            .code = code,
+        };
+    }
+
+    fn close(self: FamilyFonts) void {
+        if (self.code) |font| palette.sdl.ttfCloseFont(font);
+        palette.sdl.ttfCloseFont(self.prose_bold_italic);
+        palette.sdl.ttfCloseFont(self.prose_italic);
+        palette.sdl.ttfCloseFont(self.prose_bold);
+        palette.sdl.ttfCloseFont(self.prose);
+        palette.sdl.ttfCloseFont(self.ui_bold);
+        if (self.ui_medium) |font| palette.sdl.ttfCloseFont(font);
+        palette.sdl.ttfCloseFont(self.ui);
+    }
 };
 
 pub const Renderer = struct {
@@ -18,12 +77,11 @@ pub const Renderer = struct {
     active_backend: Backend,
     window: ?*sdl.Window = null,
     gpu: ?palette.renderer.Renderer = null,
-    gpu_ui_font: ?*palette.sdl.Font = null,
-    gpu_ui_bold_font: ?*palette.sdl.Font = null,
-    gpu_prose_font: ?*palette.sdl.Font = null,
-    gpu_prose_bold_font: ?*palette.sdl.Font = null,
-    gpu_prose_italic_font: ?*palette.sdl.Font = null,
-    gpu_prose_bold_italic_font: ?*palette.sdl.Font = null,
+    gpu_family_fonts: ?FamilyFonts = null,
+    /// Configured family the loaded faces were resolved for (possibly via a
+    /// fallback). The main loop reloads when the config diverges from it.
+    font_family: app_config.UiFontFamily = .classic,
+    effective_font_family: app_config.UiFontFamily = .classic,
     gpu_mono_font: ?*palette.sdl.Font = null,
     gpu_icon_font: ?*palette.sdl.Font = null,
     gpu_mono_symbols_font: ?*palette.sdl.Font = null,
@@ -37,12 +95,11 @@ pub const Renderer = struct {
     pub const InitOptions = struct {
         requested_backend: Backend,
         window: *sdl.Window,
-        ui_font_path: [:0]const u8,
-        ui_bold_font_path: [:0]const u8,
-        prose_font_path: [:0]const u8,
-        prose_bold_font_path: [:0]const u8,
-        prose_italic_font_path: [:0]const u8,
-        prose_bold_italic_font_path: [:0]const u8,
+        /// Chrome, prose and transcript-code faces for the UI font family.
+        family_faces: *const font_family.Faces,
+        /// Faces tried when `family_faces` cannot be opened (for example a
+        /// macOS release without the expected SF named instances).
+        fallback_family_faces: ?*const font_family.Faces = null,
         mono_font_path: [:0]const u8,
         icon_font_path: [:0]const u8,
         /// Optional coverage fallback for `mono`. Typically Verde's embedded
@@ -81,13 +138,17 @@ pub const Renderer = struct {
 
         try palette.sdl.ttfInit();
         result.gpu_ttf_initialized = true;
-        result.gpu_ui_font = try palette.sdl.ttfOpenFont(options.ui_font_path, 16.0);
-        result.gpu_ui_bold_font = try palette.sdl.ttfOpenFont(options.ui_bold_font_path, 16.0);
-        result.gpu_prose_font = try palette.sdl.ttfOpenFont(options.prose_font_path, 16.0);
-        result.gpu_prose_bold_font = try palette.sdl.ttfOpenFont(options.prose_bold_font_path, 16.0);
-        result.gpu_prose_italic_font = try palette.sdl.ttfOpenFont(options.prose_italic_font_path, 16.0);
-        result.gpu_prose_bold_italic_font = try palette.sdl.ttfOpenFont(options.prose_bold_italic_font_path, 16.0);
-        result.gpu_mono_font = try palette.sdl.ttfOpenFont(options.mono_font_path, 16.0);
+        const faces = options.family_faces;
+        var effective_family = faces.effective;
+        result.gpu_family_fonts = FamilyFonts.open(faces) catch |err| blk: {
+            const fallback = options.fallback_family_faces orelse return err;
+            log.warn("failed to open {s} UI fonts ({s}); using {s}", .{ @tagName(faces.effective), @errorName(err), @tagName(fallback.effective) });
+            effective_family = fallback.effective;
+            break :blk try FamilyFonts.open(fallback);
+        };
+        result.font_family = faces.requested;
+        result.effective_font_family = effective_family;
+        result.gpu_mono_font = try palette.sdl.ttfOpenFont(options.mono_font_path, BASE_FONT_POINT_SIZE);
         result.gpu_icon_font = try palette.sdl.ttfOpenFont(options.icon_font_path, 16.0);
         if (options.mono_symbols_font_path) |path| {
             result.gpu_mono_symbols_font = palette.sdl.ttfOpenFont(path, 16.0) catch null;
@@ -109,33 +170,65 @@ pub const Renderer = struct {
             .shader_formats = palette.renderer.ShaderFormat.defaultForTarget(builtin.os.tag),
             .shader_packages = palette.renderer.ShaderSource.packagesForTarget(builtin.os.tag),
         });
-        try result.gpu.?.configureGpuTextWithAllRoleFonts(.{
-            .ui = result.gpu_ui_font.?,
-            .ui_bold = result.gpu_ui_bold_font.?,
-            .prose = result.gpu_prose_font.?,
-            .prose_bold = result.gpu_prose_bold_font.?,
-            .prose_italic = result.gpu_prose_italic_font.?,
-            .prose_bold_italic = result.gpu_prose_bold_italic_font.?,
-            .mono = result.gpu_mono_font,
-            .icon = result.gpu_icon_font,
-            .mono_symbols = result.gpu_mono_symbols_font,
-            .symbols = result.gpu_symbols_font,
-            .symbols_alt = result.gpu_symbols_alt_font,
-            .math = result.gpu_math_font,
-            .emoji = result.gpu_emoji_font,
-        });
-        text_measure.configure(.{
-            .ui = result.gpu_ui_font.?,
-            .ui_bold = result.gpu_ui_bold_font.?,
-            .prose = result.gpu_prose_font.?,
-            .prose_bold = result.gpu_prose_bold_font.?,
-            .prose_italic = result.gpu_prose_italic_font.?,
-            .prose_bold_italic = result.gpu_prose_bold_italic_font.?,
-            .mono = result.gpu_mono_font.?,
-            .icon = result.gpu_icon_font.?,
-        });
+        try result.gpu.?.configureGpuTextWithAllRoleFonts(result.gpuRoleFonts(result.gpu_family_fonts.?));
+        result.configureTextMeasureFonts();
         try result.gpu.?.claimWindow(@ptrCast(options.window));
         return result;
+    }
+
+    /// Swaps the UI font family live: opens `faces`, hands them to the GPU
+    /// text path (which drops every shaped-text, sized-font and atlas cache),
+    /// then closes the previous faces and bumps the text-measure generation
+    /// so width/height memos keyed on it re-measure. On error the previous
+    /// faces stay active.
+    pub fn applyFontFamily(self: *Renderer, faces: *const font_family.Faces) !void {
+        if (self.active_backend != .sdl_gpu) return error.SdlGpuUnavailable;
+        const next = try FamilyFonts.open(faces);
+        errdefer next.close();
+        try self.gpu.?.replaceGpuTextRoleFonts(self.gpuRoleFonts(next));
+        const previous = self.gpu_family_fonts;
+        self.gpu_family_fonts = next;
+        self.configureTextMeasureFonts();
+        self.configureTextMeasureRenderer();
+        if (previous) |fonts| fonts.close();
+        self.font_family = faces.requested;
+        self.effective_font_family = faces.effective;
+    }
+
+    fn gpuRoleFonts(self: *const Renderer, family: FamilyFonts) palette.renderer.Renderer.RoleFonts {
+        return .{
+            .ui = family.ui,
+            .ui_medium = family.ui_medium,
+            .ui_bold = family.ui_bold,
+            .prose = family.prose,
+            .prose_bold = family.prose_bold,
+            .prose_italic = family.prose_italic,
+            .prose_bold_italic = family.prose_bold_italic,
+            .mono = self.gpu_mono_font,
+            .code = family.code,
+            .icon = self.gpu_icon_font,
+            .mono_symbols = self.gpu_mono_symbols_font,
+            .symbols = self.gpu_symbols_font,
+            .symbols_alt = self.gpu_symbols_alt_font,
+            .math = self.gpu_math_font,
+            .emoji = self.gpu_emoji_font,
+        };
+    }
+
+    fn configureTextMeasureFonts(self: *const Renderer) void {
+        const family = self.gpu_family_fonts.?;
+        text_measure.configure(.{
+            .ui = family.ui,
+            .ui_medium = family.ui_medium orelse family.ui,
+            .ui_bold = family.ui_bold,
+            .prose = family.prose,
+            .prose_bold = family.prose_bold,
+            .prose_italic = family.prose_italic,
+            .prose_bold_italic = family.prose_bold_italic,
+            .mono = self.gpu_mono_font.?,
+            .code = family.code orelse self.gpu_mono_font.?,
+            .icon = self.gpu_icon_font.?,
+        });
     }
 
     pub fn configureTextMeasureRenderer(self: *Renderer) void {
@@ -165,12 +258,7 @@ pub const Renderer = struct {
         if (self.gpu_mono_symbols_font) |font| palette.sdl.ttfCloseFont(font);
         if (self.gpu_icon_font) |font| palette.sdl.ttfCloseFont(font);
         if (self.gpu_mono_font) |font| palette.sdl.ttfCloseFont(font);
-        if (self.gpu_prose_bold_italic_font) |font| palette.sdl.ttfCloseFont(font);
-        if (self.gpu_prose_italic_font) |font| palette.sdl.ttfCloseFont(font);
-        if (self.gpu_prose_bold_font) |font| palette.sdl.ttfCloseFont(font);
-        if (self.gpu_prose_font) |font| palette.sdl.ttfCloseFont(font);
-        if (self.gpu_ui_bold_font) |font| palette.sdl.ttfCloseFont(font);
-        if (self.gpu_ui_font) |font| palette.sdl.ttfCloseFont(font);
+        if (self.gpu_family_fonts) |fonts| fonts.close();
         if (self.gpu_ttf_initialized) palette.sdl.ttfQuit();
         self.* = undefined;
     }

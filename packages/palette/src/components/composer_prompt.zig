@@ -2263,10 +2263,11 @@ pub fn ComposerPrompt(comptime config: ComposerPromptConfig) type {
         }
 
         /// Toolbar pills render with `bold_font_role`; measurement uses `toolbarMetrics` (often regular).
+        /// A medium chrome cut stays within the regular slack, so only a true bold widens it.
         fn pillToolbarLabelSlack(self: *const Component, text_metrics: text_layout.FontMetrics) f32 {
             var s = self.toolbarLabelMeasureSlack(text_metrics);
             if (config.bold_font_role != null and config.font_role != null and
-                config.bold_font_role.? != config.font_role.?)
+                config.bold_font_role.? != config.font_role.? and config.bold_font_role.? != .ui_medium)
             {
                 s *= 1.28;
             }

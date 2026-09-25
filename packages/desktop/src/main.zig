@@ -30,6 +30,7 @@ const browser_ui = @import("ui/browser.zig");
 const debug_ui = @import("ui/debug.zig");
 const terminal_panel_ui = @import("ui/terminal_panel.zig");
 const palette_frame_renderer = @import("ui/palette_frame_renderer.zig");
+const font_family = @import("ui/font_family.zig");
 const ui_theme = @import("ui/theme.zig");
 const colors = @import("ui/colors.zig");
 
@@ -129,30 +130,6 @@ const SystemCursorCache = struct {
     }
 };
 
-const PALETTE_GPU_UI_FONT_PATHS = [_][:0]const u8{
-    "src/assets/fonts/CalSans-Regular.ttf",
-    "packages/desktop/src/assets/fonts/CalSans-Regular.ttf",
-};
-const PALETTE_GPU_UI_BOLD_FONT_PATHS = [_][:0]const u8{
-    "src/assets/fonts/NotoSans-Bold.ttf",
-    "packages/desktop/src/assets/fonts/NotoSans-Bold.ttf",
-};
-const PALETTE_GPU_PROSE_FONT_PATHS = [_][:0]const u8{
-    "src/assets/fonts/NotoSans-Regular.ttf",
-    "packages/desktop/src/assets/fonts/NotoSans-Regular.ttf",
-};
-const PALETTE_GPU_PROSE_BOLD_FONT_PATHS = [_][:0]const u8{
-    "src/assets/fonts/NotoSans-Bold.ttf",
-    "packages/desktop/src/assets/fonts/NotoSans-Bold.ttf",
-};
-const PALETTE_GPU_PROSE_ITALIC_FONT_PATHS = [_][:0]const u8{
-    "src/assets/fonts/NotoSans-Italic.ttf",
-    "packages/desktop/src/assets/fonts/NotoSans-Italic.ttf",
-};
-const PALETTE_GPU_PROSE_BOLD_ITALIC_FONT_PATHS = [_][:0]const u8{
-    "src/assets/fonts/NotoSans-BoldItalic.ttf",
-    "packages/desktop/src/assets/fonts/NotoSans-BoldItalic.ttf",
-};
 const PALETTE_GPU_ICON_FONT_PATHS = [_][:0]const u8{
     "src/assets/fonts/SymbolsNerdFontMono-Regular.ttf",
     "packages/desktop/src/assets/fonts/SymbolsNerdFontMono-Regular.ttf",
@@ -174,11 +151,10 @@ const PALETTE_GPU_SYMBOLS_ALT_FONT_PATHS = [_][:0]const u8{
     "packages/desktop/src/assets/fonts/NotoSansSymbols-Regular.ttf",
 };
 
-const CAL_SANS_BYTES = @embedFile("assets/fonts/CalSans-Regular.ttf");
-const NOTO_SANS_REGULAR_BYTES = @embedFile("assets/fonts/NotoSans-Regular.ttf");
-const NOTO_SANS_BOLD_BYTES = @embedFile("assets/fonts/NotoSans-Bold.ttf");
-const NOTO_SANS_ITALIC_BYTES = @embedFile("assets/fonts/NotoSans-Italic.ttf");
-const NOTO_SANS_BOLD_ITALIC_BYTES = @embedFile("assets/fonts/NotoSans-BoldItalic.ttf");
+const CAL_SANS_BYTES = font_family.CAL_SANS.bytes;
+const NOTO_SANS_BOLD_BYTES = font_family.NOTO_SANS_BOLD.bytes;
+const NOTO_SANS_ITALIC_BYTES = font_family.NOTO_SANS_ITALIC.bytes;
+const NOTO_SANS_BOLD_ITALIC_BYTES = font_family.NOTO_SANS_BOLD_ITALIC.bytes;
 const CODICON_BYTES = @embedFile("assets/fonts/Codicon.ttf");
 const NERD_SYMBOLS_BYTES = @embedFile("assets/fonts/SymbolsNerdFontMono-Regular.ttf");
 
@@ -320,54 +296,15 @@ fn mainInner(init: std.process.Init) !void {
         NERD_SYMBOLS_BYTES[0..NERD_SYMBOLS_BYTES.len],
         loaded_app_config.font_size,
     );
-    const palette_gpu_ui_font_path = try paletteGpuFontPath(
-        allocator,
-        storage.pref_path,
-        "CalSans-Regular.ttf",
-        CAL_SANS_BYTES[0..],
-        &PALETTE_GPU_UI_FONT_PATHS,
-    );
-    defer allocator.free(palette_gpu_ui_font_path);
-    const palette_gpu_ui_bold_font_path = try paletteGpuFontPath(
-        allocator,
-        storage.pref_path,
-        "NotoSans-Bold.ttf",
-        NOTO_SANS_BOLD_BYTES[0..],
-        &PALETTE_GPU_UI_BOLD_FONT_PATHS,
-    );
-    defer allocator.free(palette_gpu_ui_bold_font_path);
-    const palette_gpu_prose_font_path = try paletteGpuFontPath(
-        allocator,
-        storage.pref_path,
-        "NotoSans-Regular.ttf",
-        NOTO_SANS_REGULAR_BYTES[0..],
-        &PALETTE_GPU_PROSE_FONT_PATHS,
-    );
-    defer allocator.free(palette_gpu_prose_font_path);
-    const palette_gpu_prose_bold_font_path = try paletteGpuFontPath(
-        allocator,
-        storage.pref_path,
-        "NotoSans-Bold.ttf",
-        NOTO_SANS_BOLD_BYTES[0..],
-        &PALETTE_GPU_PROSE_BOLD_FONT_PATHS,
-    );
-    defer allocator.free(palette_gpu_prose_bold_font_path);
-    const palette_gpu_prose_italic_font_path = try paletteGpuFontPath(
-        allocator,
-        storage.pref_path,
-        "NotoSans-Italic.ttf",
-        NOTO_SANS_ITALIC_BYTES[0..],
-        &PALETTE_GPU_PROSE_ITALIC_FONT_PATHS,
-    );
-    defer allocator.free(palette_gpu_prose_italic_font_path);
-    const palette_gpu_prose_bold_italic_font_path = try paletteGpuFontPath(
-        allocator,
-        storage.pref_path,
-        "NotoSans-BoldItalic.ttf",
-        NOTO_SANS_BOLD_ITALIC_BYTES[0..],
-        &PALETTE_GPU_PROSE_BOLD_ITALIC_FONT_PATHS,
-    );
-    defer allocator.free(palette_gpu_prose_bold_italic_font_path);
+    // Chrome/prose/code faces for `ui.font_family`. System fonts can lack an
+    // expected named instance on some macOS releases, so keep Inter ready.
+    var ui_font_faces = try font_family.resolve(allocator, storage.pref_path, loaded_app_config.ui_font_family);
+    defer ui_font_faces.deinit(allocator);
+    var ui_font_fallback_faces: ?font_family.Faces = if (ui_font_faces.effective == .system)
+        try font_family.resolve(allocator, storage.pref_path, .inter)
+    else
+        null;
+    defer if (ui_font_fallback_faces) |*faces| faces.deinit(allocator);
     const palette_gpu_mono_font_path = try ghosttyMonoFontPath(allocator) orelse try paletteGpuFontPath(
         allocator,
         storage.pref_path,
@@ -438,12 +375,8 @@ fn mainInner(init: std.process.Init) !void {
     var palette_renderer = try palette_frame_renderer.Renderer.init(.{
         .requested_backend = requested_renderer_backend,
         .window = window,
-        .ui_font_path = palette_gpu_ui_font_path,
-        .ui_bold_font_path = palette_gpu_ui_bold_font_path,
-        .prose_font_path = palette_gpu_prose_font_path,
-        .prose_bold_font_path = palette_gpu_prose_bold_font_path,
-        .prose_italic_font_path = palette_gpu_prose_italic_font_path,
-        .prose_bold_italic_font_path = palette_gpu_prose_bold_italic_font_path,
+        .family_faces = &ui_font_faces,
+        .fallback_family_faces = if (ui_font_fallback_faces) |*faces| faces else null,
         .mono_font_path = palette_gpu_mono_font_path,
         .icon_font_path = palette_gpu_icon_font_path,
         .mono_symbols_font_path = palette_gpu_mono_symbols_font_path,
@@ -669,6 +602,10 @@ fn mainInner(init: std.process.Init) !void {
         if (state.app_config_runtime_sync_pending) {
             state.app_config_runtime_sync_pending = false;
             applyAppConfigRuntime(&state);
+        }
+        // Covers every config path (Settings, verde.json edits, reload).
+        if (state.app_config.ui_font_family != palette_renderer.font_family) {
+            syncUiFontFamily(&state, &palette_renderer, storage.pref_path);
         }
         if (live_server) |*server| {
             if (server.processPending(&state)) presentation_demand.request();
@@ -1063,7 +1000,38 @@ fn paletteGpuFontPath(
         return try allocator.dupeZ(u8, candidate);
     }
 
-    return try installBundledFont(allocator, pref_path, file_name, bytes);
+    return try font_family.installBundledFont(allocator, pref_path, file_name, bytes);
+}
+
+/// Applies a changed `ui.font_family` to the live renderer. The attempt is
+/// recorded first so a family that fails to load is not retried every frame;
+/// the previous faces stay active in that case.
+fn syncUiFontFamily(state: *AppState, renderer: *palette_frame_renderer.Renderer, pref_path: []const u8) void {
+    const requested = state.app_config.ui_font_family;
+    renderer.font_family = requested;
+    applyResolvedUiFontFamily(state, renderer, pref_path, requested) catch |err| {
+        log.warn("failed to load UI font family {s}: {s}", .{ @tagName(requested), @errorName(err) });
+        // SF named instances vary by macOS release; Inter is the documented fallback.
+        const fell_back = requested == .system and blk: {
+            applyResolvedUiFontFamily(state, renderer, pref_path, .inter) catch break :blk false;
+            renderer.font_family = requested;
+            break :blk true;
+        };
+        if (!fell_back) state.setSidebarNotice("Could not load the selected UI font.");
+    };
+    runtime_log.diagnostic("ui font family requested={s} effective={s}", .{ @tagName(requested), @tagName(renderer.effective_font_family) });
+    state.markDirty();
+}
+
+fn applyResolvedUiFontFamily(
+    state: *AppState,
+    renderer: *palette_frame_renderer.Renderer,
+    pref_path: []const u8,
+    family: app_config.UiFontFamily,
+) !void {
+    var faces = try font_family.resolve(state.allocator, pref_path, family);
+    defer faces.deinit(state.allocator);
+    try renderer.applyFontFamily(&faces);
 }
 
 fn ghosttyMonoFontPath(allocator: std.mem.Allocator) !?[:0]u8 {
@@ -1175,29 +1143,6 @@ fn unquoteGhosttyValue(raw_value: []const u8) []const u8 {
     if (value.len >= 2 and value[0] == '"' and value[value.len - 1] == '"') value = value[1 .. value.len - 1];
     if (value.len >= 2 and value[0] == '\'' and value[value.len - 1] == '\'') value = value[1 .. value.len - 1];
     return value;
-}
-
-fn installBundledFont(
-    allocator: std.mem.Allocator,
-    pref_path: []const u8,
-    file_name: []const u8,
-    bytes: []const u8,
-) ![:0]u8 {
-    var threaded: std.Io.Threaded = .init(allocator, .{});
-    defer threaded.deinit();
-
-    var pref_dir = try std.Io.Dir.openDirAbsolute(threaded.io(), pref_path, .{});
-    defer pref_dir.close(threaded.io());
-    try pref_dir.createDirPath(threaded.io(), "fonts");
-
-    const path = try std.fs.path.join(allocator, &.{ pref_path, "fonts", file_name });
-    defer allocator.free(path);
-
-    var file = try std.Io.Dir.createFileAbsolute(threaded.io(), path, .{ .truncate = true });
-    defer file.close(threaded.io());
-    try file.writeStreamingAll(threaded.io(), bytes);
-
-    return try allocator.dupeZ(u8, path);
 }
 
 const EventFlags = struct {
