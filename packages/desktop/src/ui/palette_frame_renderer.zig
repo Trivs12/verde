@@ -148,6 +148,7 @@ pub const Renderer = struct {
         };
         result.font_family = faces.requested;
         result.effective_font_family = effective_family;
+        text_measure.headings_use_bold = effective_family != .classic;
         result.gpu_mono_font = try palette.sdl.ttfOpenFont(options.mono_font_path, BASE_FONT_POINT_SIZE);
         result.gpu_icon_font = try palette.sdl.ttfOpenFont(options.icon_font_path, 16.0);
         if (options.mono_symbols_font_path) |path| {
@@ -193,6 +194,7 @@ pub const Renderer = struct {
         if (previous) |fonts| fonts.close();
         self.font_family = faces.requested;
         self.effective_font_family = faces.effective;
+        text_measure.headings_use_bold = faces.effective != .classic;
     }
 
     fn gpuRoleFonts(self: *const Renderer, family: FamilyFonts) palette.renderer.Renderer.RoleFonts {
