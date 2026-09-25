@@ -48,6 +48,11 @@ const SIDEBAR_ICON_HOVER_TINT: f32 = 0.07;
 const SIDEBAR_SELECTED_TINT: f32 = 0.08;
 const SIDEBAR_TILE_TINT: f32 = 0.035;
 const SIDEBAR_GROUP_BAR_TINT: f32 = 0.22;
+/// Status pip diameter shared by expanded pane rows and collapsed avatar badges.
+const SIDEBAR_STATUS_DOT_CSS: f32 = 6.0;
+/// Collapsed-rail control buttons: square hit/hover box and vertical gap.
+const SIDEBAR_RAIL_BUTTON_CSS: f32 = 32.0;
+const SIDEBAR_RAIL_BUTTON_GAP_CSS: f32 = 4.0;
 const SIDEBAR_THREAD_ICON_LEADING_PAD_CSS: f32 = 10.0;
 /// Horizontal gap between the icon slot and the title.
 const SIDEBAR_THREAD_ICON_TITLE_GAP_CSS: f32 = 10.0;
@@ -1715,59 +1720,69 @@ fn renderHerdrRuntimeBadge(state: *runtime.AppState, rect: palette.Rect, label: 
 }
 
 fn renderPaletteCollapsedSidebar(state: *runtime.AppState, rect: palette.Rect) void {
-    const button = theme.scaledUi(36.0);
+    // Header geometry mirrors `renderPaletteExpandedSidebar` (14px top inset,
+    // 32px header row, 28px logo) so the logo stays put when the rail toggles;
+    // the control column then starts where the expanded search pill sits.
+    const button = theme.scaledUi(SIDEBAR_RAIL_BUTTON_CSS);
+    const step = button + theme.scaledUi(SIDEBAR_RAIL_BUTTON_GAP_CSS);
     const x = rect.x + (rect.w - button) * 0.5;
-    var y = rect.y + theme.scaledUi(30.0);
-    queuePaletteLogoMark(state, .{ .x = x + theme.scaledUi(2.0), .y = y, .w = theme.scaledUi(32.0), .h = theme.scaledUi(32.0) });
-    y += theme.scaledUi(58.0);
-    const expand_rect: palette.Rect = .{ .x = x, .y = y, .w = button, .h = theme.scaledUi(30.0) };
+    const header_top = rect.y + theme.scaledUi(14.0);
+    const header_h = theme.scaledUi(32.0);
+    const logo = theme.scaledUi(28.0);
+    queuePaletteLogoMark(state, .{ .x = rect.x + (rect.w - logo) * 0.5, .y = header_top + (header_h - logo) * 0.5, .w = logo, .h = logo });
+    var y = header_top + header_h + theme.scaledUi(10.0);
+    const expand_rect: palette.Rect = .{ .x = x, .y = y, .w = button, .h = button };
     renderPaletteSidebarToggle(state, expand_rect, false);
-    y += theme.scaledUi(38.0);
-    const add_top_rect: palette.Rect = .{ .x = x, .y = y, .w = button, .h = theme.scaledUi(30.0) };
+    y += step;
+    const add_top_rect: palette.Rect = .{ .x = x, .y = y, .w = button, .h = button };
     renderPaletteSidebarActionIcon(state, add_top_rect, NF_COD_ADD, null, rect);
     addPaletteHit(add_top_rect, .add_workspace, 0, 0);
-    y += theme.scaledUi(34.0);
-    const new_rect: palette.Rect = .{ .x = x, .y = y, .w = button, .h = theme.scaledUi(30.0) };
+    y += step;
+    const new_rect: palette.Rect = .{ .x = x, .y = y, .w = button, .h = button };
     renderPaletteSidebarActionIcon(state, new_rect, NF_COD_EDIT, null, rect);
     addPaletteHit(new_rect, .new_thread, state.project_controller.selected_index, 0);
-    y += theme.scaledUi(34.0);
-    const terminal_rect: palette.Rect = .{ .x = x, .y = y, .w = button, .h = theme.scaledUi(30.0) };
+    y += step;
+    const terminal_rect: palette.Rect = .{ .x = x, .y = y, .w = button, .h = button };
     renderPaletteSidebarActionIcon(state, terminal_rect, NF_COD_TERMINAL, null, rect);
     addPaletteHit(terminal_rect, .new_terminal, state.project_controller.selected_index, 0);
-    y += theme.scaledUi(34.0);
+    y += step;
     // Palette trigger parity with the expanded rail's search pill, so the
     // collapsed rail keeps a visible route to search/history too.
-    const search_rect: palette.Rect = .{ .x = x, .y = y, .w = button, .h = theme.scaledUi(30.0) };
+    const search_rect: palette.Rect = .{ .x = x, .y = y, .w = button, .h = button };
     renderPaletteSidebarActionIcon(state, search_rect, NF_COD_SEARCH, null, rect);
     addPaletteHit(search_rect, .command_palette, 0, 0);
-    y += theme.scaledUi(34.0);
+    y += button + theme.scaledUi(8.0);
 
     // Hairline divider, then a vertical "activity dock" of workspace avatars so
     // the narrow rail shows every workspace, which one is active, and whether
     // any of its panes need attention — instead of being a dead button strip.
-    queuePaletteRect(state, .{ .x = x + theme.scaledUi(6.0), .y = y, .w = button - theme.scaledUi(12.0), .h = theme.scaledUi(1.0) }, paletteColor(theme.borderMuted()));
+    const avatar = theme.scaledUi(36.0);
+    const avatar_x = rect.x + (rect.w - avatar) * 0.5;
+    queuePaletteRect(state, .{ .x = avatar_x + theme.scaledUi(6.0), .y = y, .w = avatar - theme.scaledUi(12.0), .h = theme.scaledUi(1.0) }, paletteColor(theme.borderMuted()));
     y += theme.scaledUi(12.0);
 
-    const avatar = theme.scaledUi(36.0);
-    const dock_bottom = rect.y + rect.h - theme.scaledUi(48.0);
+    // Same footer band as the expanded rail, so the dock (avatar plus its
+    // pane dots) never runs into the settings button.
+    const footer_top = rect.y + rect.h - theme.scaledUi(SIDEBAR_FOOTER_RESERVE_CSS);
+    const dock_bottom = footer_top - theme.scaledUi(12.0);
     var project_index: usize = 0;
     while (project_index < state.project_controller.projects.items.len) : (project_index += 1) {
         if (y + avatar > dock_bottom) break; // keep the rail tidy; expand to see the rest
         const project = &state.project_controller.projects.items[project_index];
         const selected = state.project_controller.selected_index == project_index;
-        const avatar_rect: palette.Rect = .{ .x = x, .y = y, .w = avatar, .h = avatar };
+        const avatar_rect: palette.Rect = .{ .x = avatar_x, .y = y, .w = avatar, .h = avatar };
         const hovered = state.transcript_controller.palette_mouse_in_workspace and rectContainsPoint(avatar_rect, state.transcript_controller.palette_mouse_x, state.transcript_controller.palette_mouse_y);
 
-        // The active workspace reads as a bold filled chip in the theme accent —
-        // mirroring (and amplifying) the green filled folder of the expanded
-        // view's selected row — with a left accent bar for an unmistakable cue.
+        // Neutral chips matching the expanded rail's calm fills: a faint tile
+        // at rest, the shared hover/selected tints, and the expanded group
+        // bar's neutral tint for the left selection marker.
         const bg = if (selected)
-            paletteColor(theme.COLOR_GREEN)
+            sidebarTint(SIDEBAR_SELECTED_TINT)
         else if (hovered)
-            paletteColor(theme.wash(theme.COLOR_GREEN, 56))
+            sidebarTint(SIDEBAR_HOVER_TINT)
         else
-            paletteColor(theme.COLOR_PANEL_ALT);
-        queuePaletteRoundedRect(state, avatar_rect, bg, theme.scaledUi(9.0));
+            sidebarTint(SIDEBAR_TILE_TINT);
+        queuePaletteRoundedRect(state, avatar_rect, paletteColor(bg), theme.scaledUi(9.0));
         if (selected) {
             const bar_h = avatar * 0.55;
             queuePaletteRoundedRect(state, .{
@@ -1775,7 +1790,7 @@ fn renderPaletteCollapsedSidebar(state: *runtime.AppState, rect: palette.Rect) v
                 .y = avatar_rect.y + (avatar - bar_h) * 0.5,
                 .w = theme.scaledUi(3.0),
                 .h = bar_h,
-            }, paletteColor(theme.COLOR_GREEN), theme.scaledUi(1.5));
+            }, paletteColor(sidebarTint(SIDEBAR_GROUP_BAR_TINT)), theme.scaledUi(1.5));
         }
 
         var workspace_shortcut_buf: [16]u8 = undefined;
@@ -1788,18 +1803,12 @@ fn renderPaletteCollapsedSidebar(state: *runtime.AppState, rect: palette.Rect) v
             "";
 
         // Workspace initial as the avatar mark. queuePaletteText is left-aligned,
-        // so center it manually (single glyph ~= font * 0.6 wide). On the filled
-        // active chip the initial reverses out to the dark panel color.
+        // so center it manually (single glyph ~= font * 0.6 wide).
         var letter_buf: [1]u8 = undefined;
         const letter = workspaceInitial(&letter_buf, project.label);
         const letter_font = theme.scaledUi(15.0);
         const letter_w = letter_font * 0.6;
-        const letter_color = if (selected)
-            theme.background()
-        else if (hovered)
-            theme.COLOR_WHITE
-        else
-            theme.COLOR_TEXT_MUTED;
+        const letter_color = if (selected or hovered) theme.COLOR_WHITE else theme.COLOR_TEXT_MUTED;
         if (workspace_shortcut.len > 0) {
             renderSidebarShortcutKeyTip(state, avatar_rect, rect, workspace_shortcut);
         } else {
@@ -1815,10 +1824,11 @@ fn renderPaletteCollapsedSidebar(state: *runtime.AppState, rect: palette.Rect) v
         // narrow rail so it doesn't clip against the panel edge.
         if (workspace_shortcut.len == 0) if (workspaceStatusColor(state, project_index)) |badge| {
             const pulse = attentionPulse(state, project_index);
-            const badge_d = theme.scaledUi(8.0);
+            // Same diameter as the expanded rail's pane-row pips.
+            const badge_d = theme.scaledUi(SIDEBAR_STATUS_DOT_CSS);
             queuePaletteRoundedRect(state, .{
-                .x = avatar_rect.x + avatar - badge_d - theme.scaledUi(2.0),
-                .y = avatar_rect.y + theme.scaledUi(2.0),
+                .x = avatar_rect.x + avatar - badge_d - theme.scaledUi(4.0),
+                .y = avatar_rect.y + theme.scaledUi(4.0),
                 .w = badge_d,
                 .h = badge_d,
             }, paletteColor(theme.withAlpha(badge, @intFromFloat(pulse * 255.0))), badge_d * 0.5);
@@ -1834,7 +1844,8 @@ fn renderPaletteCollapsedSidebar(state: *runtime.AppState, rect: palette.Rect) v
         y += theme.scaledUi(11.0);
     }
 
-    const settings_rect: palette.Rect = .{ .x = x, .y = rect.y + rect.h - theme.scaledUi(42.0), .w = button, .h = theme.scaledUi(30.0) };
+    // Centered in the footer band exactly like the expanded rail's gear.
+    const settings_rect: palette.Rect = .{ .x = x, .y = footer_top + (rect.y + rect.h - footer_top - button) * 0.5, .w = button, .h = button };
     renderPaletteSettingsButton(state, settings_rect, rect);
 }
 
@@ -2075,7 +2086,7 @@ fn collapsedPaneIndicator(
             };
         }
     }
-    return .{ .color = if (selected_pane) theme.COLOR_GREEN else theme.COLOR_TEXT_SUBTLE };
+    return .{ .color = if (selected_pane) theme.COLOR_WHITE else theme.COLOR_TEXT_SUBTLE };
 }
 
 fn queuePaletteRect(state: *runtime.AppState, rect: palette.Rect, color: palette.Color) void {
@@ -2431,7 +2442,7 @@ fn renderOpenPaneRow(
         const animated = running or (if (status) |s| s == .working or s == .waiting else false);
         const waiting = if (status) |s| s == .waiting else false;
         const pulse: f32 = if (animated) attentionPulse(state, project_index) else 1.0;
-        const dot = theme.scaledUi(6.0);
+        const dot = theme.scaledUi(SIDEBAR_STATUS_DOT_CSS);
         const status_font = theme.scaledUi(11.0);
         // Approximate right-alignment with the same per-char width heuristic
         // the title truncation uses; labels are short and near-uniform.
