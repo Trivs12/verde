@@ -342,39 +342,81 @@ fn radiusSm() f32 {
     return theme.scaledUi(6.0);
 }
 
-fn radiusMd() f32 {
+/// Corner radius of the floating settings sheet.
+fn radiusShell() f32 {
+    return theme.scaledUi(14.0);
+}
+
+/// Gap between the settings sheet and the window / sidebar edges, so the
+/// rounded shell reads as a sheet over the dimmed workspace.
+fn shellInset() f32 {
     return theme.scaledUi(8.0);
 }
 
-fn radiusLg() f32 {
-    return theme.scaledUi(12.0);
-}
+/// Scrim strength behind the sheet: enough to separate it, soft enough that
+/// the workspace stays legible while settings live-apply.
+const SHELL_SCRIM_ALPHA: f32 = 0.22;
 
+/// Secondary copy: field labels, unselected nav rows, chevrons.
 fn textLabel() [4]f32 {
     return theme.COLOR_TEXT_MUTED;
 }
 
+/// Row and field labels ("Theme", "Font family") read in the body text colour.
+fn fieldLabel() [4]f32 {
+    return theme.COLOR_WHITE;
+}
+
+const FIELD_LABEL_FONT_SIZE: f32 = 13.0;
+
+/// Tertiary copy: row descriptions, hints, version strings.
 fn textHint() [4]f32 {
-    return theme.mix(theme.COLOR_TEXT_SUBTLE, theme.COLOR_WHITE, 0.18);
+    return theme.COLOR_TEXT_SUBTLE;
 }
 
-// Settings controls need predictable contrast against the modal. Omarchy's
-// terminal color0/color8 may be light, so panel_alt/panel_muted are unsuitable
-// as opaque fills even though they remain useful as palette accents elsewhere.
-fn raisedSurface(amount: f32) [4]f32 {
-    return theme.mix(theme.background(), theme.COLOR_WHITE, amount);
+// Neutral panel→text tint strengths for sheet fills (see `panelTint`).
+const HOVER_TINT: f32 = 0.045;
+const SELECTED_TINT: f32 = 0.08;
+const CONTROL_TINT: f32 = 0.025;
+const MENU_TINT: f32 = 0.05;
+
+// Settings paints on `COLOR_PANEL`, so fills mix from it toward the text
+// colour. Omarchy's terminal color0/color8 may be light, so panel_alt /
+// panel_muted are unsuitable as opaque fills even though they remain useful
+// as palette accents elsewhere.
+fn panelTint(amount: f32) [4]f32 {
+    return theme.mix(theme.COLOR_PANEL, theme.COLOR_WHITE, amount);
 }
 
-fn cardSurface() [4]f32 {
-    return raisedSurface(0.10);
-}
-
+/// Resting fill for dropdowns, steppers and segmented tracks.
 fn controlSurface() [4]f32 {
-    return raisedSurface(0.16);
+    return panelTint(CONTROL_TINT);
 }
 
+/// Soft hover fill shared by rows, nav items and ghost buttons.
 fn controlHoverSurface() [4]f32 {
-    return raisedSurface(0.22);
+    return panelTint(HOVER_TINT);
+}
+
+/// Neutral selected fill (nav row, segment, menu option). The accent is
+/// reserved for primary actions and switches that are on.
+fn selectedSurface() [4]f32 {
+    return panelTint(SELECTED_TINT);
+}
+
+/// Opaque popup surface for dropdown menus.
+fn menuSurface() [4]f32 {
+    return panelTint(MENU_TINT);
+}
+
+/// Hairline edge for resting controls, menus and dividers.
+fn controlEdge() [4]f32 {
+    return theme.restingEdge();
+}
+
+/// Neutral outline for an open dropdown.
+fn controlOpenEdge() [4]f32 {
+    return theme.focusRing();
 }
 
 fn metrics() Metrics {
@@ -397,14 +439,17 @@ fn panelWidth(state: *const runtime.AppState, width: f32, dock_x: f32) f32 {
     return @min(preferred, max_w);
 }
 
+// Floating sheet beside the sidebar, inset from the window edges so its
+// rounded corners and hairline edge read against the scrim.
 fn layoutPanel(state: *const runtime.AppState, width: f32, height: f32) palette.Rect {
-    const dock_x = sidebarDockWidth(state, width);
-    const modal_w = panelWidth(state, width, dock_x);
+    const inset = shellInset();
+    const x = sidebarDockWidth(state, width) + inset;
+    const modal_w = panelWidth(state, width, x);
     return .{
-        .x = dock_x,
-        .y = 0.0,
+        .x = x,
+        .y = inset,
         .w = modal_w,
-        .h = height,
+        .h = @max(height - inset * 2.0, 0.0),
     };
 }
 
@@ -1457,7 +1502,7 @@ pub fn render(state: *runtime.AppState, width: f32, height: f32) void {
         .y = layout.content.y,
         .w = theme.scaledUi(1.0),
         .h = layout.content.h,
-    }, paletteColor(theme.withAlpha(theme.borderMuted(), 90)), 0.0);
+    }, paletteColor(controlEdge()), 0.0);
 
     const category = state.settings_controller.active_category;
     if (category == .appearance) {
@@ -1471,7 +1516,7 @@ pub fn render(state: *runtime.AppState, width: f32, height: f32) void {
             .y = layout.ui_font_family_label_y,
             .w = layout.appearance_card.w - m.card_pad * 2.0,
             .h = m.label_h,
-        }, "Font family", paletteColor(textLabel()), theme.scaledUi(12.5), layout.body_clip);
+        }, "Font family", paletteColor(fieldLabel()), theme.scaledUi(FIELD_LABEL_FONT_SIZE), layout.body_clip);
         drawUiFontFamilyDropdown(state, layout);
         const motion = state.settings_controller.draft.reduced_motion;
         drawSwitchRow(state, layout.reduced_motion, "Reduce motion", motion.all(), isControlHovered(state, .reduced_motion), layout.body_clip);
@@ -1485,7 +1530,7 @@ pub fn render(state: *runtime.AppState, width: f32, height: f32) void {
                 .y = layout.companion_character_label_y,
                 .w = layout.appearance_card.w - m.card_pad * 2.0,
                 .h = m.label_h,
-            }, "Character", paletteColor(textLabel()), theme.scaledUi(12.5), layout.body_clip);
+            }, "Character", paletteColor(fieldLabel()), theme.scaledUi(FIELD_LABEL_FONT_SIZE), layout.body_clip);
             drawCompanionCharacterDropdown(state, layout);
         }
     } else if (category == .workspace) {
@@ -1496,7 +1541,7 @@ pub fn render(state: *runtime.AppState, width: f32, height: f32) void {
             .y = layout.workspace_tabs_label_y,
             .w = layout.workspace_card.w - m.card_pad * 2.0,
             .h = m.label_h,
-        }, "Tabs", paletteColor(textLabel()), theme.scaledUi(12.5), layout.body_clip);
+        }, "Tabs", paletteColor(fieldLabel()), theme.scaledUi(FIELD_LABEL_FONT_SIZE), layout.body_clip);
         drawToggleCell(state, layout.workspace_tabs_automatic, "Auto", state.settings_controller.draft.workspace_tabs == .automatic, isControlHovered(state, .workspace_tabs_automatic), layout.body_clip);
         drawToggleCell(state, layout.workspace_tabs_always, "Always", state.settings_controller.draft.workspace_tabs == .always, isControlHovered(state, .workspace_tabs_always), layout.body_clip);
         drawToggleCell(state, layout.workspace_tabs_disabled, "Off", state.settings_controller.draft.workspace_tabs == .disabled, isControlHovered(state, .workspace_tabs_disabled), layout.body_clip);
@@ -1505,28 +1550,28 @@ pub fn render(state: *runtime.AppState, width: f32, height: f32) void {
             .y = layout.open_action_dropdown.y - m.inner_gap - m.label_h,
             .w = layout.open_action_dropdown.w,
             .h = m.label_h,
-        }, "Open with", paletteColor(textLabel()), theme.scaledUi(12.5), layout.body_clip);
+        }, "Open with", paletteColor(fieldLabel()), theme.scaledUi(FIELD_LABEL_FONT_SIZE), layout.body_clip);
         drawChatTitleDropdown(state, layout.open_action_dropdown, openActionDraftLabel(state), .open_action_dropdown, state.settings_controller.open_action_dropdown_open, layout.body_clip);
         queueText(state, .{
             .x = layout.new_chat_new_pane.x,
             .y = layout.new_chat_new_pane.y - m.inner_gap - m.label_h,
             .w = layout.new_chat_new_pane.w + layout.new_chat_replace_pane.w,
             .h = m.label_h,
-        }, "New chat", paletteColor(textLabel()), theme.scaledUi(12.5), layout.body_clip);
+        }, "New chat", paletteColor(fieldLabel()), theme.scaledUi(FIELD_LABEL_FONT_SIZE), layout.body_clip);
         drawSegmentedPair(state, layout.new_chat_new_pane, layout.new_chat_replace_pane, "New pane", "Replace", state.settings_controller.draft.new_chat_pane_behavior == .new_pane, isControlHovered(state, .new_chat_new_pane), isControlHovered(state, .new_chat_replace_pane), layout.body_clip);
         queueText(state, .{
             .x = layout.workspace_split_default_chat.x,
             .y = layout.workspace_split_default_chat.y - m.inner_gap - m.label_h,
             .w = layout.workspace_split_default_chat.w + layout.workspace_split_default_terminal.w,
             .h = m.label_h,
-        }, "Split", paletteColor(textLabel()), theme.scaledUi(12.5), layout.body_clip);
+        }, "Split", paletteColor(fieldLabel()), theme.scaledUi(FIELD_LABEL_FONT_SIZE), layout.body_clip);
         drawSegmentedPair(state, layout.workspace_split_default_chat, layout.workspace_split_default_terminal, "Chat", "Terminal", state.settings_controller.draft.workspace_split_default_pane == .chat, isControlHovered(state, .workspace_split_default_chat), isControlHovered(state, .workspace_split_default_terminal), layout.body_clip);
         queueText(state, .{
             .x = layout.workspace_new_tab_chat.x,
             .y = layout.workspace_new_tab_chat.y - m.inner_gap - m.label_h,
             .w = layout.workspace_new_tab_chat.w + layout.workspace_new_tab_terminal.w,
             .h = m.label_h,
-        }, "New tab", paletteColor(textLabel()), theme.scaledUi(12.5), layout.body_clip);
+        }, "New tab", paletteColor(fieldLabel()), theme.scaledUi(FIELD_LABEL_FONT_SIZE), layout.body_clip);
         drawSegmentedPair(state, layout.workspace_new_tab_chat, layout.workspace_new_tab_terminal, "Chat", "Terminal", state.settings_controller.draft.workspace_new_tab_pane == .chat, isControlHovered(state, .workspace_new_tab_chat), isControlHovered(state, .workspace_new_tab_terminal), layout.body_clip);
         drawSwitchRow(state, layout.workspace_unzoom_on_navigation, "Unzoom on navigate", state.settings_controller.draft.unzoom_on_pane_navigation, isControlHovered(state, .workspace_unzoom_on_navigation), layout.body_clip);
         drawStepperRow(state, layout.workspace_card, m, layout.workspace_pane_gap_dec.y, "Pane gap", state.settings_controller.draft.workspace_pane_gap, app_config.MIN_WORKSPACE_PANE_GAP, app_config.MAX_WORKSPACE_PANE_GAP, .workspace_pane_gap_dec, .workspace_pane_gap_inc, layout.workspace_pane_gap_dec, layout.workspace_pane_gap_inc, layout.body_clip);
@@ -1536,7 +1581,7 @@ pub fn render(state: *runtime.AppState, width: f32, height: f32) void {
             .y = layout.workspace_scroll_mode_automatic.y - m.inner_gap - m.label_h,
             .w = layout.workspace_scroll_mode_automatic.w + layout.workspace_scroll_mode_always.w + layout.workspace_scroll_mode_disabled.w,
             .h = m.label_h,
-        }, "Scrolling", paletteColor(textLabel()), theme.scaledUi(12.5), layout.body_clip);
+        }, "Scrolling", paletteColor(fieldLabel()), theme.scaledUi(FIELD_LABEL_FONT_SIZE), layout.body_clip);
         drawSegmentedTriple(
             state,
             layout.workspace_scroll_mode_automatic,
@@ -1559,7 +1604,7 @@ pub fn render(state: *runtime.AppState, width: f32, height: f32) void {
             .y = layout.workspace_scroll_horizontal.y - m.inner_gap - m.label_h,
             .w = layout.workspace_scroll_horizontal.w + layout.workspace_scroll_vertical.w,
             .h = m.label_h,
-        }, "Direction", paletteColor(textLabel()), theme.scaledUi(12.5), layout.body_clip);
+        }, "Direction", paletteColor(fieldLabel()), theme.scaledUi(FIELD_LABEL_FONT_SIZE), layout.body_clip);
         drawSegmentedPair(state, layout.workspace_scroll_horizontal, layout.workspace_scroll_vertical, "Horizontal", "Vertical", state.settings_controller.draft.workspace_scroll_direction == .horizontal, isControlHovered(state, .workspace_scroll_horizontal), isControlHovered(state, .workspace_scroll_vertical), layout.body_clip);
     } else if (category == .chat) {
         drawCard(state, layout.transcript_card, layout.body_clip);
@@ -1573,10 +1618,11 @@ pub fn render(state: *runtime.AppState, width: f32, height: f32) void {
             .y = layout.diff_layout_stacked.y - m.inner_gap - m.label_h,
             .w = layout.diff_layout_stacked.w + layout.diff_layout_split.w,
             .h = m.label_h,
-        }, "Diff", paletteColor(textLabel()), theme.scaledUi(12.5), layout.body_clip);
+        }, "Diff", paletteColor(fieldLabel()), theme.scaledUi(FIELD_LABEL_FONT_SIZE), layout.body_clip);
         drawSegmentedPair(state, layout.diff_layout_stacked, layout.diff_layout_split, "Stacked", "Split", state.settings_controller.draft.diff_layout_preference == .stacked, isControlHovered(state, .diff_layout_stacked), isControlHovered(state, .diff_layout_split), layout.body_clip);
 
         drawCard(state, layout.chat_card, layout.body_clip);
+        drawSectionDivider(state, layout.chat_card, layout.body_clip);
         drawCardTitle(state, layout.chat_card, "Chat", layout.body_clip);
         drawSwitchRow(state, layout.automatic_chat_titles, "Auto-name chats", state.settings_controller.draft.automatic_chat_titles_enabled, isControlHovered(state, .automatic_chat_titles), layout.body_clip);
         if (state.settings_controller.draft.automatic_chat_titles_enabled) {
@@ -1586,20 +1632,20 @@ pub fn render(state: *runtime.AppState, width: f32, height: f32) void {
                 .y = title_generator_label_y,
                 .w = layout.chat_title_provider_dropdown.w,
                 .h = m.label_h,
-            }, "Provider", paletteColor(textLabel()), theme.scaledUi(12.5), layout.body_clip);
+            }, "Provider", paletteColor(fieldLabel()), theme.scaledUi(FIELD_LABEL_FONT_SIZE), layout.body_clip);
             queueText(state, .{
                 .x = layout.chat_title_model_dropdown.x,
                 .y = title_generator_label_y,
                 .w = layout.chat_title_model_dropdown.w,
                 .h = m.label_h,
-            }, "Model", paletteColor(textLabel()), theme.scaledUi(12.5), layout.body_clip);
+            }, "Model", paletteColor(fieldLabel()), theme.scaledUi(FIELD_LABEL_FONT_SIZE), layout.body_clip);
             drawChatTitleDropdown(state, layout.chat_title_provider_dropdown, state.settingsChatTitleProviderLabel(state.settingsChatTitleProviderSelectedIndex()), .chat_title_provider_dropdown, state.settings_controller.title_provider_dropdown_open, layout.body_clip);
             drawChatTitleDropdown(state, layout.chat_title_model_dropdown, state.settingsChatTitleModelSelectedLabel(), .chat_title_model_dropdown, state.settings_controller.title_model_dropdown_open, layout.body_clip);
         }
         const new_chat_defaults_label_y = layout.new_chat_provider_dropdown.y - m.inner_gap - m.label_h;
-        queueText(state, .{ .x = layout.new_chat_provider_dropdown.x, .y = new_chat_defaults_label_y, .w = layout.new_chat_provider_dropdown.w, .h = m.label_h }, "New chat", paletteColor(textLabel()), theme.scaledUi(12.5), layout.body_clip);
-        queueText(state, .{ .x = layout.new_chat_model_dropdown.x, .y = new_chat_defaults_label_y, .w = layout.new_chat_model_dropdown.w, .h = m.label_h }, "Model", paletteColor(textLabel()), theme.scaledUi(12.5), layout.body_clip);
-        queueText(state, .{ .x = layout.new_chat_reasoning_dropdown.x, .y = new_chat_defaults_label_y, .w = layout.new_chat_reasoning_dropdown.w, .h = m.label_h }, "Reasoning", paletteColor(textLabel()), theme.scaledUi(12.5), layout.body_clip);
+        queueText(state, .{ .x = layout.new_chat_provider_dropdown.x, .y = new_chat_defaults_label_y, .w = layout.new_chat_provider_dropdown.w, .h = m.label_h }, "New chat", paletteColor(fieldLabel()), theme.scaledUi(FIELD_LABEL_FONT_SIZE), layout.body_clip);
+        queueText(state, .{ .x = layout.new_chat_model_dropdown.x, .y = new_chat_defaults_label_y, .w = layout.new_chat_model_dropdown.w, .h = m.label_h }, "Model", paletteColor(fieldLabel()), theme.scaledUi(FIELD_LABEL_FONT_SIZE), layout.body_clip);
+        queueText(state, .{ .x = layout.new_chat_reasoning_dropdown.x, .y = new_chat_defaults_label_y, .w = layout.new_chat_reasoning_dropdown.w, .h = m.label_h }, "Reasoning", paletteColor(fieldLabel()), theme.scaledUi(FIELD_LABEL_FONT_SIZE), layout.body_clip);
         drawChatTitleDropdown(state, layout.new_chat_provider_dropdown, state.settingsNewChatProviderLabel(state.settingsNewChatProviderSelectedIndex()), .new_chat_provider_dropdown, state.settings_controller.new_chat_provider_dropdown_open, layout.body_clip);
         drawChatTitleDropdown(state, layout.new_chat_model_dropdown, state.settingsNewChatModelSelectedLabel(), .new_chat_model_dropdown, state.settings_controller.new_chat_model_dropdown_open, layout.body_clip);
         drawChatTitleDropdown(state, layout.new_chat_reasoning_dropdown, state.settingsNewChatReasoningSelectedLabel(), .new_chat_reasoning_dropdown, state.settings_controller.new_chat_reasoning_dropdown_open, layout.body_clip);
@@ -1611,11 +1657,11 @@ pub fn render(state: *runtime.AppState, width: f32, height: f32) void {
     } else if (category == .browser) {
         drawCard(state, layout.browser_card, layout.body_clip);
         drawCardTitle(state, layout.browser_card, "Browser", layout.body_clip);
-        queueText(state, .{ .x = layout.links_verde_browser.x, .y = layout.links_verde_browser.y - m.inner_gap - m.label_h, .w = layout.links_verde_browser.w + layout.links_system_browser.w, .h = m.label_h }, "Web links", paletteColor(textLabel()), theme.scaledUi(12.5), layout.body_clip);
+        queueText(state, .{ .x = layout.links_verde_browser.x, .y = layout.links_verde_browser.y - m.inner_gap - m.label_h, .w = layout.links_verde_browser.w + layout.links_system_browser.w, .h = m.label_h }, "Web links", paletteColor(fieldLabel()), theme.scaledUi(FIELD_LABEL_FONT_SIZE), layout.body_clip);
         drawSegmentedPair(state, layout.links_verde_browser, layout.links_system_browser, "Verde", "System", state.settings_controller.draft.link_open_target == .verde_browser, isControlHovered(state, .links_verde_browser), isControlHovered(state, .links_system_browser), layout.body_clip);
-        queueText(state, .{ .x = layout.chat_links_global.x, .y = layout.chat_links_global.y - m.inner_gap - m.label_h, .w = layout.chat_links_global.w * 3.0, .h = m.label_h }, "Chat links", paletteColor(textLabel()), theme.scaledUi(12.5), layout.body_clip);
+        queueText(state, .{ .x = layout.chat_links_global.x, .y = layout.chat_links_global.y - m.inner_gap - m.label_h, .w = layout.chat_links_global.w * 3.0, .h = m.label_h }, "Chat links", paletteColor(fieldLabel()), theme.scaledUi(FIELD_LABEL_FONT_SIZE), layout.body_clip);
         drawSegmentedTriple(state, layout.chat_links_global, layout.chat_links_verde_browser, layout.chat_links_system_browser, .{ "Global", "Verde", "System" }, @intFromEnum(state.settings_controller.draft.chat_link_open_override), .{ isControlHovered(state, .chat_links_global), isControlHovered(state, .chat_links_verde_browser), isControlHovered(state, .chat_links_system_browser) }, layout.body_clip);
-        queueText(state, .{ .x = layout.terminal_links_global.x, .y = layout.terminal_links_global.y - m.inner_gap - m.label_h, .w = layout.terminal_links_global.w * 3.0, .h = m.label_h }, "Terminal links", paletteColor(textLabel()), theme.scaledUi(12.5), layout.body_clip);
+        queueText(state, .{ .x = layout.terminal_links_global.x, .y = layout.terminal_links_global.y - m.inner_gap - m.label_h, .w = layout.terminal_links_global.w * 3.0, .h = m.label_h }, "Terminal links", paletteColor(fieldLabel()), theme.scaledUi(FIELD_LABEL_FONT_SIZE), layout.body_clip);
         drawSegmentedTriple(state, layout.terminal_links_global, layout.terminal_links_verde_browser, layout.terminal_links_system_browser, .{ "Global", "Verde", "System" }, @intFromEnum(state.settings_controller.draft.terminal_link_open_override), .{ isControlHovered(state, .terminal_links_global), isControlHovered(state, .terminal_links_verde_browser), isControlHovered(state, .terminal_links_system_browser) }, layout.body_clip);
         drawBrowserScrollSpeedSlider(state, layout.browser_scroll_speed, state.settings_controller.draft.browser_scroll_speed, isControlHovered(state, .browser_scroll_speed), layout.body_clip);
     } else if (category == .providers) {
@@ -1648,7 +1694,7 @@ pub fn render(state: *runtime.AppState, width: f32, height: f32) void {
             .y = layout.hooks_label_y,
             .w = layout.integrations_card.w - m.card_pad * 2.0,
             .h = m.label_h,
-        }, "Status hooks", paletteColor(textLabel()), theme.scaledUi(12.5), layout.body_clip);
+        }, "Status hooks", paletteColor(fieldLabel()), theme.scaledUi(FIELD_LABEL_FONT_SIZE), layout.body_clip);
         drawSwitchRow(state, layout.hooks_claude, "Claude", state.settings_controller.hook_claude_installed, isControlHovered(state, .hooks_claude), layout.body_clip);
         drawSwitchRow(state, layout.hooks_codex, "Codex", state.settings_controller.hook_codex_installed, isControlHovered(state, .hooks_codex), layout.body_clip);
         drawSwitchRow(state, layout.hooks_cursor, "Cursor", state.settings_controller.hook_cursor_installed, isControlHovered(state, .hooks_cursor), layout.body_clip);
@@ -1738,6 +1784,7 @@ pub fn render(state: *runtime.AppState, width: f32, height: f32) void {
         queueText(state, layout.updates_release_page, RELEASE_PAGE_LABEL, paletteColor(release_page_color), theme.scaledUi(NOTES_LINK_FONT_SIZE), layout.body_clip);
 
         drawCard(state, layout.notifications_card, layout.body_clip);
+        drawSectionDivider(state, layout.notifications_card, layout.body_clip);
         drawCardTitle(state, layout.notifications_card, "Notifications", layout.body_clip);
         drawSwitchRow(state, layout.notifications_toggle, "Agent status", state.settings_controller.draft.notifications_enabled, isControlHovered(state, .notifications_toggle), layout.body_clip);
     }
@@ -2584,24 +2631,27 @@ fn releaseNotesPreview(notes: []const u8) []const u8 {
     return "No release notes were provided.";
 }
 
+// Settings shell: soft scrim over the app, then the rounded sheet with a
+// neutral hairline edge.
 fn drawModalChrome(state: *runtime.AppState, width: f32, height: f32, modal: palette.Rect) void {
-    _ = width;
-    _ = height;
-    queueRoundedRect(state, modal, paletteColor(theme.COLOR_PANEL), 0.0);
-    queueBorder(state, modal, paletteColor(theme.withAlpha(theme.borderMuted(), 110)), 0.0, theme.scaledUi(1.0));
+    queueRoundedRect(state, .{ .x = 0.0, .y = 0.0, .w = width, .h = height }, paletteColor(theme.scrim(SHELL_SCRIM_ALPHA)), 0.0);
+    queueRoundedRect(state, modal, paletteColor(theme.COLOR_PANEL), radiusShell());
+    queueBorder(state, modal, paletteColor(controlEdge()), radiusShell(), theme.scaledUi(1.0));
 }
 
+// Header: medium-weight title, a subtle close button and a hairline above the
+// nav/content split. No filled strip, so the sheet reads as one surface.
 fn drawHeaderBar(state: *runtime.AppState, layout: SettingsLayout) void {
     const m = metrics();
-    drawEdgeStrip(state, layout.header, theme.raise(theme.COLOR_PANEL, 0.02), true);
-    drawHairline(state, layout.header.x, layout.header.y + layout.header.h - 1.0, layout.header.w);
+    drawHairline(state, layout.header.x + theme.scaledUi(1.0), layout.header.y + layout.header.h - 1.0, layout.header.w - theme.scaledUi(2.0));
 
-    queueText(state, .{
+    const title_h = theme.scaledUi(20.0);
+    queueRoleText(state, .{
         .x = layout.modal.x + m.modal_pad,
-        .y = layout.header.y + (m.header_h - theme.scaledUi(22.0)) * 0.5,
+        .y = layout.header.y + (m.header_h - title_h) * 0.5,
         .w = theme.scaledUi(160.0),
-        .h = theme.scaledUi(22.0),
-    }, "Settings", paletteColor(theme.COLOR_WHITE), theme.scaledUi(17.0), layout.modal);
+        .h = title_h,
+    }, "Settings", paletteColor(theme.COLOR_WHITE), theme.scaledUi(15.0), .ui_medium, layout.modal);
 
     drawIconButton(state, layout.close, "×", state.settings_controller.close_hovered);
 }
@@ -2757,7 +2807,7 @@ fn drawCategoryNav(state: *runtime.AppState, layout: SettingsLayout) void {
         const selected = index == active;
         const hovered = state.settings_controller.hover_category == @as(u8, @intCast(index));
         if (selected) {
-            queueRoundedRect(state, rect, paletteColor(theme.withAlpha(theme.accent(), 40)), radiusSm());
+            queueRoundedRect(state, rect, paletteColor(selectedSurface()), radiusSm());
         } else if (hovered) {
             queueRoundedRect(state, rect, paletteColor(controlHoverSurface()), radiusSm());
         }
@@ -3168,7 +3218,7 @@ fn drawRuntimeCard(state: *runtime.AppState, layout: SettingsLayout) void {
         const header = row_plan.header;
         const header_hovered = isRuntimeActionHovered(state, runtime_connections.encodeRowAction(row, .expand));
         if (row_plan.expanded) {
-            queueRoundedRectClipped(state, .{ .x = header.x, .y = header.y, .w = header.w, .h = row_plan.bottom - header.y }, paletteColor(controlSurface()), radiusSm(), clip);
+            queueRoundedRectClipped(state, .{ .x = header.x, .y = header.y, .w = header.w, .h = row_plan.bottom - header.y }, paletteColor(controlHoverSurface()), radiusSm(), clip);
         } else if (header_hovered) {
             queueRoundedRectClipped(state, header, paletteColor(controlHoverSurface()), radiusSm(), clip);
         }
@@ -3282,18 +3332,34 @@ fn drawRuntimeCard(state: *runtime.AppState, layout: SettingsLayout) void {
     queueText(state, .{ .x = card.x + m.card_pad, .y = plan.hint_y, .w = card.w - m.card_pad * 2.0, .h = m.label_h }, "Tokens stay in memory only · started chats keep their pinned runtime · defaults apply to new chats in the selected workspace", paletteColor(textHint()), theme.scaledUi(12.0), clip);
 }
 
+// Settings groups are unboxed: the section title carries the structure and
+// `drawSectionDivider` separates stacked groups on one page.
 fn drawCard(state: *runtime.AppState, rect: palette.Rect, clip: palette.Rect) void {
-    queueRoundedRectClipped(state, rect, paletteColor(cardSurface()), radiusMd(), clip);
+    _ = state;
+    _ = rect;
+    _ = clip;
+}
+
+// Hairline between two stacked groups, centred in the card gap above `card`.
+fn drawSectionDivider(state: *runtime.AppState, card: palette.Rect, clip: palette.Rect) void {
+    const m = metrics();
+    const line: palette.Rect = .{
+        .x = card.x + m.card_pad,
+        .y = card.y - m.card_gap * 0.5,
+        .w = card.w - m.card_pad * 2.0,
+        .h = 1.0,
+    };
+    queueRoundedRectClipped(state, line, paletteColor(controlEdge()), 0.0, clip);
 }
 
 fn drawCardTitle(state: *runtime.AppState, card: palette.Rect, title: []const u8, clip: palette.Rect) void {
     const m = metrics();
-    queueText(state, .{
+    queueRoleText(state, .{
         .x = card.x + m.card_pad,
         .y = card.y + m.card_pad,
         .w = card.w - m.card_pad * 2.0,
         .h = m.title_h,
-    }, title, paletteColor(theme.COLOR_WHITE), theme.scaledUi(15.0), clip);
+    }, title, paletteColor(theme.COLOR_WHITE), theme.scaledUi(14.0), .ui_medium, clip);
 }
 
 fn drawFieldLabel(state: *runtime.AppState, card: palette.Rect, m: Metrics, label: []const u8, clip: palette.Rect) void {
@@ -3302,7 +3368,7 @@ fn drawFieldLabel(state: *runtime.AppState, card: palette.Rect, m: Metrics, labe
         .y = card.y + m.card_pad + m.title_h + m.row_gap,
         .w = card.w - m.card_pad * 2.0,
         .h = m.label_h,
-    }, label, paletteColor(textLabel()), theme.scaledUi(12.5), clip);
+    }, label, paletteColor(fieldLabel()), theme.scaledUi(FIELD_LABEL_FONT_SIZE), clip);
 }
 
 // Appearance theme selector control.
@@ -3310,13 +3376,13 @@ fn drawThemeDropdown(state: *runtime.AppState, layout: SettingsLayout) void {
     const rect = layout.theme_dropdown;
     const hovered = isControlHovered(state, .theme_dropdown);
     const background = if (state.settings_controller.theme_dropdown_open)
-        theme.withAlpha(theme.accent(), 34)
+        controlHoverSurface()
     else if (hovered)
         controlHoverSurface()
     else
         controlSurface();
     queueRoundedRectClipped(state, rect, paletteColor(background), radiusSm(), layout.body_clip);
-    queueBorderClipped(state, rect, paletteColor(if (state.settings_controller.theme_dropdown_open) theme.withAlpha(theme.accent(), 150) else theme.withAlpha(theme.COLOR_WHITE, 24)), radiusSm(), theme.scaledUi(1.0), layout.body_clip);
+    queueBorderClipped(state, rect, paletteColor(if (state.settings_controller.theme_dropdown_open) controlOpenEdge() else controlEdge()), radiusSm(), theme.scaledUi(1.0), layout.body_clip);
 
     const selected = @min(state.settings_controller.draft.theme_choice, state.settingsThemeChoiceCount() - 1);
     queueText(state, .{
@@ -3339,13 +3405,13 @@ fn drawCompanionCharacterDropdown(state: *runtime.AppState, layout: SettingsLayo
     const rect = layout.companion_character_dropdown;
     const hovered = isControlHovered(state, .companion_character_dropdown);
     const background = if (state.settings_controller.companion_character_dropdown_open)
-        theme.withAlpha(theme.accent(), 34)
+        controlHoverSurface()
     else if (hovered)
         controlHoverSurface()
     else
         controlSurface();
     queueRoundedRectClipped(state, rect, paletteColor(background), radiusSm(), layout.body_clip);
-    queueBorderClipped(state, rect, paletteColor(if (state.settings_controller.companion_character_dropdown_open) theme.withAlpha(theme.accent(), 150) else theme.withAlpha(theme.COLOR_WHITE, 24)), radiusSm(), theme.scaledUi(1.0), layout.body_clip);
+    queueBorderClipped(state, rect, paletteColor(if (state.settings_controller.companion_character_dropdown_open) controlOpenEdge() else controlEdge()), radiusSm(), theme.scaledUi(1.0), layout.body_clip);
 
     const selected = companionCharacterIndex(state.settings_controller.draft.companion_character);
     queueText(state, .{
@@ -3367,8 +3433,8 @@ fn drawCompanionCharacterDropdown(state: *runtime.AppState, layout: SettingsLayo
 fn drawCompanionCharacterDropdownMenu(state: *runtime.AppState, layout: SettingsLayout) void {
     if (!state.settings_controller.companion_character_dropdown_open) return;
     const menu = companionCharacterMenuRect(layout);
-    queueRoundedRectClipped(state, menu, paletteColor(raisedSurface(0.14)), radiusSm(), layout.body_clip);
-    queueBorderClipped(state, menu, paletteColor(theme.withAlpha(theme.COLOR_WHITE, 34)), radiusSm(), theme.scaledUi(1.0), layout.body_clip);
+    queueRoundedRectClipped(state, menu, paletteColor(menuSurface()), radiusSm(), layout.body_clip);
+    queueBorderClipped(state, menu, paletteColor(controlEdge()), radiusSm(), theme.scaledUi(1.0), layout.body_clip);
 
     const selected = companionCharacterIndex(state.settings_controller.draft.companion_character);
     for (0..companionCharacterCount()) |choice_index| {
@@ -3376,12 +3442,12 @@ fn drawCompanionCharacterDropdownMenu(state: *runtime.AppState, layout: Settings
         const is_selected = choice_index == selected;
         const hovered = state.settings_controller.companion_character_hover_index == choice_index;
         if (is_selected or hovered) {
-            const fill = if (is_selected) theme.withAlpha(theme.accent(), 38) else controlHoverSurface();
+            const fill = if (is_selected) selectedSurface() else controlHoverSurface();
             queueRoundedRectClipped(state, row, paletteColor(fill), theme.scaledUi(4.0), layout.body_clip);
         }
 
         const dot_size = theme.scaledUi(6.0);
-        const dot_color = if (is_selected) theme.accent() else theme.withAlpha(theme.COLOR_TEXT_MUTED, 110);
+        const dot_color = if (is_selected) theme.COLOR_WHITE else theme.withAlpha(theme.COLOR_TEXT_MUTED, 60);
         queueRoundedRectClipped(state, .{
             .x = row.x + theme.scaledUi(10.0),
             .y = row.y + (row.h - dot_size) * 0.5,
@@ -3403,13 +3469,13 @@ fn drawUiFontFamilyDropdown(state: *runtime.AppState, layout: SettingsLayout) vo
     const open = state.settings_controller.ui_font_family_dropdown_open;
     const hovered = isControlHovered(state, .ui_font_family_dropdown);
     const background = if (open)
-        theme.withAlpha(theme.accent(), 34)
+        controlHoverSurface()
     else if (hovered)
         controlHoverSurface()
     else
         controlSurface();
     queueRoundedRectClipped(state, rect, paletteColor(background), radiusSm(), layout.body_clip);
-    queueBorderClipped(state, rect, paletteColor(if (open) theme.withAlpha(theme.accent(), 150) else theme.withAlpha(theme.COLOR_WHITE, 24)), radiusSm(), theme.scaledUi(1.0), layout.body_clip);
+    queueBorderClipped(state, rect, paletteColor(if (open) controlOpenEdge() else controlEdge()), radiusSm(), theme.scaledUi(1.0), layout.body_clip);
 
     queueText(state, .{
         .x = rect.x + theme.scaledUi(10.0),
@@ -3430,8 +3496,8 @@ fn drawUiFontFamilyDropdown(state: *runtime.AppState, layout: SettingsLayout) vo
 fn drawUiFontFamilyDropdownMenu(state: *runtime.AppState, layout: SettingsLayout) void {
     if (!state.settings_controller.ui_font_family_dropdown_open) return;
     const menu = uiFontFamilyMenuRect(layout);
-    queueRoundedRectClipped(state, menu, paletteColor(raisedSurface(0.14)), radiusSm(), layout.body_clip);
-    queueBorderClipped(state, menu, paletteColor(theme.withAlpha(theme.COLOR_WHITE, 34)), radiusSm(), theme.scaledUi(1.0), layout.body_clip);
+    queueRoundedRectClipped(state, menu, paletteColor(menuSurface()), radiusSm(), layout.body_clip);
+    queueBorderClipped(state, menu, paletteColor(controlEdge()), radiusSm(), theme.scaledUi(1.0), layout.body_clip);
 
     const selected = uiFontFamilyIndex(state.settings_controller.draft.ui_font_family);
     for (0..uiFontFamilyCount()) |choice_index| {
@@ -3439,12 +3505,12 @@ fn drawUiFontFamilyDropdownMenu(state: *runtime.AppState, layout: SettingsLayout
         const is_selected = choice_index == selected;
         const hovered = state.settings_controller.ui_font_family_hover_index == choice_index;
         if (is_selected or hovered) {
-            const fill = if (is_selected) theme.withAlpha(theme.accent(), 38) else controlHoverSurface();
+            const fill = if (is_selected) selectedSurface() else controlHoverSurface();
             queueRoundedRectClipped(state, row, paletteColor(fill), theme.scaledUi(4.0), layout.body_clip);
         }
 
         const dot_size = theme.scaledUi(6.0);
-        const dot_color = if (is_selected) theme.accent() else theme.withAlpha(theme.COLOR_TEXT_MUTED, 110);
+        const dot_color = if (is_selected) theme.COLOR_WHITE else theme.withAlpha(theme.COLOR_TEXT_MUTED, 60);
         queueRoundedRectClipped(state, .{
             .x = row.x + theme.scaledUi(10.0),
             .y = row.y + (row.h - dot_size) * 0.5,
@@ -3464,8 +3530,8 @@ fn drawUiFontFamilyDropdownMenu(state: *runtime.AppState, layout: SettingsLayout
 fn drawThemeDropdownMenu(state: *runtime.AppState, layout: SettingsLayout) void {
     if (!state.settings_controller.theme_dropdown_open) return;
     const menu = themeMenuRect(state, layout);
-    queueRoundedRectClipped(state, menu, paletteColor(raisedSurface(0.14)), radiusSm(), layout.body_clip);
-    queueBorderClipped(state, menu, paletteColor(theme.withAlpha(theme.COLOR_WHITE, 34)), radiusSm(), theme.scaledUi(1.0), layout.body_clip);
+    queueRoundedRectClipped(state, menu, paletteColor(menuSurface()), radiusSm(), layout.body_clip);
+    queueBorderClipped(state, menu, paletteColor(controlEdge()), radiusSm(), theme.scaledUi(1.0), layout.body_clip);
 
     for (0..themeMenuVisibleCount(state)) |visible_index| {
         const choice_index = state.settings_controller.theme_menu_scroll + visible_index;
@@ -3473,12 +3539,12 @@ fn drawThemeDropdownMenu(state: *runtime.AppState, layout: SettingsLayout) void 
         const selected = choice_index == state.settings_controller.draft.theme_choice;
         const hovered = state.settings_controller.theme_hover_index == choice_index;
         if (selected or hovered) {
-            const color = if (selected) theme.withAlpha(theme.accent(), 38) else controlHoverSurface();
+            const color = if (selected) selectedSurface() else controlHoverSurface();
             queueRoundedRectClipped(state, row, paletteColor(color), theme.scaledUi(4.0), layout.body_clip);
         }
 
         const dot_size = theme.scaledUi(6.0);
-        const dot_color = if (selected) theme.accent() else theme.withAlpha(theme.COLOR_TEXT_MUTED, 110);
+        const dot_color = if (selected) theme.COLOR_WHITE else theme.withAlpha(theme.COLOR_TEXT_MUTED, 60);
         queueRoundedRectClipped(state, .{
             .x = row.x + theme.scaledUi(10.0),
             .y = row.y + (row.h - dot_size) * 0.5,
@@ -3521,13 +3587,13 @@ fn drawChatTitleDropdown(
     clip: palette.Rect,
 ) void {
     const background = if (open)
-        theme.withAlpha(theme.accent(), 34)
+        controlHoverSurface()
     else if (isControlHovered(state, control))
         controlHoverSurface()
     else
         controlSurface();
     queueRoundedRectClipped(state, rect, paletteColor(background), radiusSm(), clip);
-    queueBorderClipped(state, rect, paletteColor(if (open) theme.withAlpha(theme.accent(), 150) else theme.withAlpha(theme.COLOR_WHITE, 24)), radiusSm(), theme.scaledUi(1.0), clip);
+    queueBorderClipped(state, rect, paletteColor(if (open) controlOpenEdge() else controlEdge()), radiusSm(), theme.scaledUi(1.0), clip);
     queueText(state, .{
         .x = rect.x + theme.scaledUi(10.0),
         .y = rect.y + (rect.h - theme.scaledUi(15.0)) * 0.5,
@@ -3551,8 +3617,8 @@ fn drawChatTitleDropdownMenu(state: *runtime.AppState, layout: SettingsLayout, p
     const visible_count = if (provider_menu) count else titleModelMenuVisibleCount(state);
     const scroll = if (provider_menu) 0 else state.settings_controller.title_model_menu_scroll;
     const menu = if (provider_menu) titleProviderMenuRect(state, layout) else titleModelMenuRect(state, layout);
-    queueRoundedRectClipped(state, menu, paletteColor(raisedSurface(0.14)), radiusSm(), layout.body_clip);
-    queueBorderClipped(state, menu, paletteColor(theme.withAlpha(theme.COLOR_WHITE, 34)), radiusSm(), theme.scaledUi(1.0), layout.body_clip);
+    queueRoundedRectClipped(state, menu, paletteColor(menuSurface()), radiusSm(), layout.body_clip);
+    queueBorderClipped(state, menu, paletteColor(controlEdge()), radiusSm(), theme.scaledUi(1.0), layout.body_clip);
 
     const selected_index = if (provider_menu) state.settingsChatTitleProviderSelectedIndex() else state.settingsChatTitleModelSelectedIndex() orelse std.math.maxInt(usize);
     for (0..visible_count) |visible_index| {
@@ -3561,12 +3627,12 @@ fn drawChatTitleDropdownMenu(state: *runtime.AppState, layout: SettingsLayout, p
         const selected = option_index == selected_index;
         const hovered = state.settings_controller.title_menu_hover_index == option_index;
         if (selected or hovered) {
-            const color = if (selected) theme.withAlpha(theme.accent(), 38) else controlHoverSurface();
+            const color = if (selected) selectedSurface() else controlHoverSurface();
             queueRoundedRectClipped(state, row, paletteColor(color), theme.scaledUi(4.0), layout.body_clip);
         }
 
         const dot_size = theme.scaledUi(6.0);
-        const dot_color = if (selected) theme.accent() else theme.withAlpha(theme.COLOR_TEXT_MUTED, 110);
+        const dot_color = if (selected) theme.COLOR_WHITE else theme.withAlpha(theme.COLOR_TEXT_MUTED, 60);
         queueRoundedRectClipped(state, .{
             .x = row.x + theme.scaledUi(10.0),
             .y = row.y + (row.h - dot_size) * 0.5,
@@ -3609,8 +3675,8 @@ fn drawNewChatDropdownMenu(state: *runtime.AppState, layout: SettingsLayout, kin
     const visible_count = if (kind == .model) newChatModelMenuVisibleCount(state) else @min(count, TITLE_MENU_MAX_ROWS);
     const scroll = if (kind == .model) state.settings_controller.new_chat_model_menu_scroll else 0;
     const menu = newChatMenuRect(state, layout, kind);
-    queueRoundedRectClipped(state, menu, paletteColor(raisedSurface(0.14)), radiusSm(), layout.body_clip);
-    queueBorderClipped(state, menu, paletteColor(theme.withAlpha(theme.COLOR_WHITE, 34)), radiusSm(), theme.scaledUi(1.0), layout.body_clip);
+    queueRoundedRectClipped(state, menu, paletteColor(menuSurface()), radiusSm(), layout.body_clip);
+    queueBorderClipped(state, menu, paletteColor(controlEdge()), radiusSm(), theme.scaledUi(1.0), layout.body_clip);
 
     const selected_index = switch (kind) {
         .provider => state.settingsNewChatProviderSelectedIndex(),
@@ -3622,7 +3688,7 @@ fn drawNewChatDropdownMenu(state: *runtime.AppState, layout: SettingsLayout, kin
         const row = dropdownOptionRect(menu, visible_index);
         const selected = option_index == selected_index;
         const hovered = state.settings_controller.new_chat_menu_hover_index == option_index;
-        if (selected or hovered) queueRoundedRectClipped(state, row, paletteColor(if (selected) theme.withAlpha(theme.accent(), 38) else controlHoverSurface()), theme.scaledUi(4.0), layout.body_clip);
+        if (selected or hovered) queueRoundedRectClipped(state, row, paletteColor(if (selected) selectedSurface() else controlHoverSurface()), theme.scaledUi(4.0), layout.body_clip);
         const label = switch (kind) {
             .provider => state.settingsNewChatProviderLabel(option_index),
             .model => state.settingsNewChatModelLabel(option_index),
@@ -3640,15 +3706,15 @@ fn drawNewChatDropdownMenu(state: *runtime.AppState, layout: SettingsLayout, kin
 fn drawOpenActionDropdownMenu(state: *runtime.AppState, layout: SettingsLayout) void {
     if (!state.settings_controller.open_action_dropdown_open) return;
     const menu = openActionMenuRect(layout);
-    queueRoundedRectClipped(state, menu, paletteColor(raisedSurface(0.14)), radiusSm(), layout.body_clip);
-    queueBorderClipped(state, menu, paletteColor(theme.withAlpha(theme.COLOR_WHITE, 34)), radiusSm(), theme.scaledUi(1.0), layout.body_clip);
+    queueRoundedRectClipped(state, menu, paletteColor(menuSurface()), radiusSm(), layout.body_clip);
+    queueBorderClipped(state, menu, paletteColor(controlEdge()), radiusSm(), theme.scaledUi(1.0), layout.body_clip);
     const selected_index = openActionSelectedIndex(state);
     for (OPEN_CHOICES, 0..) |choice, option_index| {
         const row = dropdownOptionRect(menu, option_index);
         const selected = option_index == selected_index;
         const hovered = state.settings_controller.open_action_hover_index == option_index;
         if (selected or hovered) {
-            queueRoundedRectClipped(state, row, paletteColor(if (selected) theme.withAlpha(theme.accent(), 38) else controlHoverSurface()), theme.scaledUi(4.0), layout.body_clip);
+            queueRoundedRectClipped(state, row, paletteColor(if (selected) selectedSurface() else controlHoverSurface()), theme.scaledUi(4.0), layout.body_clip);
         }
         queueText(state, .{
             .x = row.x + theme.scaledUi(10.0),
@@ -3661,20 +3727,20 @@ fn drawOpenActionDropdownMenu(state: *runtime.AppState, layout: SettingsLayout) 
 
 fn drawToggleCell(state: *runtime.AppState, rect: palette.Rect, label: []const u8, selected: bool, hovered: bool, clip: palette.Rect) void {
     const bg = if (selected)
-        theme.withAlpha(theme.accent(), 44)
+        selectedSurface()
     else if (hovered)
         controlHoverSurface()
     else
         controlSurface();
     queueRoundedRectClipped(state, rect, paletteColor(bg), radiusSm(), clip);
     // Unselected cells need a visible edge or they read as disabled.
-    const border = if (selected) theme.withAlpha(theme.accent(), 140) else theme.withAlpha(theme.COLOR_WHITE, 26);
+    const border = if (selected) controlOpenEdge() else controlEdge();
     queueBorderClipped(state, rect, paletteColor(border), radiusSm(), theme.scaledUi(1.0), clip);
 
     const dot_size = theme.scaledUi(7.0);
     const dot_x = rect.x + theme.scaledUi(10.0);
     const dot_y = rect.y + (rect.h - dot_size) * 0.5;
-    const dot_color = if (selected) theme.accent() else theme.withAlpha(theme.COLOR_TEXT_MUTED, 180);
+    const dot_color = if (selected) theme.COLOR_WHITE else theme.withAlpha(theme.COLOR_TEXT_MUTED, 120);
     queueRoundedRectClipped(state, .{ .x = dot_x, .y = dot_y, .w = dot_size, .h = dot_size }, paletteColor(dot_color), theme.scaledUi(3.5), clip);
 
     const text_color = if (selected or hovered) theme.COLOR_WHITE else textLabel();
@@ -3733,16 +3799,16 @@ fn drawSwitchRow(state: *runtime.AppState, rect: palette.Rect, label: []const u8
         .w = track_w,
         .h = track_h,
     };
-    const track_color = if (on) theme.withAlpha(theme.accent(), 200) else controlSurface();
+    const track_color = if (on) theme.accent() else panelTint(0.10);
     queueRoundedRectClipped(state, track, paletteColor(track_color), track_h * 0.5, clip);
     if (!on) {
-        queueBorderClipped(state, track, paletteColor(theme.withAlpha(theme.COLOR_WHITE, 34)), track_h * 0.5, theme.scaledUi(1.0), clip);
+        queueBorderClipped(state, track, paletteColor(controlEdge()), track_h * 0.5, theme.scaledUi(1.0), clip);
     }
 
     const knob_pad = theme.scaledUi(3.0);
     const knob = track_h - knob_pad * 2.0;
     const knob_x = if (on) track.x + track.w - knob_pad - knob else track.x + knob_pad;
-    const knob_color = if (on) theme.foregroundOn(theme.accent()) else theme.withAlpha(theme.COLOR_WHITE, 190);
+    const knob_color = if (on) theme.foregroundOn(theme.accent()) else theme.withAlpha(theme.COLOR_WHITE, 170);
     queueRoundedRectClipped(state, .{ .x = knob_x, .y = track.y + knob_pad, .w = knob, .h = knob }, paletteColor(knob_color), knob * 0.5, clip);
 }
 
@@ -3780,7 +3846,7 @@ fn drawBrowserScrollSpeedSlider(state: *runtime.AppState, row: palette.Rect, val
     const progress = (theme.clampf(value, app_config.MIN_BROWSER_SCROLL_SPEED, app_config.MAX_BROWSER_SCROLL_SPEED) - app_config.MIN_BROWSER_SCROLL_SPEED) /
         (app_config.MAX_BROWSER_SCROLL_SPEED - app_config.MIN_BROWSER_SCROLL_SPEED);
     queueRoundedRectClipped(state, track, paletteColor(if (hovered) controlHoverSurface() else controlSurface()), track_h * 0.5, clip);
-    queueRoundedRectClipped(state, .{ .x = track.x, .y = track.y, .w = track.w * progress, .h = track.h }, paletteColor(theme.withAlpha(theme.accent(), 210)), track_h * 0.5, clip);
+    queueRoundedRectClipped(state, .{ .x = track.x, .y = track.y, .w = track.w * progress, .h = track.h }, paletteColor(theme.focusRing()), track_h * 0.5, clip);
 
     const knob_size = theme.scaledUi(16.0);
     const knob_x = track.x + track.w * progress - knob_size * 0.5;
@@ -3806,9 +3872,9 @@ fn drawCompanionExperimentalRow(state: *runtime.AppState, rect: palette.Rect, on
         .w = badge_text_w + badge_pad_x * 2.0,
         .h = badge_h,
     };
-    queueRoundedRectClipped(state, badge, paletteColor(theme.withAlpha(theme.accent(), 34)), badge_h * 0.5, clip);
-    queueBorderClipped(state, badge, paletteColor(theme.withAlpha(theme.accent(), 130)), badge_h * 0.5, theme.scaledUi(1.0), clip);
-    queueCenteredText(state, badge, "Experimental", paletteColor(theme.accent()), badge_font_size, clip);
+    queueRoundedRectClipped(state, badge, paletteColor(controlHoverSurface()), badge_h * 0.5, clip);
+    queueBorderClipped(state, badge, paletteColor(controlEdge()), badge_h * 0.5, theme.scaledUi(1.0), clip);
+    queueCenteredText(state, badge, "Experimental", paletteColor(textLabel()), badge_font_size, clip);
 }
 
 // Two-option exclusive choice rendered as one segmented control.
@@ -3825,7 +3891,7 @@ fn drawSegmentedPair(
 ) void {
     const container: palette.Rect = .{ .x = left.x, .y = left.y, .w = left.w + right.w, .h = left.h };
     queueRoundedRectClipped(state, container, paletteColor(controlSurface()), radiusSm(), clip);
-    queueBorderClipped(state, container, paletteColor(theme.withAlpha(theme.COLOR_WHITE, 26)), radiusSm(), theme.scaledUi(1.0), clip);
+    queueBorderClipped(state, container, paletteColor(controlEdge()), radiusSm(), theme.scaledUi(1.0), clip);
 
     if (left_hovered and !left_selected) {
         queueRoundedRectClipped(state, left, paletteColor(controlHoverSurface()), radiusSm(), clip);
@@ -3834,8 +3900,8 @@ fn drawSegmentedPair(
         queueRoundedRectClipped(state, right, paletteColor(controlHoverSurface()), radiusSm(), clip);
     }
     const selected_rect = if (left_selected) left else right;
-    queueRoundedRectClipped(state, selected_rect, paletteColor(theme.withAlpha(theme.accent(), 44)), radiusSm(), clip);
-    queueBorderClipped(state, selected_rect, paletteColor(theme.withAlpha(theme.accent(), 150)), radiusSm(), theme.scaledUi(1.0), clip);
+    queueRoundedRectClipped(state, selected_rect, paletteColor(selectedSurface()), radiusSm(), clip);
+    queueBorderClipped(state, selected_rect, paletteColor(controlOpenEdge()), radiusSm(), theme.scaledUi(1.0), clip);
 
     const left_color = if (left_selected or left_hovered) theme.COLOR_WHITE else textLabel();
     const right_color = if (!left_selected or right_hovered) theme.COLOR_WHITE else textLabel();
@@ -3857,7 +3923,7 @@ fn drawSegmentedTriple(
     const segments = [3]palette.Rect{ first, second, third };
     const container: palette.Rect = .{ .x = first.x, .y = first.y, .w = first.w + second.w + third.w, .h = first.h };
     queueRoundedRectClipped(state, container, paletteColor(controlSurface()), radiusSm(), clip);
-    queueBorderClipped(state, container, paletteColor(theme.withAlpha(theme.COLOR_WHITE, 26)), radiusSm(), theme.scaledUi(1.0), clip);
+    queueBorderClipped(state, container, paletteColor(controlEdge()), radiusSm(), theme.scaledUi(1.0), clip);
 
     for (segments, 0..) |segment, index| {
         if (hovered[index] and index != selected_index) {
@@ -3865,8 +3931,8 @@ fn drawSegmentedTriple(
         }
     }
     const selected = segments[@min(selected_index, segments.len - 1)];
-    queueRoundedRectClipped(state, selected, paletteColor(theme.withAlpha(theme.accent(), 44)), radiusSm(), clip);
-    queueBorderClipped(state, selected, paletteColor(theme.withAlpha(theme.accent(), 150)), radiusSm(), theme.scaledUi(1.0), clip);
+    queueRoundedRectClipped(state, selected, paletteColor(selectedSurface()), radiusSm(), clip);
+    queueBorderClipped(state, selected, paletteColor(controlOpenEdge()), radiusSm(), theme.scaledUi(1.0), clip);
 
     for (segments, labels, 0..) |segment, label, index| {
         const color = if (index == selected_index or hovered[index]) theme.COLOR_WHITE else textLabel();
@@ -3887,13 +3953,13 @@ fn drawActionButton(state: *runtime.AppState, rect: palette.Rect, label: []const
             button_fill = bg;
             queueRoundedRectClipped(state, rect, paletteColor(bg), radiusSm(), clip);
         },
+        // Ghost: hairline only, with the shared soft fill on hover.
         .secondary => {
-            const bg = if (hovered) controlHoverSurface() else controlSurface();
-            queueRoundedRectClipped(state, rect, paletteColor(bg), radiusSm(), clip);
-            queueBorderClipped(state, rect, paletteColor(theme.withAlpha(theme.COLOR_WHITE, 30)), radiusSm(), theme.scaledUi(1.0), clip);
+            if (hovered) queueRoundedRectClipped(state, rect, paletteColor(controlHoverSurface()), radiusSm(), clip);
+            queueBorderClipped(state, rect, paletteColor(controlEdge()), radiusSm(), theme.scaledUi(1.0), clip);
         },
         .disabled => {
-            queueBorderClipped(state, rect, paletteColor(theme.withAlpha(theme.COLOR_WHITE, 16)), radiusSm(), theme.scaledUi(1.0), clip);
+            queueBorderClipped(state, rect, paletteColor(theme.mix(theme.COLOR_PANEL, controlEdge(), 0.6)), radiusSm(), theme.scaledUi(1.0), clip);
         },
     }
     const text_color = if (style == .disabled)
@@ -3943,17 +4009,18 @@ fn drawStepperRow(
         .y = row_y + (m.row_h - theme.scaledUi(15.0)) * 0.5,
         .w = card.w * 0.5,
         .h = theme.scaledUi(15.0),
-    }, label, paletteColor(textLabel()), theme.scaledUi(13.5), clip);
+    }, label, paletteColor(theme.COLOR_WHITE), theme.scaledUi(13.0), clip);
 
     const pill_x = dec_rect.x;
     const pill: palette.Rect = .{ .x = pill_x, .y = row_y, .w = m.stepperW(), .h = m.row_h };
     queueRoundedRectClipped(state, pill, paletteColor(controlSurface()), radiusSm(), clip);
+    queueBorderClipped(state, pill, paletteColor(controlEdge()), radiusSm(), theme.scaledUi(1.0), clip);
 
     var value_buf: [8]u8 = undefined;
     const value_text = std.fmt.bufPrint(&value_buf, "{d:.0}", .{value}) catch "?";
     const value_rect: palette.Rect = .{ .x = dec_rect.x + m.step_w, .y = row_y, .w = m.value_w, .h = m.row_h };
-    queueRoundedRectClipped(state, .{ .x = dec_rect.x + m.step_w - 0.5, .y = row_y + theme.scaledUi(6.0), .w = 1.0, .h = m.row_h - theme.scaledUi(12.0) }, paletteColor(theme.withAlpha(theme.COLOR_WHITE, 24)), 0.0, clip);
-    queueRoundedRectClipped(state, .{ .x = inc_rect.x - 0.5, .y = row_y + theme.scaledUi(6.0), .w = 1.0, .h = m.row_h - theme.scaledUi(12.0) }, paletteColor(theme.withAlpha(theme.COLOR_WHITE, 24)), 0.0, clip);
+    queueRoundedRectClipped(state, .{ .x = dec_rect.x + m.step_w - 0.5, .y = row_y + theme.scaledUi(6.0), .w = 1.0, .h = m.row_h - theme.scaledUi(12.0) }, paletteColor(controlEdge()), 0.0, clip);
+    queueRoundedRectClipped(state, .{ .x = inc_rect.x - 0.5, .y = row_y + theme.scaledUi(6.0), .w = 1.0, .h = m.row_h - theme.scaledUi(12.0) }, paletteColor(controlEdge()), 0.0, clip);
     queueCenteredText(state, value_rect, value_text, paletteColor(theme.COLOR_WHITE), theme.scaledUi(13.0), clip);
 
     const at_min = value <= min_value;
@@ -3974,33 +4041,12 @@ fn drawIconButton(state: *runtime.AppState, rect: palette.Rect, label: []const u
     if (hovered) {
         queueRoundedRect(state, rect, paletteColor(controlHoverSurface()), radiusSm());
     }
-    queueCenteredText(state, rect, label, paletteColor(if (hovered) theme.COLOR_WHITE else textLabel()), theme.scaledUi(17.0), rect);
-}
-
-// Header/footer chrome strip. The fill is inset by the modal border width and
-// follows the modal corner radius on its outer edge, then the inner edge is
-// squared off — a plain squared fill overpaints the rounded corners and the
-// 1px modal border, which reads as broken corners.
-fn drawEdgeStrip(state: *runtime.AppState, bar: palette.Rect, color: [4]f32, round_top: bool) void {
-    const bw = theme.scaledUi(1.0);
-    const strip: palette.Rect = .{
-        .x = bar.x + bw,
-        .y = if (round_top) bar.y + bw else bar.y,
-        .w = bar.w - bw * 2.0,
-        .h = bar.h - bw,
-    };
-    queueRoundedRect(state, strip, paletteColor(color), radiusLg());
-    const patch_h = @min(radiusLg(), strip.h * 0.5);
-    const patch: palette.Rect = if (round_top)
-        .{ .x = strip.x, .y = strip.y + strip.h - patch_h, .w = strip.w, .h = patch_h }
-    else
-        .{ .x = strip.x, .y = strip.y, .w = strip.w, .h = patch_h };
-    queueRoundedRect(state, patch, paletteColor(color), 0.0);
+    queueCenteredText(state, rect, label, paletteColor(if (hovered) theme.COLOR_WHITE else textHint()), theme.scaledUi(16.0), rect);
 }
 
 fn drawHairline(state: *runtime.AppState, x: f32, y: f32, w: f32) void {
     if (w <= 0.0) return;
-    queueRoundedRect(state, .{ .x = x, .y = y, .w = w, .h = 1.0 }, paletteColor(theme.withAlpha(theme.COLOR_WHITE, 18)), 0.0);
+    queueRoundedRect(state, .{ .x = x, .y = y, .w = w, .h = 1.0 }, paletteColor(controlEdge()), 0.0);
 }
 
 fn queueCenteredText(state: *runtime.AppState, rect: palette.Rect, value: []const u8, color: palette.Color, font_size: f32, clip: ?palette.Rect) void {
@@ -4050,6 +4096,30 @@ fn queueText(state: *runtime.AppState, rect: palette.Rect, value: []const u8, co
         stable_value,
         color,
         font_size,
+        clip,
+        .{},
+        font_size * 0.55,
+        font_size * 1.25,
+        false,
+    ) catch |err| {
+        log.warn("failed to queue settings text: {s}", .{@errorName(err)});
+    };
+}
+
+// Same as `queueText` with an explicit font role (e.g. `.ui_medium` titles).
+fn queueRoleText(state: *runtime.AppState, rect: palette.Rect, value: []const u8, color: palette.Color, font_size: f32, role: palette.FontRole, clip: ?palette.Rect) void {
+    const stable_value = state.palette_frame_text_arena.allocator().dupe(u8, value) catch |err| {
+        log.warn("failed to retain settings text: {s}", .{@errorName(err)});
+        return;
+    };
+    state.palette_overlay_batch.fixedRoleText(
+        state.allocator,
+        rect,
+        stable_value,
+        color,
+        font_size,
+        role,
+        null,
         clip,
         .{},
         font_size * 0.55,
@@ -4455,7 +4525,7 @@ test "Companion experimental setting renders one themed immutable toggle row" {
         if (std.mem.eql(u8, command.text, "Companion")) saw_companion = true;
         if (std.mem.eql(u8, command.text, "Experimental")) {
             saw_badge = true;
-            try std.testing.expectEqual(paletteColor(theme.accent()), command.color);
+            try std.testing.expectEqual(paletteColor(textLabel()), command.color);
         }
     }
     try std.testing.expect(saw_companion);
