@@ -181,6 +181,7 @@ pub fn renderRoot(state: *runtime.AppState, width: f32, height: f32) void {
     // The workspace strip (collapsed/hidden sidebar only) takes its height off
     // the top of the workspace rect here, once, so every pane layout below and
     // the prefix overlays share the same content rect.
+    queueTitlebarBand(state, root_layout.sidebar);
     const split = workspace_strip.splitWorkspaceRect(state, root_layout.workspace);
     if (split.strip) |strip| workspace_strip.render(state, strip);
     if (state.isSidebarHidden()) {
@@ -642,8 +643,13 @@ pub fn isSidebarAnimating() bool {
     return sidebar_animating or sidebar.isAttentionMotionAnimating();
 }
 
+/// Framebuffer pixels reserved at the top of the window for a transparent
+/// native titlebar (macOS traffic lights). Set by the main loop each frame.
+pub var window_top_inset_px: f32 = 0.0;
+
 fn computeRootLayout(state: *runtime.AppState, width: f32, height: f32) RootLayout {
     const gap: f32 = 0.0;
+    const top = theme.clampf(window_top_inset_px, 0.0, height * 0.25);
     const target_sidebar_width = if (state.isSidebarCollapsed())
         theme.clampf(width * 0.07, theme.scaledUi(60.0), theme.scaledUi(76.0))
     else if (width < theme.scaledUi(900.0))
@@ -682,14 +688,25 @@ fn computeRootLayout(state: *runtime.AppState, width: f32, height: f32) RootLayo
     const target_layout_sidebar_width = if (hidden) 0.0 else target_sidebar_width;
     const workspace_width = @max(width - layout_sidebar_width - gap, theme.scaledUi(320.0));
     return .{
-        .sidebar = .{ .x = sidebar_anim_x, .y = 0.0, .w = sidebar_anim_width, .h = height },
-        .workspace = .{ .x = layout_sidebar_width + gap, .y = 0.0, .w = workspace_width, .h = height },
+        .sidebar = .{ .x = sidebar_anim_x, .y = top, .w = sidebar_anim_width, .h = height - top },
+        .workspace = .{ .x = layout_sidebar_width + gap, .y = top, .w = workspace_width, .h = height - top },
         .target_workspace_width = @max(width - target_layout_sidebar_width - gap, theme.scaledUi(320.0)),
     };
 }
 
 fn approach(current: f32, target: f32, t: f32) f32 {
     return current + (target - current) * t;
+}
+
+/// Continues the sidebar's panel colour and edge up through the titlebar band
+/// so the traffic lights sit on the sidebar rather than a separate strip. The
+/// root background already fills the band over the workspace.
+fn queueTitlebarBand(state: *runtime.AppState, sidebar_rect: palette.Rect) void {
+    if (sidebar_rect.y <= 0.0 or state.isSidebarHidden()) return;
+    const band: palette.Rect = .{ .x = sidebar_rect.x, .y = 0.0, .w = sidebar_rect.w, .h = sidebar_rect.y };
+    state.palette_overlay_batch.rect(state.allocator, band, paletteColor(theme.COLOR_PANEL)) catch {};
+    const edge_w = theme.scaledUi(1.0);
+    state.palette_overlay_batch.rect(state.allocator, .{ .x = band.x + band.w - edge_w, .y = 0.0, .w = edge_w, .h = band.h }, paletteColor(theme.borderMuted())) catch {};
 }
 
 fn queueRootBackground(state: *runtime.AppState, width: f32, height: f32) void {

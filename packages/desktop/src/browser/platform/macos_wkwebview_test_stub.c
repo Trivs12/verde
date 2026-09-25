@@ -22,6 +22,15 @@ void verde_macos_host_window_order_out(void *ns_window) {
     (void)ns_window;
 }
 
+void verde_macos_host_window_unify_titlebar(void *ns_window) {
+    (void)ns_window;
+}
+
+double verde_macos_host_window_titlebar_height(void *ns_window) {
+    (void)ns_window;
+    return 0.0;
+}
+
 void verde_macos_webview_destroy(void *handle) {
     (void)handle;
 }

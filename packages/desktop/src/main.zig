@@ -270,6 +270,7 @@ fn mainInner(init: std.process.Init) !void {
     if (builtin.os.tag == .macos) {
         macos_launch_close_suppress_until_ms = currentTimeMillis() + MACOS_LAUNCH_CLOSE_SUPPRESS_MS;
         verde_macos_host_window_install_close_monitor(nativeBrowserHostWindow(window));
+        verde_macos_host_window_unify_titlebar(nativeBrowserHostWindow(window));
     }
     defer sdl.stopTextInput(window) catch {};
     installWindowIcon(window);
@@ -691,6 +692,7 @@ fn mainInner(init: std.process.Init) !void {
         chat_panel_ui.resetRuntimeBannerHits();
 
         state.noteWorkspaceSwitchRenderStarted();
+        ui_layout.window_top_inset_px = windowTopInsetPx(window, ui_scale);
         recordSpan(&frame_sample, .render_root, struct {
             fn run(app_state: *AppState, framebuffer_width: c_int, framebuffer_height: c_int) void {
                 ui_layout.renderRoot(app_state, @floatFromInt(framebuffer_width), @floatFromInt(framebuffer_height));
@@ -3261,6 +3263,8 @@ extern fn SDL_HideWindow(window: *sdl.Window) bool;
 extern fn verde_macos_host_window_install_close_monitor(ns_window: ?*anyopaque) void;
 extern fn verde_macos_host_window_order_out(ns_window: ?*anyopaque) void;
 extern fn verde_macos_host_window_should_close(ns_window: ?*anyopaque) bool;
+extern fn verde_macos_host_window_unify_titlebar(ns_window: ?*anyopaque) void;
+extern fn verde_macos_host_window_titlebar_height(ns_window: ?*anyopaque) f64;
 
 fn handleWindowCloseRequested(window: *sdl.Window, state: *AppState) bool {
     if (builtin.os.tag == .macos) {
@@ -3575,6 +3579,14 @@ fn noteMacosWorkspaceCloseShortcut(event: *const sdl.KeyboardEvent, action: keyb
 
 fn currentTimeMillis() i64 {
     return platform_runtime.unixTimestampMs();
+}
+
+/// Framebuffer pixels at the top of the window covered by the transparent macOS
+/// titlebar (traffic lights); the root layout keeps its controls below it.
+fn windowTopInsetPx(window: *sdl.Window, scale: f32) f32 {
+    if (builtin.os.tag != .macos) return 0.0;
+    const points: f32 = @floatCast(verde_macos_host_window_titlebar_height(nativeBrowserHostWindow(window)));
+    return points * scale;
 }
 
 fn activateMacosHostWindow(window: *sdl.Window) void {

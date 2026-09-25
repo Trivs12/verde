@@ -455,6 +455,33 @@ public func verde_macos_host_window_order_out(_ nsWindow: UnsafeMutableRawPointe
     }
 }
 
+/// Extends the SDL content view under a transparent, title-less titlebar so
+/// the traffic lights float over Verde's own chrome instead of a grey strip.
+/// Verde reserves `verde_macos_host_window_titlebar_height` at the top of its
+/// layout, so no Verde control ever sits under the (non-clickable) titlebar.
+@_cdecl("verde_macos_host_window_unify_titlebar")
+public func verde_macos_host_window_unify_titlebar(_ nsWindow: UnsafeMutableRawPointer?) {
+    guard let nsWindow else { return }
+    onMain {
+        let window = Unmanaged<NSWindow>.fromOpaque(nsWindow).takeUnretainedValue()
+        window.styleMask.insert(.fullSizeContentView)
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
+    }
+}
+
+/// Height in points of the titlebar band overlapping the content view; zero in
+/// native fullscreen, where macOS hides the titlebar.
+@_cdecl("verde_macos_host_window_titlebar_height")
+public func verde_macos_host_window_titlebar_height(_ nsWindow: UnsafeMutableRawPointer?) -> Double {
+    guard let nsWindow else { return 0 }
+    return onMain {
+        let window = Unmanaged<NSWindow>.fromOpaque(nsWindow).takeUnretainedValue()
+        guard window.styleMask.contains(.fullSizeContentView), !window.styleMask.contains(.fullScreen) else { return 0 }
+        return Double(max(window.frame.height - window.contentLayoutRect.height, 0))
+    }
+}
+
 @_cdecl("verde_macos_webview_appkit_diagnostics")
 public func verde_macos_webview_appkit_diagnostics(_ handle: UnsafeMutableRawPointer?) -> UnsafeMutablePointer<CChar>? {
     onMain {
