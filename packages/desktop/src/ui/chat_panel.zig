@@ -12,6 +12,7 @@ const platform_runtime = @import("platform_runtime");
 const utils = @import("../utils.zig");
 const browser_panel = @import("browser.zig");
 const bang_commands = @import("../workspace/bang_commands.zig");
+const chat_threads = @import("../chat/threads.zig");
 const chat_types = @import("../state/chat_types.zig");
 const linked_chats = @import("../state/linked_chats_controller.zig");
 const chat_markdown = @import("chat_markdown.zig");
@@ -2628,52 +2629,10 @@ pub fn transcriptMarkdownSelectionPlainText(state: *app_state.AppState) std.mem.
 
 const HEADER_TITLE_BUF_LEN: usize = 512;
 
-const HeaderTitleDisplay = struct {
-    text: []const u8,
-    /// The cleaned title did not fit `buf`; the caller must ellipsize.
-    clipped: bool,
-};
+const HeaderTitleDisplay = chat_threads.DisplayTitle;
 
-/// Display form of a thread title for the pane header. Auto-titles are often
-/// the first line of a pasted prompt, so leading markdown syntax (headings,
-/// quotes, list bullets, emphasis) and inline backticks are dropped and
-/// whitespace runs collapse to single spaces. Stored titles are unchanged.
 fn headerTitleDisplayText(buf: []u8, title: []const u8) HeaderTitleDisplay {
-    var start: usize = 0;
-    while (start < title.len) : (start += 1) {
-        switch (title[start]) {
-            '#', '>', '-', '*', '`', '+', '_', ' ', '\t', '\n', '\r' => {},
-            else => break,
-        }
-    }
-    var len: usize = 0;
-    var pending_space = false;
-    var i = start;
-    while (i < title.len) {
-        const byte = title[i];
-        if (byte == '`') {
-            i += 1;
-            continue;
-        }
-        if (byte < 0x20 or byte == ' ' or byte == 0x7f) {
-            pending_space = len > 0;
-            i += 1;
-            continue;
-        }
-        const seq = std.unicode.utf8ByteSequenceLength(byte) catch 1;
-        const end = @min(i + seq, title.len);
-        const needed = (end - i) + @as(usize, if (pending_space) 1 else 0);
-        if (len + needed > buf.len) return .{ .text = buf[0..len], .clipped = true };
-        if (pending_space) {
-            buf[len] = ' ';
-            len += 1;
-            pending_space = false;
-        }
-        @memcpy(buf[len..][0 .. end - i], title[i..end]);
-        len += end - i;
-        i = end;
-    }
-    return .{ .text = buf[0..len], .clipped = false };
+    return chat_threads.displayThreadTitle(buf, title);
 }
 
 /// Ellipsizes `display` to `max_width` using measured `.ui_medium` advances,

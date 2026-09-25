@@ -6,6 +6,7 @@ const sdl = @import("zsdl3");
 const theme = @import("theme.zig");
 const colors = @import("colors.zig");
 const context_menu = @import("context_menu.zig");
+const chat_threads = @import("../chat/threads.zig");
 const globe_icon = @import("globe_icon.zig");
 const runtime = @import("runtime.zig");
 const command_palette = @import("command_palette.zig");
@@ -840,10 +841,18 @@ pub fn paneTitle(
     term_title_buf: *TerminalTitleBuffer,
 ) []const u8 {
     return switch (pane.ref) {
-        .chat => |ref| if (ref.thread_index < project.threads.items.len) project.threads.items[ref.thread_index].title else "Chat",
+        .chat => |ref| if (ref.thread_index < project.threads.items.len) chatTitle(term_title_buf, project.threads.items[ref.thread_index].title) else "Chat",
         .terminal => |ref| terminalPaneTitle(state, project_index, ref.dock_id, term_title_buf),
         .browser => browserPaneTitle(pane),
     };
+}
+
+/// Chat pane label: the thread title without leading markdown syntax, so a
+/// pasted "# Heading" prompt reads as "Heading". Falls back to the stored title
+/// when cleaning leaves nothing.
+pub fn chatTitle(buf: []u8, title: []const u8) []const u8 {
+    const display = chat_threads.displayThreadTitle(buf, title).text;
+    return if (display.len > 0) display else title;
 }
 
 /// Terminal pane label: prefer an agent/notify-provided surface title, then
@@ -2319,7 +2328,7 @@ fn renderOpenPaneRow(
             if (ref.thread_index < project.threads.items.len) {
                 const thread = &project.threads.items[ref.thread_index];
                 queuePaletteProviderGlyph(state, thread.provider, icon_x, cy, clip);
-                title = thread.title;
+                title = chatTitle(&term_title_buf, thread.title);
                 status = chatSurfaceStatusForUi(thread);
                 running = status.? == .working;
                 if (running) status_started_at_ms = thread.sendStartedAtMsForUi();

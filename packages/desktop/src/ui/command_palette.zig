@@ -1748,12 +1748,13 @@ fn renderThreadRow(state: *runtime.AppState, row_index: usize, tr: ThreadRef, re
     const show_workspace = state.command_controller.scope_project == null;
     const workspace_w = if (show_workspace) theme.scaledUi(96.0) else 0.0;
     const title_x = rect.x + theme.scaledUi(42.0);
+    var title_buf: sidebar.TerminalTitleBuffer = undefined;
     queueText(state, .{
         .x = title_x,
         .y = text_y,
         .w = rect.w - (title_x - rect.x) - workspace_w - open_w - time_w - theme.scaledUi(16.0),
         .h = font_size * 1.3,
-    }, thread.title, paletteColor(if (emphasis) theme.COLOR_WHITE else theme.COLOR_TEXT_MUTED), font_size, row_clip);
+    }, sidebar.chatTitle(&title_buf, thread.title), paletteColor(if (emphasis) theme.COLOR_WHITE else theme.COLOR_TEXT_MUTED), font_size, row_clip);
 
     var right = rect.x + rect.w - theme.scaledUi(8.0);
     var time_buf: [24]u8 = undefined;

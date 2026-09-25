@@ -106,32 +106,73 @@ pub fn selectedCommittedThreadIndex(project: anytype) usize {
     return if (committed_index == 0) 0 else fallback_index;
 }
 
-/// Builds a short title from the first prompt text.
+/// Builds a short title from the first prompt text. A prompt that opens with a
+/// markdown heading (handoffs, pasted specs) is titled by that heading alone;
+/// otherwise the whole prompt is compacted. Leading markdown syntax is dropped.
 pub fn makeThreadTitle(allocator: std.mem.Allocator, prompt: []const u8) ![:0]const u8 {
-    const trimmed = std.mem.trim(u8, prompt, &std.ascii.whitespace);
-    if (trimmed.len == 0) return try allocator.dupeZ(u8, "New chat");
+    var source = std.mem.trim(u8, prompt, &std.ascii.whitespace);
+    if (source.len > 0 and source[0] == '#') {
+        const line_end = std.mem.findScalar(u8, source, '\n') orelse source.len;
+        source = source[0..line_end];
+    }
 
     var compact: [96]u8 = undefined;
-    var count: usize = 0;
-    var saw_space = false;
-    for (trimmed) |char| {
-        const normalized = if (std.ascii.isWhitespace(char)) ' ' else char;
-        if (normalized == ' ') {
-            if (count == 0 or saw_space) continue;
-            saw_space = true;
-        } else {
-            saw_space = false;
-        }
-        if (count == compact.len) break;
-        compact[count] = normalized;
-        count += 1;
-    }
-
-    while (count > 0 and compact[count - 1] == ' ') {
-        count -= 1;
-    }
+    const display = displayThreadTitle(&compact, source);
+    var count = display.text.len;
+    // If the byte limit lands inside UTF-8, omit the partial codepoint.
+    while (count > 0 and !std.unicode.utf8ValidateSlice(compact[0..count])) count -= 1;
+    while (count > 0 and compact[count - 1] == ' ') count -= 1;
     if (count == 0) return try allocator.dupeZ(u8, "New chat");
     return try allocator.dupeZ(u8, compact[0..count]);
+}
+
+/// A thread title cleaned for display, written into a caller buffer.
+pub const DisplayTitle = struct {
+    text: []const u8,
+    /// The cleaned title did not fit `buf`; the caller must ellipsize.
+    clipped: bool,
+};
+
+/// Display form of a thread title. Auto-titles are often the first line of a
+/// pasted prompt, so leading markdown syntax (headings, quotes, list bullets,
+/// emphasis) and inline backticks are dropped and whitespace runs collapse to
+/// single spaces. Stored titles are unchanged.
+pub fn displayThreadTitle(buf: []u8, title: []const u8) DisplayTitle {
+    var start: usize = 0;
+    while (start < title.len) : (start += 1) {
+        switch (title[start]) {
+            '#', '>', '-', '*', '`', '+', '_', ' ', '\t', '\n', '\r' => {},
+            else => break,
+        }
+    }
+    var len: usize = 0;
+    var pending_space = false;
+    var i = start;
+    while (i < title.len) {
+        const byte = title[i];
+        if (byte == '`') {
+            i += 1;
+            continue;
+        }
+        if (byte < 0x20 or byte == ' ' or byte == 0x7f) {
+            pending_space = len > 0;
+            i += 1;
+            continue;
+        }
+        const seq = std.unicode.utf8ByteSequenceLength(byte) catch 1;
+        const end = @min(i + seq, title.len);
+        const needed = (end - i) + @as(usize, if (pending_space) 1 else 0);
+        if (len + needed > buf.len) return .{ .text = buf[0..len], .clipped = true };
+        if (pending_space) {
+            buf[len] = ' ';
+            len += 1;
+            pending_space = false;
+        }
+        @memcpy(buf[len..][0 .. end - i], title[i..end]);
+        len += end - i;
+        i = end;
+    }
+    return .{ .text = buf[0..len], .clipped = false };
 }
 
 /// Returns whether a title is one of Verde's reserved empty-thread labels.
@@ -198,6 +239,22 @@ pub fn makeTitleGenerationPrompt(
 pub fn sanitizeEnum(comptime Enum: type, value: *Enum, fallback: Enum) void {
     const raw = @as(*u8, @ptrCast(value)).*;
     value.* = std.enums.fromInt(Enum, raw) orelse fallback;
+}
+
+test "prompt titles use a leading heading and drop markdown syntax" {
+    const allocator = std.testing.allocator;
+    const handoff = try makeThreadTitle(allocator, "# Verde agent handoff\n\nContinue the work described below.");
+    defer allocator.free(handoff);
+    try std.testing.expectEqualStrings("Verde agent handoff", handoff);
+    const plain = try makeThreadTitle(allocator, "  Fix the   sidebar\nspacing please ");
+    defer allocator.free(plain);
+    try std.testing.expectEqualStrings("Fix the sidebar spacing please", plain);
+    const quoted = try makeThreadTitle(allocator, "> `why` does this 404?");
+    defer allocator.free(quoted);
+    try std.testing.expectEqualStrings("why does this 404?", quoted);
+    const empty = try makeThreadTitle(allocator, "### \n");
+    defer allocator.free(empty);
+    try std.testing.expectEqualStrings("New chat", empty);
 }
 
 test "generated thread title strips response framing" {
