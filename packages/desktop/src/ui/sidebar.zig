@@ -38,14 +38,14 @@ fn attentionPulse(state: *runtime.AppState, project_index: usize) f32 {
 }
 
 /// Saved-thread row: provider bitmap slot (CSS px).
-const SIDEBAR_THREAD_PROVIDER_GLYPH_CSS: f32 = 22.0;
+const SIDEBAR_THREAD_PROVIDER_GLYPH_CSS: f32 = 20.0;
 /// Claude's mark fills its whole image while the other logos carry built-in
 /// padding; shrink it so every provider reads at the same optical size.
 const CLAUDE_LOGO_OPTICAL_SCALE: f32 = 0.8;
 /// Thread row height must fit `SIDEBAR_THREAD_PROVIDER_GLYPH_CSS` with a little vertical air.
-const SIDEBAR_THREAD_ROW_HEIGHT_CSS: f32 = 38.0;
+const SIDEBAR_THREAD_ROW_HEIGHT_CSS: f32 = 32.0;
 /// Vertical advance per thread row (row + gap).
-const SIDEBAR_THREAD_ROW_STEP_CSS: f32 = 42.0;
+const SIDEBAR_THREAD_ROW_STEP_CSS: f32 = 33.0;
 // Neutral panel→text tint strengths for sidebar fills (see `sidebarTint`).
 const SIDEBAR_HOVER_TINT: f32 = 0.045;
 const SIDEBAR_ICON_HOVER_TINT: f32 = 0.07;
@@ -65,9 +65,9 @@ const SIDEBAR_THREAD_ICON_TITLE_GAP_CSS: f32 = 10.0;
 const SIDEBAR_STATUS_COLUMN_CSS: f32 = 96.0;
 /// Horizontal padding of the expanded rail's content column. Kept tight so
 /// pane titles keep as many characters as possible at typical rail widths.
-const SIDEBAR_PAD_X_CSS: f32 = 16.0;
+const SIDEBAR_PAD_X_CSS: f32 = 10.0;
 /// Indent of pane rows beneath their workspace header row.
-const SIDEBAR_ROW_INDENT_CSS: f32 = 16.0;
+const SIDEBAR_ROW_INDENT_CSS: f32 = 24.0;
 /// Compact workspace-row badge width for Herdr-backed workspaces.
 const SIDEBAR_HERDR_BADGE_W_CSS: f32 = 50.0;
 const HIDDEN_SIDEBAR_EDGE_REVEAL_CSS: f32 = 8.0;
@@ -79,17 +79,26 @@ const SIDEBAR_FOOTER_RESERVE_CSS: f32 = 56.0;
 /// the cluster so a busy machine cannot bury the workspace tree.
 const SIDEBAR_ACTIVE_MAX_ROWS: usize = 10;
 /// Caption band above ACTIVE rows, including the gap under the label.
-const SIDEBAR_ACTIVE_LABEL_H_CSS: f32 = 20.0;
+const SIDEBAR_ACTIVE_LABEL_H_CSS: f32 = 24.0;
 /// Pinned "New chat" / "Search" rows under the rail header.
-const SIDEBAR_RAIL_ACTION_ROW_CSS: f32 = 32.0;
+const SIDEBAR_RAIL_ACTION_ROW_CSS: f32 = 36.0;
 /// Pinned section caption band ("Projects").
-const SIDEBAR_SECTION_CAPTION_H_CSS: f32 = 26.0;
+const SIDEBAR_SECTION_CAPTION_H_CSS: f32 = 24.0;
+/// Space above a section caption that follows another section.
+const SIDEBAR_SECTION_GAP_CSS: f32 = 12.0;
+/// Workspace (folder) rows in the expanded rail, and the gap below each.
+const SIDEBAR_PROJECT_ROW_H_CSS: f32 = 34.0;
+const SIDEBAR_PROJECT_ROW_GAP_CSS: f32 = 1.0;
+/// Corner radius shared by rail row fills.
+const SIDEBAR_ROW_RADIUS_CSS: f32 = 8.0;
+/// Fill behind the selected workspace's folder row.
+const SIDEBAR_PROJECT_SELECTED_TINT: f32 = 0.035;
 /// Hover action buttons on workspace rows.
 const SIDEBAR_ROW_ACTION_CSS: f32 = 24.0;
 /// Section caption text ("Active", "Projects").
-const SIDEBAR_SECTION_CAPTION_FONT_CSS: f32 = 13.0;
+const SIDEBAR_SECTION_CAPTION_FONT_CSS: f32 = 12.5;
 /// Hairline divider plus trailing gap that separates ACTIVE from the tree.
-const SIDEBAR_ACTIVE_TRAILING_H_CSS: f32 = 12.0;
+const SIDEBAR_ACTIVE_TRAILING_H_CSS: f32 = 4.0;
 /// Keep at least this much of the workspace tree visible under a tall ACTIVE
 /// cluster so short windows still show the selected workspace.
 const SIDEBAR_WORKSPACE_MIN_H_CSS: f32 = 96.0;
@@ -1150,10 +1159,10 @@ fn renderPaletteExpandedSidebar(state: *runtime.AppState, rect: palette.Rect) vo
     // scrolling list, so starting a chat and the palette — the only route to
     // saved threads — keep visible entry points.
     const action_row_h = theme.scaledUi(SIDEBAR_RAIL_ACTION_ROW_CSS);
-    const action_row_gap = theme.scaledUi(2.0);
-    const new_chat_top = header_top + header_h + theme.scaledUi(8.0);
+    const action_row_gap = theme.scaledUi(1.0);
+    const new_chat_top = header_top + header_h + theme.scaledUi(4.0);
     const search_top = new_chat_top + action_row_h + action_row_gap;
-    const list_top = search_top + action_row_h + theme.scaledUi(12.0);
+    const list_top = search_top + action_row_h + theme.scaledUi(18.0);
     // Reserve a band at the bottom of the rail for sticky chrome. Clipping the
     // workspace tree short here also caps `sidebar_max_scroll_y` (computed
     // below from `workspace_clip`), so the tree scrolls to rest above the
@@ -1176,7 +1185,8 @@ fn renderPaletteExpandedSidebar(state: *runtime.AppState, rect: palette.Rect) vo
 
     // Pinned "Projects" caption between the ACTIVE cluster and the tree; it
     // carries the add-workspace control.
-    const projects_caption_top = list_top + cluster_layout.viewport_h;
+    const projects_caption_top = list_top + cluster_layout.viewport_h +
+        (if (cluster_layout.viewport_h > 0.0) theme.scaledUi(SIDEBAR_SECTION_GAP_CSS) else 0.0);
     const projects_caption_h = theme.scaledUi(SIDEBAR_SECTION_CAPTION_H_CSS);
     const workspace_top = projects_caption_top + projects_caption_h;
     const workspace_clip: palette.Rect = .{
@@ -1195,7 +1205,7 @@ fn renderPaletteExpandedSidebar(state: *runtime.AppState, rect: palette.Rect) vo
     var content_y = workspace_top;
     var focused_row: ?palette.Rect = null;
     for (state.project_controller.projects.items, 0..) |*project, index| {
-        content_y += theme.scaledUi(34.0);
+        content_y += theme.scaledUi(SIDEBAR_PROJECT_ROW_H_CSS + SIDEBAR_PROJECT_ROW_GAP_CSS);
         if (!project.collapsed) {
             const is_focused_project = index == focused_project_index;
             const measured = measureSidebarPaneRows(&project.workspace_layout, if (is_focused_project) focused_pane_id else null);
@@ -1206,7 +1216,6 @@ fn renderPaletteExpandedSidebar(state: *runtime.AppState, rect: palette.Rect) vo
             }
             content_y += measured.height;
         }
-        content_y += theme.scaledUi(8.0);
     }
     sidebar_max_scroll_y = @max(0.0, content_y - (workspace_clip.y + workspace_clip.h) + theme.scaledUi(8.0));
     sidebar_scroll_y = theme.clampf(sidebar_scroll_y, 0.0, sidebar_max_scroll_y);
@@ -1227,8 +1236,7 @@ fn renderPaletteExpandedSidebar(state: *runtime.AppState, rect: palette.Rect) vo
         // Each workspace expands independently, so several projects' panes
         // can be open in the tree at once.
         const effective_collapsed = project.collapsed;
-        const row_h = theme.scaledUi(30.0);
-        const group_top = y;
+        const row_h = theme.scaledUi(SIDEBAR_PROJECT_ROW_H_CSS);
         // Full-width row: the hover zone covers the trailing action cluster so
         // moving onto the hover-revealed icons doesn't clear the row hover.
         const row_rect: palette.Rect = .{ .x = x, .y = y, .w = rail_w, .h = row_h };
@@ -1243,8 +1251,12 @@ fn renderPaletteExpandedSidebar(state: *runtime.AppState, rect: palette.Rect) vo
         else
             "";
         if (project_visible) {
-            if (project_hovered and !selected) {
-                queuePaletteRoundedRect(state, snapRect(row_rect), paletteColor(sidebarTint(SIDEBAR_HOVER_TINT)), theme.scaledUi(6.0));
+            // The selected workspace's folder row carries a soft fill (the
+            // selection cue); hover lifts any other row a little.
+            if (selected) {
+                queuePaletteRoundedRect(state, snapRect(row_rect), paletteColor(sidebarTint(if (project_hovered) SIDEBAR_HOVER_TINT else SIDEBAR_PROJECT_SELECTED_TINT)), theme.scaledUi(SIDEBAR_ROW_RADIUS_CSS));
+            } else if (project_hovered) {
+                queuePaletteRoundedRect(state, snapRect(row_rect), paletteColor(sidebarTint(SIDEBAR_HOVER_TINT)), theme.scaledUi(SIDEBAR_ROW_RADIUS_CSS));
             }
             addClippedPaletteHit(row_rect, workspace_clip, .workspace_row, project_index, 0);
         }
@@ -1253,9 +1265,11 @@ fn renderPaletteExpandedSidebar(state: *runtime.AppState, rect: palette.Rect) vo
         var tx = x + theme.scaledUi(6.0);
         // No disclosure chevron: the folder row itself toggles, and its
         // indented pane rows show whether it is open.
-        tx += theme.scaledUi(4.0);
-        if (project_visible) queuePaletteFolderIcon(state, tx, cy, theme.scaledUi(14.0), theme.scaledUi(10.0), if (selected or project_hovered) theme.COLOR_WHITE else theme.COLOR_TEXT_SUBTLE, selected);
-        tx += theme.scaledUi(20.0);
+        tx = x + theme.scaledUi(SIDEBAR_THREAD_ICON_LEADING_PAD_CSS);
+        if (project_visible) queuePaletteFolderIcon(state, tx, cy, theme.scaledUi(16.0), theme.scaledUi(12.0), if (selected or project_hovered) theme.COLOR_WHITE else theme.COLOR_TEXT_SUBTLE, selected);
+        // Folder (16) + 8 gap puts the label on the column the indented pane
+        // rows' provider logos share.
+        tx += theme.scaledUi(24.0);
 
         // Trailing hover actions: new chat and "…" (the workspace menu, which
         // holds terminal, history, settings and the rest). They render only
@@ -1274,12 +1288,13 @@ fn renderPaletteExpandedSidebar(state: *runtime.AppState, rect: palette.Rect) vo
         const badge_gap = theme.scaledUi(6.0);
         const label_right = if (badge_label != null) content_right - badge_w - badge_gap else content_right;
         if (project_visible) {
-            const label_rect: palette.Rect = .{ .x = tx, .y = y + theme.scaledUi(5.0), .w = @max(label_right - tx, theme.scaledUi(24.0)), .h = row_h };
+            const label_font = theme.scaledUi(14.0);
+            const label_rect: palette.Rect = .{ .x = tx, .y = @round(cy - label_font * 0.65), .w = @max(label_right - tx, theme.scaledUi(24.0)), .h = label_font * 1.3 };
             const label_color = paletteColor(if (selected or project_hovered) theme.COLOR_WHITE else theme.COLOR_TEXT_MUTED);
             if (selected)
-                queuePaletteMediumText(state, label_rect, project.label, label_color, theme.scaledUi(14.5), row_rect)
+                queuePaletteMediumText(state, label_rect, project.label, label_color, label_font, row_rect)
             else
-                queuePaletteText(state, label_rect, project.label, label_color, theme.scaledUi(14.5), row_rect);
+                queuePaletteText(state, label_rect, project.label, label_color, label_font, row_rect);
         }
         if (project_visible) {
             if (badge_label) |label| {
@@ -1297,29 +1312,12 @@ fn renderPaletteExpandedSidebar(state: *runtime.AppState, rect: palette.Rect) vo
             renderPaletteSidebarRowAction(state, more_rect, NF_COD_ELLIPSIS, workspace_more_hovered == project_index, workspace_clip);
             addClippedPaletteHit(more_rect, workspace_clip, .workspace_more, project_index, 0);
         }
-        y += row_h + theme.scaledUi(4.0);
+        y += row_h + theme.scaledUi(SIDEBAR_PROJECT_ROW_GAP_CSS);
 
         if (!effective_collapsed) {
             y = renderOpenPanesSection(state, project_index, project, x, rail_w, workspace_clip, workspace_clip, y);
         }
 
-        // 3px neutral bar spanning the active workspace group — mirrors the
-        // collapsed rail's selected-chip bar so both rails share one selection
-        // cue. Clamped to the workspace band so it never bleeds into the
-        // pinned ACTIVE/header/footer strips while scrolled.
-        if (selected) {
-            const bar_top = @max(group_top + theme.scaledUi(4.0), workspace_clip.y);
-            const bar_bottom = @min(y - theme.scaledUi(4.0), workspace_clip.y + workspace_clip.h);
-            if (bar_bottom - bar_top > theme.scaledUi(4.0)) {
-                queuePaletteRoundedRect(state, .{
-                    .x = rect.x + theme.scaledUi(2.0),
-                    .y = bar_top,
-                    .w = theme.scaledUi(3.0),
-                    .h = bar_bottom - bar_top,
-                }, paletteColor(sidebarTint(SIDEBAR_GROUP_BAR_TINT)), theme.scaledUi(1.5));
-            }
-        }
-        y += theme.scaledUi(8.0);
     }
 
     // Scrollbar must clip to the workspace tree so the thumb never extends
@@ -1385,7 +1383,7 @@ fn renderPaletteExpandedSidebar(state: *runtime.AppState, rect: palette.Rect) vo
         queuePaletteLogoMark(state, .{ .x = x, .y = header_top + (header_h - logo) * 0.5, .w = logo, .h = logo });
     }
 
-    const btn_w = theme.scaledUi(28.0);
+    const btn_w = @min(theme.scaledUi(32.0), header_h);
     const toggle_rect: palette.Rect = .{ .x = rect.x + rect.w - pad_x - btn_w, .y = header_top + (header_h - btn_w) * 0.5, .w = btn_w, .h = btn_w };
     renderPaletteSidebarToggle(state, toggle_rect, true);
 
@@ -1475,13 +1473,13 @@ fn renderPaletteRailActionRow(
     primary: bool,
 ) void {
     if (hovered) {
-        queuePaletteRoundedRect(state, snapRect(rect), paletteColor(sidebarTint(SIDEBAR_HOVER_TINT)), theme.scaledUi(7.0));
+        queuePaletteRoundedRect(state, snapRect(rect), paletteColor(sidebarTint(SIDEBAR_HOVER_TINT)), theme.scaledUi(SIDEBAR_ROW_RADIUS_CSS));
     }
     addPaletteHit(rect, kind, 0, 0);
 
     const cy = rect.y + rect.h * 0.5;
     const fg = if (hovered or primary) theme.COLOR_WHITE else theme.COLOR_TEXT_MUTED;
-    const icon_font = theme.scaledUi(14.0);
+    const icon_font = theme.scaledUi(16.0);
     queuePaletteIcon(state, .{
         .x = rect.x + theme.scaledUi(SIDEBAR_THREAD_ICON_LEADING_PAD_CSS),
         .y = cy - icon_font * 0.55,
@@ -1491,7 +1489,7 @@ fn renderPaletteRailActionRow(
 
     const label_font = theme.scaledUi(14.0);
     const label_rect: palette.Rect = .{
-        .x = rect.x + theme.scaledUi(SIDEBAR_THREAD_ICON_LEADING_PAD_CSS + 24.0),
+        .x = rect.x + theme.scaledUi(SIDEBAR_THREAD_ICON_LEADING_PAD_CSS + 26.0),
         .y = @round(cy - label_font * 0.65),
         .w = @max(rect.w - theme.scaledUi(96.0), theme.scaledUi(40.0)),
         .h = label_font * 1.3,
@@ -1520,7 +1518,7 @@ fn renderProjectsCaption(state: *runtime.AppState, x: f32, rail_w: f32, band: pa
     queuePaletteRect(state, .{ .x = band.x, .y = band.y, .w = band.w - theme.scaledUi(1.0), .h = band.h }, paletteColor(theme.COLOR_PANEL));
     const caption_font = theme.scaledUi(SIDEBAR_SECTION_CAPTION_FONT_CSS);
     const cy = band.y + band.h * 0.5;
-    queuePaletteText(state, .{
+    queuePaletteMediumText(state, .{
         .x = x + theme.scaledUi(SIDEBAR_THREAD_ICON_LEADING_PAD_CSS),
         .y = @round(cy - caption_font * 0.65),
         .w = rail_w * 0.5,
@@ -1636,9 +1634,9 @@ fn renderAttentionClusterSection(
         .h = label_h,
     }, paletteColor(theme.COLOR_PANEL));
     const caption_font = theme.scaledUi(SIDEBAR_SECTION_CAPTION_FONT_CSS);
-    queuePaletteText(state, .{
+    queuePaletteMediumText(state, .{
         .x = x + theme.scaledUi(SIDEBAR_THREAD_ICON_LEADING_PAD_CSS),
-        .y = clip.y,
+        .y = @round(clip.y + (label_h - caption_font * 1.3) * 0.5),
         .w = rail_w * 0.5,
         .h = caption_font * 1.3,
     }, "Active", paletteColor(theme.COLOR_TEXT_SUBTLE), caption_font, clip);
@@ -1647,7 +1645,7 @@ fn renderAttentionClusterSection(
     const count_w = runtime.paletteUiTextPrefixWidth(count_label, caption_font, count_label.len);
     queuePaletteText(state, .{
         .x = x + rail_w - count_w - theme.scaledUi(10.0),
-        .y = clip.y,
+        .y = @round(clip.y + (label_h - caption_font * 1.3) * 0.5),
         .w = count_w + theme.scaledUi(4.0),
         .h = caption_font * 1.3,
     }, count_label, paletteColor(theme.COLOR_TEXT_SUBTLE), caption_font, clip);
@@ -1659,12 +1657,6 @@ fn renderAttentionClusterSection(
         .h = trailing_h,
     };
     queuePaletteRect(state, divider_band, paletteColor(theme.COLOR_PANEL));
-    queuePaletteRect(state, .{
-        .x = x,
-        .y = divider_band.y + theme.scaledUi(2.0),
-        .w = rail_w,
-        .h = theme.scaledUi(1.0),
-    }, paletteColor(theme.borderMuted()));
 
     renderSidebarOverflowScrollbar(state, rows_clip, attention_scroll_y, attention_max_scroll_y);
 }
@@ -2410,9 +2402,9 @@ fn renderOpenPaneRow(
     const hovered = state.transcript_controller.palette_mouse_in_workspace and rectContainsPoint(rect, state.transcript_controller.palette_mouse_x, state.transcript_controller.palette_mouse_y);
     // Neutral fills: selection reads as a soft lift, not an accent block.
     if (focused) {
-        queuePaletteRoundedRectClipped(state, rect, paletteColor(sidebarTint(SIDEBAR_SELECTED_TINT)), theme.scaledUi(7.0), clip);
+        queuePaletteRoundedRectClipped(state, rect, paletteColor(sidebarTint(SIDEBAR_SELECTED_TINT)), theme.scaledUi(SIDEBAR_ROW_RADIUS_CSS), clip);
     } else if (hovered) {
-        queuePaletteRoundedRectClipped(state, rect, paletteColor(sidebarTint(SIDEBAR_HOVER_TINT)), theme.scaledUi(7.0), clip);
+        queuePaletteRoundedRectClipped(state, rect, paletteColor(sidebarTint(SIDEBAR_HOVER_TINT)), theme.scaledUi(SIDEBAR_ROW_RADIUS_CSS), clip);
     }
     addClippedPaletteHit(rect, clip, if (show_workspace_tag) .open_pane else .open_pane_reorder, project_index, pane.id);
 
