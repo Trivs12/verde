@@ -38,7 +38,7 @@ fn attentionPulse(state: *runtime.AppState, project_index: usize) f32 {
 }
 
 /// Saved-thread row: provider bitmap slot (CSS px).
-const SIDEBAR_THREAD_PROVIDER_GLYPH_CSS: f32 = 22.0;
+const SIDEBAR_THREAD_PROVIDER_GLYPH_CSS: f32 = 18.0;
 /// Thread row height must fit `SIDEBAR_THREAD_PROVIDER_GLYPH_CSS` with a little vertical air.
 const SIDEBAR_THREAD_ROW_HEIGHT_CSS: f32 = 38.0;
 /// Vertical advance per thread row (row + gap).
@@ -81,6 +81,8 @@ const SIDEBAR_ACTIVE_LABEL_H_CSS: f32 = 20.0;
 const SIDEBAR_RAIL_ACTION_ROW_CSS: f32 = 32.0;
 /// Pinned section caption band ("Projects").
 const SIDEBAR_SECTION_CAPTION_H_CSS: f32 = 26.0;
+/// Section caption text ("Active", "Projects").
+const SIDEBAR_SECTION_CAPTION_FONT_CSS: f32 = 13.0;
 /// Hairline divider plus trailing gap that separates ACTIVE from the tree.
 const SIDEBAR_ACTIVE_TRAILING_H_CSS: f32 = 12.0;
 /// Keep at least this much of the workspace tree visible under a tall ACTIVE
@@ -738,16 +740,17 @@ fn finishWorkspaceDrag(state: *runtime.AppState, x: f32, y: f32) bool {
     _ = sdl.captureMouse(false);
 
     if (!drag.active) {
-        // No meaningful movement — treat as a plain click on the row. First
-        // click selects the workspace (which auto-expands its subtree in the
-        // expanded rail); only a click on the already-selected row toggles the
-        // manual collapse flag, so selecting never immediately re-hides panes.
+        // No meaningful movement — treat as a plain click on the row. It
+        // always selects the workspace; a collapsed row also expands, and a
+        // click on the already-selected expanded row collapses it. Selecting
+        // an expanded workspace never re-hides its panes.
         if (drag.project_index < state.project_controller.projects.items.len) {
             state.noteInteraction();
             const was_selected = state.project_controller.selected_index == drag.project_index;
             _ = state.selectProjectAtIndex(drag.project_index);
-            if (drag.toggle_project_on_click and was_selected) {
-                state.project_controller.projects.items[drag.project_index].collapsed = !state.project_controller.projects.items[drag.project_index].collapsed;
+            const project = &state.project_controller.projects.items[drag.project_index];
+            if (drag.toggle_project_on_click and (was_selected or project.collapsed)) {
+                project.collapsed = !project.collapsed;
             }
             state.requestTranscriptScrollToBottom();
             state.markDirty();
@@ -1159,10 +1162,13 @@ fn renderPaletteExpandedSidebar(state: *runtime.AppState, rect: palette.Rect) vo
     var focused_row: ?palette.Rect = null;
     for (state.project_controller.projects.items, 0..) |*project, index| {
         content_y += theme.scaledUi(34.0);
-        if (index == focused_project_index and !project.collapsed) {
-            const measured = measureSidebarPaneRows(&project.workspace_layout, focused_pane_id);
-            if (measured.focused_top) |top| {
-                focused_row = .{ .x = 0.0, .y = content_y + top, .w = 0.0, .h = measured.focused_h };
+        if (!project.collapsed) {
+            const is_focused_project = index == focused_project_index;
+            const measured = measureSidebarPaneRows(&project.workspace_layout, if (is_focused_project) focused_pane_id else null);
+            if (is_focused_project) {
+                if (measured.focused_top) |top| {
+                    focused_row = .{ .x = 0.0, .y = content_y + top, .w = 0.0, .h = measured.focused_h };
+                }
             }
             content_y += measured.height;
         }
@@ -1184,11 +1190,9 @@ fn renderPaletteExpandedSidebar(state: *runtime.AppState, rect: palette.Rect) vo
     while (project_index < state.project_controller.projects.items.len) : (project_index += 1) {
         const project = &state.project_controller.projects.items[project_index];
         const selected = state.project_controller.selected_index == project_index;
-        // Only the selected workspace expands. Other workspaces stay one
-        // header row tall — their live panes surface through the cluster
-        // above — so the tree never buries the active workspace under idle
-        // pane lists and rail height keeps tracking activity.
-        const effective_collapsed = project.collapsed or !selected;
+        // Each workspace expands independently, so several projects' panes
+        // can be open in the tree at once.
+        const effective_collapsed = project.collapsed;
         const row_h = theme.scaledUi(30.0);
         const group_top = y;
         // Full-width row: the hover zone covers the trailing action cluster so
@@ -1475,7 +1479,7 @@ fn renderPaletteRailActionRow(
 fn renderProjectsCaption(state: *runtime.AppState, x: f32, rail_w: f32, band: palette.Rect) void {
     if (band.h <= 0.0) return;
     queuePaletteRect(state, .{ .x = band.x, .y = band.y, .w = band.w - theme.scaledUi(1.0), .h = band.h }, paletteColor(theme.COLOR_PANEL));
-    const caption_font = theme.scaledUi(12.0);
+    const caption_font = theme.scaledUi(SIDEBAR_SECTION_CAPTION_FONT_CSS);
     const cy = band.y + band.h * 0.5;
     queuePaletteText(state, .{
         .x = x + theme.scaledUi(SIDEBAR_THREAD_ICON_LEADING_PAD_CSS),
@@ -1483,9 +1487,18 @@ fn renderProjectsCaption(state: *runtime.AppState, x: f32, rail_w: f32, band: pa
         .w = rail_w * 0.5,
         .h = caption_font * 1.3,
     }, "Projects", paletteColor(theme.COLOR_TEXT_SUBTLE), caption_font, band);
-    const btn = theme.scaledUi(24.0);
+    // Compact add control sized to the caption, not the 30px row actions.
+    const btn = theme.scaledUi(22.0);
     const add_rect: palette.Rect = .{ .x = x + rail_w - btn - theme.scaledUi(4.0), .y = cy - btn * 0.5, .w = btn, .h = btn };
-    renderPaletteSidebarActionIcon(state, add_rect, NF_COD_ADD, null, band);
+    const hovered = state.transcript_controller.palette_mouse_in_workspace and rectContainsPoint(add_rect, state.transcript_controller.palette_mouse_x, state.transcript_controller.palette_mouse_y);
+    if (hovered) queuePaletteRoundedRect(state, add_rect, paletteColor(sidebarTint(SIDEBAR_ICON_HOVER_TINT)), theme.scaledUi(6.0));
+    const icon_font = theme.scaledUi(13.0);
+    queuePaletteIcon(state, .{
+        .x = add_rect.x + (add_rect.w - icon_font) * 0.5,
+        .y = add_rect.y + (add_rect.h - icon_font) * 0.5,
+        .w = icon_font,
+        .h = icon_font,
+    }, NF_COD_ADD, icon_font, paletteColor(if (hovered) theme.COLOR_WHITE else theme.COLOR_TEXT_SUBTLE), band);
     addPaletteHit(add_rect, .add_workspace, 0, 0);
 }
 
@@ -1583,7 +1596,7 @@ fn renderAttentionClusterSection(
         .w = clip.w - theme.scaledUi(1.0),
         .h = label_h,
     }, paletteColor(theme.COLOR_PANEL));
-    const caption_font = theme.scaledUi(12.0);
+    const caption_font = theme.scaledUi(SIDEBAR_SECTION_CAPTION_FONT_CSS);
     queuePaletteText(state, .{
         .x = x + theme.scaledUi(SIDEBAR_THREAD_ICON_LEADING_PAD_CSS),
         .y = clip.y,

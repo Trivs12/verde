@@ -5968,6 +5968,8 @@ pub const AppState = struct {
             return null;
         };
         defer loaded.deinit();
+        const pixel_count: usize = @as(usize, @intCast(loaded.width)) * @as(usize, @intCast(loaded.height));
+        bleedTransparentRgb(loaded.pixels[0 .. pixel_count * 4], @intCast(loaded.width), @intCast(loaded.height));
         return self.uploadLoadedTexture(loaded);
     }
 
@@ -22288,6 +22290,41 @@ test "runtime picker add-connection row follows the configured profiles" {
     try std.testing.expectEqual(@as(usize, 2), runtimePickerAddIndex(&state));
     try std.testing.expectEqualStrings("Unavailable runtime", paletteRuntimePickerLabel(@ptrCast(&state), 1));
     try std.testing.expectEqualStrings("Add connection…", paletteRuntimePickerLabel(@ptrCast(&state), 2));
+}
+
+/// Gives fully transparent pixels the artwork's alpha-weighted average colour,
+/// keeping alpha at zero. Logos are drawn far below their source size with
+/// linear filtering, so transparent pixels stored as black otherwise bleed a
+/// grey fringe around the edges. Exact for single-colour marks.
+fn bleedTransparentRgb(pixels: []u8, width: usize, height: usize) void {
+    const count = width * height;
+    if (count == 0 or pixels.len < count * 4) return;
+    var sum = [3]u64{ 0, 0, 0 };
+    var weight: u64 = 0;
+    for (0..count) |p| {
+        const a: u64 = pixels[p * 4 + 3];
+        if (a == 0) continue;
+        sum[0] += @as(u64, pixels[p * 4]) * a;
+        sum[1] += @as(u64, pixels[p * 4 + 1]) * a;
+        sum[2] += @as(u64, pixels[p * 4 + 2]) * a;
+        weight += a;
+    }
+    if (weight == 0) return;
+    const fill = [3]u8{ @intCast(sum[0] / weight), @intCast(sum[1] / weight), @intCast(sum[2] / weight) };
+    for (0..count) |p| {
+        if (pixels[p * 4 + 3] != 0) continue;
+        pixels[p * 4] = fill[0];
+        pixels[p * 4 + 1] = fill[1];
+        pixels[p * 4 + 2] = fill[2];
+    }
+}
+
+test "transparent logo pixels take the artwork colour" {
+    var pixels = [_]u8{ 0, 0, 0, 0, 200, 100, 50, 255, 0, 0, 0, 0, 200, 100, 50, 128 };
+    bleedTransparentRgb(&pixels, 2, 2);
+    try std.testing.expectEqualSlices(u8, &.{ 200, 100, 50, 0 }, pixels[0..4]);
+    try std.testing.expectEqual(@as(u8, 255), pixels[7]);
+    try std.testing.expectEqual(@as(u8, 128), pixels[15]);
 }
 
 /// Rewrites RGBA pixels in place into white with alpha = coverage (see

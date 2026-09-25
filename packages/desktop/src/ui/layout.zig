@@ -685,11 +685,14 @@ fn computeRootLayout(state: *runtime.AppState, width: f32, height: f32) RootLayo
     }
 
     const layout_sidebar_width = if (hidden) 0.0 else sidebar_anim_width;
+    const workspace_top = if (hidden) top else 0.0;
     const target_layout_sidebar_width = if (hidden) 0.0 else target_sidebar_width;
     const workspace_width = @max(width - layout_sidebar_width - gap, theme.scaledUi(320.0));
     return .{
         .sidebar = .{ .x = sidebar_anim_x, .y = top, .w = sidebar_anim_width, .h = height - top },
-        .workspace = .{ .x = layout_sidebar_width + gap, .y = top, .w = workspace_width, .h = height - top },
+        // The traffic lights sit over the sidebar, so the workspace only
+        // needs the titlebar band when the sidebar is hidden.
+        .workspace = .{ .x = layout_sidebar_width + gap, .y = workspace_top, .w = workspace_width, .h = height - workspace_top },
         .target_workspace_width = @max(width - target_layout_sidebar_width - gap, theme.scaledUi(320.0)),
     };
 }
