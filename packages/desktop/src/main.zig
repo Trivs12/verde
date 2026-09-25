@@ -591,6 +591,8 @@ fn mainInner(init: std.process.Init) !void {
                 changed.* = app_state.pollTerminals();
             }
         }.run, .{ &state, &terminal_needs_render });
+        // Settings-menu hover delays elapse on the clock, not on an event.
+        const settings_hover_needs_render = state.pollComposerSettingsHoverIntent();
         if (app_config_poll_cadence.shouldRun(monotonicMs(), APP_CONFIG_POLL_INTERVAL_MS)) {
             recordSpan(&frame_sample, .poll_config, struct {
                 fn run(app_state: *AppState, kb: *keybinds.NativeKeyboardConfig) void {
@@ -648,7 +650,7 @@ fn mainInner(init: std.process.Init) !void {
         // A wake-driven send change is covered by the display-rate wake frame.
         // Non-wake polling changes still render immediately.
         const immediate_send_render = send_needs_render and event_flags.loop_wakeup_sequence == null;
-        if (runtime_needs_render or immediate_send_render or background_tasks_need_render or browser_needs_render or terminal_needs_render or event_needs_render or framebuffer_size_changed or continuous_frame_due or wake_frame_due or state.workspaceSwitchFramePending()) {
+        if (runtime_needs_render or settings_hover_needs_render or immediate_send_render or background_tasks_need_render or browser_needs_render or terminal_needs_render or event_needs_render or framebuffer_size_changed or continuous_frame_due or wake_frame_due or state.workspaceSwitchFramePending()) {
             presentation_demand.request();
         }
         if (!presentation_demand.pending) {
@@ -1762,11 +1764,15 @@ fn eventWaitTimeoutMs(
 }
 
 fn eventWaitBaseTimeoutMs(state: *AppState) c_int {
-    const base = eventWaitBaseTimeoutForActivity(pacingActivity(state));
+    var base = eventWaitBaseTimeoutForActivity(pacingActivity(state));
     // A held notice toast needs exactly one wake at its fade start; cap the
     // idle wait on that instead of pumping frames through the hold.
     if (state.noticeToastWakeMs()) |wake_ms| {
-        return @intCast(@min(@as(i64, base), @max(wake_ms, 1)));
+        base = @intCast(@min(@as(i64, base), @max(wake_ms, 1)));
+    }
+    // Likewise one wake when a settings-menu hover delay elapses.
+    if (state.composerSettingsHoverWakeMs()) |wake_ms| {
+        base = @intCast(@min(@as(i64, base), @max(wake_ms, 1)));
     }
     return base;
 }

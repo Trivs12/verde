@@ -89,6 +89,105 @@ pub fn settingsKeyAction(key: SettingsKey, focused_row: usize, row_count: usize,
     };
 }
 
+/// How long the pointer must rest on a settings row before hover opens (or
+/// switches to) its submenu. Clicks and keys open immediately. This is a
+/// hover-intent delay, not motion, so reduced-motion settings keep it.
+pub const SETTINGS_HOVER_OPEN_DELAY_MS: i64 = 150;
+
+/// What a pointer move over the settings menu means for the row highlight.
+pub const SettingsHoverMove = enum {
+    /// Hovering the row changes nothing (no row, or its submenu is showing).
+    idle,
+    /// A submenu switch is pending; the highlight follows the pointer.
+    waiting,
+    /// The pointer is heading into the open submenu across other rows; the
+    /// highlight stays on the open submenu's row.
+    aiming,
+};
+
+/// Hover intent for the settings menu: hovering a row schedules its
+/// submenu instead of opening it, so sweeping up from the label across the
+/// Model row, or diagonally toward an open submenu, does not flicker lists.
+/// Palette has no timers; the host polls `takeDue` and caps its event wait
+/// on `wakeMs`.
+pub const SettingsHoverIntent = struct {
+    pending_row: ?usize = null,
+    deadline_ms: i64 = 0,
+    last_point: ?palette.draw.Vec2 = null,
+
+    pub fn reset(self: *SettingsHoverIntent) void {
+        self.* = .{};
+    }
+
+    /// Pointer at `point` over settings row `row` (null off the rows).
+    /// `needs_switch` is whether resting there would change the open
+    /// submenu; `submenu_rect` is the open submenu's bounds, if any.
+    pub fn noteMove(
+        self: *SettingsHoverIntent,
+        point: palette.draw.Vec2,
+        row: ?usize,
+        needs_switch: bool,
+        submenu_rect: ?palette.Rect,
+        now_ms: i64,
+    ) SettingsHoverMove {
+        const previous = self.last_point;
+        self.last_point = point;
+        const target = row orelse {
+            self.pending_row = null;
+            return .idle;
+        };
+        if (!needs_switch) {
+            self.pending_row = null;
+            return .idle;
+        }
+        const aiming = if (submenu_rect) |rect|
+            if (previous) |from| movingTowardRect(from, point, rect) else false
+        else
+            false;
+        // Motion toward the open submenu is not resting: keep pushing the
+        // deadline so the switch waits until the pointer settles.
+        if (aiming or self.pending_row != target) {
+            self.pending_row = target;
+            self.deadline_ms = now_ms + SETTINGS_HOVER_OPEN_DELAY_MS;
+        }
+        return if (aiming) .aiming else .waiting;
+    }
+
+    /// The row whose delay elapsed by `now_ms`, clearing it.
+    pub fn takeDue(self: *SettingsHoverIntent, now_ms: i64) ?usize {
+        const row = self.pending_row orelse return null;
+        if (now_ms < self.deadline_ms) return null;
+        self.pending_row = null;
+        return row;
+    }
+
+    /// Milliseconds until the pending row is due (0 when overdue).
+    pub fn wakeMs(self: SettingsHoverIntent, now_ms: i64) ?i64 {
+        if (self.pending_row == null) return null;
+        return @max(self.deadline_ms - now_ms, 0);
+    }
+};
+
+/// True when moving `from` -> `to` heads into `rect`: `to` lies inside the
+/// triangle spanned by `from` and the rect's near vertical edge (the
+/// classic submenu "safe triangle").
+pub fn movingTowardRect(from: palette.draw.Vec2, to: palette.draw.Vec2, rect: palette.Rect) bool {
+    if (from.x == to.x and from.y == to.y) return false;
+    const near_x = if (rect.x >= from.x) rect.x else rect.x + rect.w;
+    const top: palette.draw.Vec2 = .{ .x = near_x, .y = rect.y };
+    const bottom: palette.draw.Vec2 = .{ .x = near_x, .y = rect.y + rect.h };
+    const d1 = cross(from, top, to);
+    const d2 = cross(top, bottom, to);
+    const d3 = cross(bottom, from, to);
+    const has_neg = d1 < 0.0 or d2 < 0.0 or d3 < 0.0;
+    const has_pos = d1 > 0.0 or d2 > 0.0 or d3 > 0.0;
+    return !(has_neg and has_pos);
+}
+
+fn cross(a: palette.draw.Vec2, b: palette.draw.Vec2, p: palette.draw.Vec2) f32 {
+    return (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x);
+}
+
 /// CSS-unit geometry of the settings menu (scaled by the caller's factor).
 pub const SETTINGS_MENU_WIDTH: f32 = 260.0;
 pub const SETTINGS_MENU_PADDING: f32 = 6.0;
@@ -228,6 +327,7 @@ pub fn State(
         /// Highlighted menu row (hover or arrows); null until either.
         settings_focused_row: ?usize = null,
         settings_submenu: ?SettingsSubmenu = null,
+        settings_hover: SettingsHoverIntent = .{},
         /// Effort / Access submenu list; the Model submenu is `model_picker`.
         settings_option_picker: SettingsOptionPicker,
         picker_provider: ?Provider = null,
@@ -315,4 +415,63 @@ test "settings menu sits above the label right-aligned and inside the pane" {
     try std.testing.expect(left.divider.w > 0.0 and left.divider.h >= 1.0);
     // Model alone would lead the menu without a divider.
     try std.testing.expectEqual(@as(f32, 0.0), layoutSettingsMenu(anchor, bounds, kinds[3..], 1.0).divider.h);
+}
+
+test "settings hover opens a row's submenu only after it rests for the delay" {
+    var intent: SettingsHoverIntent = .{};
+    // Crossing the Model row on the way up schedules it...
+    try std.testing.expectEqual(SettingsHoverMove.waiting, intent.noteMove(.{ .x = 50, .y = 130 }, 3, true, null, 1000));
+    try std.testing.expectEqual(@as(?i64, SETTINGS_HOVER_OPEN_DELAY_MS), intent.wakeMs(1000));
+    try std.testing.expectEqual(@as(?usize, null), intent.takeDue(1100));
+    // ...but reaching another row restarts the delay for that row.
+    try std.testing.expectEqual(SettingsHoverMove.waiting, intent.noteMove(.{ .x = 50, .y = 90 }, 2, true, null, 1100));
+    try std.testing.expectEqual(@as(?usize, null), intent.takeDue(1000 + SETTINGS_HOVER_OPEN_DELAY_MS));
+    // Small moves within the row do not restart it.
+    _ = intent.noteMove(.{ .x = 60, .y = 92 }, 2, true, null, 1200);
+    try std.testing.expectEqual(@as(?i64, 50), intent.wakeMs(1200));
+    try std.testing.expectEqual(@as(?usize, 2), intent.takeDue(1100 + SETTINGS_HOVER_OPEN_DELAY_MS));
+    try std.testing.expectEqual(@as(?usize, null), intent.takeDue(2000));
+    try std.testing.expectEqual(@as(?i64, null), intent.wakeMs(2000));
+
+    // Leaving the rows, or resting where nothing would change, cancels.
+    _ = intent.noteMove(.{ .x = 50, .y = 60 }, 1, true, null, 3000);
+    try std.testing.expectEqual(SettingsHoverMove.idle, intent.noteMove(.{ .x = 50, .y = 10 }, null, true, null, 3010));
+    try std.testing.expectEqual(@as(?usize, null), intent.takeDue(4000));
+    _ = intent.noteMove(.{ .x = 50, .y = 60 }, 1, true, null, 4000);
+    try std.testing.expectEqual(SettingsHoverMove.idle, intent.noteMove(.{ .x = 50, .y = 62 }, 1, false, null, 4010));
+    try std.testing.expectEqual(@as(?usize, null), intent.takeDue(5000));
+}
+
+test "settings hover keeps the open submenu while the pointer aims at it" {
+    // Menu rows span x 0..260; the open Model list sits to the right and
+    // reaches up from the Model row.
+    const submenu: palette.Rect = .{ .x = 270, .y = 0, .w = 200, .h = 160 };
+    var intent: SettingsHoverIntent = .{};
+    _ = intent.noteMove(.{ .x = 100, .y = 150 }, 3, false, submenu, 0);
+    // Diagonal motion up-right across the Access row toward the list.
+    try std.testing.expectEqual(SettingsHoverMove.aiming, intent.noteMove(.{ .x = 140, .y = 120 }, 2, true, submenu, 10));
+    try std.testing.expectEqual(SettingsHoverMove.aiming, intent.noteMove(.{ .x = 180, .y = 100 }, 2, true, submenu, 100));
+    // Still aiming on the same row keeps pushing the switch out.
+    try std.testing.expectEqual(SettingsHoverMove.aiming, intent.noteMove(.{ .x = 220, .y = 90 }, 2, true, submenu, 200));
+    try std.testing.expectEqual(@as(?usize, null), intent.takeDue(200 + SETTINGS_HOVER_OPEN_DELAY_MS - 1));
+    // Settling on the row switches after the delay from the last aimed move.
+    try std.testing.expectEqual(@as(?usize, 2), intent.takeDue(200 + SETTINGS_HOVER_OPEN_DELAY_MS));
+
+    // Moving away from the submenu is an ordinary delayed hover.
+    intent.reset();
+    _ = intent.noteMove(.{ .x = 200, .y = 50 }, 1, false, submenu, 0);
+    try std.testing.expectEqual(SettingsHoverMove.waiting, intent.noteMove(.{ .x = 150, .y = 90 }, 2, true, submenu, 10));
+    try std.testing.expectEqual(SettingsHoverMove.waiting, intent.noteMove(.{ .x = 140, .y = 95 }, 2, true, submenu, 20));
+    try std.testing.expectEqual(@as(?usize, 2), intent.takeDue(10 + SETTINGS_HOVER_OPEN_DELAY_MS));
+}
+
+test "safe triangle uses the submenu's near edge on either side" {
+    const right: palette.Rect = .{ .x = 300, .y = 0, .w = 100, .h = 100 };
+    try std.testing.expect(movingTowardRect(.{ .x = 100, .y = 150 }, .{ .x = 120, .y = 140 }, right));
+    try std.testing.expect(!movingTowardRect(.{ .x = 100, .y = 150 }, .{ .x = 100, .y = 170 }, right));
+    try std.testing.expect(!movingTowardRect(.{ .x = 100, .y = 150 }, .{ .x = 80, .y = 140 }, right));
+    try std.testing.expect(!movingTowardRect(.{ .x = 100, .y = 150 }, .{ .x = 100, .y = 150 }, right));
+    const left: palette.Rect = .{ .x = 0, .y = 0, .w = 100, .h = 100 };
+    try std.testing.expect(movingTowardRect(.{ .x = 300, .y = 150 }, .{ .x = 280, .y = 140 }, left));
+    try std.testing.expect(!movingTowardRect(.{ .x = 300, .y = 150 }, .{ .x = 320, .y = 140 }, left));
 }

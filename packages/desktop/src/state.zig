@@ -13659,6 +13659,7 @@ pub const AppState = struct {
         self.composer_controller.settings_open = true;
         self.composer_controller.settings_submenu = null;
         self.composer_controller.settings_focused_row = null;
+        self.composer_controller.settings_hover.reset();
         self.composer_controller.composer.setLabelActive(true);
         if (submenu) |kind| {
             self.composer_controller.settings_focused_row = self.layoutComposerSettingsMenu().indexOf(settingsRowForSubmenu(kind));
@@ -13714,6 +13715,7 @@ pub const AppState = struct {
         self.composer_controller.settings_open = false;
         self.composer_controller.settings_submenu = null;
         self.composer_controller.settings_focused_row = null;
+        self.composer_controller.settings_hover.reset();
         self.composer_controller.composer.setLabelActive(false);
     }
 
@@ -13836,6 +13838,8 @@ pub const AppState = struct {
         const layout = self.layoutComposerSettingsMenu();
         if (index >= layout.count) return;
         self.composer_controller.settings_focused_row = index;
+        // Explicit activation skips (and cancels) any pending hover delay.
+        self.composer_controller.settings_hover.reset();
         switch (composer_controller.settingsRowActivation(layout.kinds[index], self.currentThread().fast_mode == .on)) {
             .fast_changed => |enabled| {
                 self.closeComposerSettingsSubmenu();
@@ -13850,6 +13854,8 @@ pub const AppState = struct {
     /// Menu-level keys once no submenu picker claimed them.
     fn routeComposerSettingsKey(self: *AppState, key: composer_controller.SettingsKey) bool {
         if (!self.composer_controller.settings_open) return false;
+        // Keys take over from the pointer; a pending hover must not fire.
+        self.composer_controller.settings_hover.reset();
         const layout = self.layoutComposerSettingsMenu();
         // Before any hover or arrow the menu has no focused row: the first
         // arrow picks an end, the first activation key picks the top row.
@@ -13944,31 +13950,68 @@ pub const AppState = struct {
         return true;
     }
 
-    /// Hover moves the row highlight and opens that row's submenu (Fast
-    /// closes any open one); motion over the submenu goes to its picker.
+    /// Hover moves the row highlight at once but opens that row's submenu
+    /// (Fast closes any open one) only after the pointer rests there for
+    /// `SETTINGS_HOVER_OPEN_DELAY_MS`; `pollComposerSettingsHoverIntent`
+    /// applies it. Heading diagonally into the open submenu keeps it and its
+    /// row highlighted. Motion over the submenu goes to its picker.
     fn routeComposerSettingsMouseMove(self: *AppState, point: palette.draw.Vec2, dragging: bool) bool {
         if (!self.composer_controller.settings_open) return false;
-        if (self.settingsSubmenuRect()) |rect| {
+        const hover = &self.composer_controller.settings_hover;
+        const now_ms = monotonicMs();
+        const submenu_rect = self.settingsSubmenuRect();
+        if (submenu_rect) |rect| {
             if (dragging or rect.contains(point)) {
                 const input: palette.RichPickerInput = if (dragging) .{ .mouse_drag = point } else .{ .mouse_move = point };
                 const handled = self.settingsSubmenuPickerInput(input);
-                if (rect.contains(point) or handled) return true;
+                if (rect.contains(point) or handled) {
+                    _ = hover.noteMove(point, null, false, null, now_ms);
+                    return true;
+                }
             }
         }
         const layout = self.layoutComposerSettingsMenu();
-        if (layout.rowAt(point)) |index| {
-            if (self.composer_controller.settings_focused_row != index) {
+        const row = layout.rowAt(point);
+        const open_submenu: ?ComposerSettingsSubmenu = if (submenu_rect != null) self.composer_controller.settings_submenu else null;
+        const needs_switch = if (row) |index| !sameSettingsSubmenu(layout.kinds[index].submenu(), open_submenu) else false;
+        const move = hover.noteMove(point, row, needs_switch, submenu_rect, now_ms);
+        if (row) |index| {
+            if (move != .aiming and self.composer_controller.settings_focused_row != index) {
                 self.composer_controller.settings_focused_row = index;
                 self.noteInteraction();
-            }
-            if (layout.kinds[index].submenu()) |kind| {
-                self.openComposerSettingsSubmenu(kind);
-            } else {
-                self.closeComposerSettingsSubmenu();
             }
             return true;
         }
         return layout.panel.contains(point);
+    }
+
+    fn sameSettingsSubmenu(a: ?ComposerSettingsSubmenu, b: ?ComposerSettingsSubmenu) bool {
+        if (a) |kind| return if (b) |other| kind == other else false;
+        return b == null;
+    }
+
+    /// Applies a settings-row hover whose rest delay elapsed. The main loop
+    /// polls this each iteration and renders when it returns true.
+    pub fn pollComposerSettingsHoverIntent(self: *AppState) bool {
+        if (!self.composer_controller.settings_open) return false;
+        const index = self.composer_controller.settings_hover.takeDue(monotonicMs()) orelse return false;
+        const layout = self.layoutComposerSettingsMenu();
+        if (index >= layout.count) return false;
+        self.composer_controller.settings_focused_row = index;
+        if (layout.kinds[index].submenu()) |kind| {
+            self.openComposerSettingsSubmenu(kind);
+        } else {
+            self.closeComposerSettingsSubmenu();
+        }
+        self.noteInteraction();
+        return true;
+    }
+
+    /// Milliseconds until a pending settings-row hover is due; the main loop
+    /// caps its event wait on this instead of rendering through the delay.
+    pub fn composerSettingsHoverWakeMs(self: *const AppState) ?i64 {
+        if (!self.composer_controller.settings_open) return null;
+        return self.composer_controller.settings_hover.wakeMs(monotonicMs());
     }
 
     fn routeComposerSettingsWheel(self: *AppState, point: palette.draw.Vec2, y: f32) bool {
