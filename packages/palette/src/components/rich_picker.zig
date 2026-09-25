@@ -48,6 +48,14 @@ pub const Placement = enum {
     auto,
 };
 
+/// Runtime placement beside a host panel (a cascading submenu): the picker
+/// opens right of `panel` when the viewport has room, else left of it, with
+/// its first row level with `row`; the viewport clamp keeps it on screen.
+pub const SideAnchor = struct {
+    panel: draw.Rect,
+    row: draw.Rect,
+};
+
 pub const RichPickerConfig = struct {
     width: f32 = 360.0,
     /// Compact row (label only).
@@ -288,6 +296,13 @@ pub fn RichPicker(comptime config: RichPickerConfig) type {
         font_metrics: ?text_layout.FontMetrics = null,
         viewport_rect: ?draw.Rect = config.viewport_rect,
         anchor_rect: ?draw.Rect = config.anchor_rect,
+        /// Overrides `anchor_rect` / `placement` while set; see `SideAnchor`.
+        side_anchor: ?SideAnchor = null,
+        /// Runtime body width (CSS units) replacing `config.width`.
+        width_override: ?f32 = null,
+        /// Hides a configured rail at runtime; groups then render as header
+        /// rows, as for a picker without a rail.
+        rail_suppressed: bool = false,
         z_index: i32 = config.z_index,
         style: Style = defaultStyle(),
         callbacks: RichPickerCallbacks = .{},
@@ -371,6 +386,24 @@ pub fn RichPicker(comptime config: RichPickerConfig) type {
 
         pub fn setAnchorRect(self: *Component, rect_value: draw.Rect) void {
             self.anchor_rect = rect_value;
+        }
+
+        pub fn setSideAnchor(self: *Component, anchor: ?SideAnchor) void {
+            self.side_anchor = anchor;
+        }
+
+        pub fn setWidthOverride(self: *Component, width: ?f32) void {
+            self.width_override = width;
+        }
+
+        pub fn setRailSuppressed(self: *Component, suppressed: bool) void {
+            if (self.rail_suppressed == suppressed) return;
+            self.rail_suppressed = suppressed;
+            // A rail filter the user can no longer see must not hide rows.
+            self.active_group_label.clearRetainingCapacity();
+            self.hovered_rail = null;
+            self.focused_rail = null;
+            self.rows_dirty = true;
         }
 
         pub fn setItemCount(self: *Component, count: usize) void {
@@ -532,7 +565,7 @@ pub fn RichPicker(comptime config: RichPickerConfig) type {
         }
 
         pub fn pickerRect(self: *const Component) draw.Rect {
-            const width = self.scaled(config.width) + self.railWidth();
+            const width = self.scaled(self.width_override orelse config.width) + self.railWidth();
             const pad_y = self.scaled(config.padding_y);
             const search_h = if (self.searchActive()) self.scaled(config.search_height) + self.scaled(config.search_gap) else 0.0;
             var body_h = if (config.fixed_body_height) |fixed_height|
@@ -556,7 +589,13 @@ pub fn RichPicker(comptime config: RichPickerConfig) type {
                 height = @max(height, rail_h);
             }
             var rect_value: draw.Rect = .{ .x = 0.0, .y = 0.0, .w = width, .h = height };
-            if (self.anchor_rect) |anchor| {
+            if (self.side_anchor) |side| {
+                const gap = self.scaled(config.anchor_gap);
+                const right_x = side.panel.x + side.panel.w + gap;
+                const fits_right = if (self.viewport_rect) |viewport| right_x + width <= viewport.x + viewport.w else true;
+                rect_value.x = if (fits_right) right_x else side.panel.x - gap - width;
+                rect_value.y = side.row.y - pad_y;
+            } else if (self.anchor_rect) |anchor| {
                 rect_value.x = anchor.x;
                 const gap = self.scaled(config.anchor_gap);
                 rect_value.y = switch (config.placement) {
@@ -592,7 +631,11 @@ pub fn RichPicker(comptime config: RichPickerConfig) type {
         }
 
         fn railActive(self: *const Component) bool {
-            return config.rail_enabled and self.groups.items.len > 1;
+            return self.railConfigured() and self.groups.items.len > 1;
+        }
+
+        fn railConfigured(self: *const Component) bool {
+            return config.rail_enabled and !self.rail_suppressed;
         }
 
         fn railWidth(self: *const Component) f32 {
@@ -846,7 +889,7 @@ pub fn RichPicker(comptime config: RichPickerConfig) type {
             // An active query re-ranks items by score, interleaving groups;
             // headers would repeat between every hit, so search results render
             // as a flat ranked list instead. A rail replaces headers entirely.
-            const grouping_active = self.last_query.items.len == 0 and !config.rail_enabled;
+            const grouping_active = self.last_query.items.len == 0 and !self.railConfigured();
             var y: f32 = 0.0;
             var ordinal: usize = 0;
             var previous_group: []const u8 = "";
@@ -1845,4 +1888,57 @@ test "rich picker renders labels, descriptions, badges, and search" {
     }
     try std.testing.expect(text_commands >= TestContext.labels.len * 2);
     try std.testing.expect(rect_commands >= 2);
+}
+
+test "rich picker rail suppression shows group headers instead of the rail" {
+    var context: TestContext = .{};
+    var picker = try openedPickerOf(RailTestPicker, &context);
+    defer picker.deinit(std.testing.allocator);
+    const rail_width = picker.pickerRect().w;
+
+    // Filter to one group, then suppress: every row returns under headers.
+    _ = try picker.handleInput(std.testing.allocator, .{ .mouse_down = .{ .point = railItemCenter(&picker, 2) } });
+    picker.setRailSuppressed(true);
+    _ = try picker.handleInput(std.testing.allocator, .{ .item_count = TestContext.labels.len });
+    try std.testing.expect(!picker.railActive());
+    // 6 items + 3 group headers ("Codex", "Claude", "Cursor").
+    try std.testing.expectEqual(@as(usize, 9), picker.rows.items.len);
+    try std.testing.expect(picker.rows.items[0].kind == .header);
+    try std.testing.expect(picker.pickerRect().w < rail_width);
+    try std.testing.expectEqual(@as(?usize, null), picker.railItemAtPoint(railItemCenter(&picker, 0)));
+    // Left stays in the search field rather than entering a hidden rail.
+    _ = try picker.handleInput(std.testing.allocator, .{ .key = .{ .code = .left } });
+    try std.testing.expectEqual(@as(?usize, null), picker.focused_rail);
+
+    // Search still flattens results; clearing it restores headers.
+    _ = try picker.handleInput(std.testing.allocator, .{ .text = "opus" });
+    try std.testing.expectEqual(@as(usize, 1), picker.rows.items.len);
+
+    // Default picker keeps its rail when not suppressed.
+    picker.setRailSuppressed(false);
+    _ = try picker.handleInput(std.testing.allocator, .close);
+    _ = try picker.handleInput(std.testing.allocator, .open);
+    try std.testing.expect(picker.railActive());
+    try std.testing.expectEqual(@as(usize, TestContext.labels.len), picker.rows.items.len);
+}
+
+test "rich picker side anchor opens beside a panel and flips left without room" {
+    var context: TestContext = .{};
+    var picker = try openedTestPicker(&context);
+    defer picker.deinit(std.testing.allocator);
+    picker.setWidthOverride(200);
+    picker.setViewportRect(.{ .x = 0, .y = 0, .w = 1000, .h = 900 });
+
+    const panel: draw.Rect = .{ .x = 100, .y = 400, .w = 240, .h = 160 };
+    const row: draw.Rect = .{ .x = 104, .y = 440, .w = 232, .h = 30 };
+    picker.setSideAnchor(.{ .panel = panel, .row = row });
+    const right = picker.pickerRect();
+    try std.testing.expectEqual(@as(f32, 200), right.w);
+    try std.testing.expect(right.x >= panel.x + panel.w);
+
+    // Panel near the viewport's right edge: open on its left instead.
+    picker.setSideAnchor(.{ .panel = .{ .x = 700, .y = 400, .w = 240, .h = 160 }, .row = row });
+    const left = picker.pickerRect();
+    try std.testing.expect(left.x + left.w <= 700.0);
+    try std.testing.expect(left.y + left.h <= 900.0);
 }

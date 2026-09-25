@@ -2378,9 +2378,11 @@ pub const PaletteComposerPrompt = palette.composerPrompt(.{
     .toolbar_gap = 10.0,
     .control_gap = 6.0,
     // Single slim bar while the draft fits one line: prompt text on the left,
-    // one merged ghost model label ([logo] Model detail ⌄) plus the round
-    // send button on the right. Longer drafts stack the text above that row.
+    // one merged ghost model label ([logo] Model ⌄) on the right; the round
+    // button joins it only as the stop control of a running turn (Enter
+    // sends). Longer drafts stack the text above that row.
     .inline_toolbar = true,
+    .send_button = .running_only,
     .merged_model_label = true,
     // Small provider logo in the merged label (drawn by the host in
     // `leadingIconRect(.model)`), with a text-sized gap before the name.
@@ -2541,6 +2543,14 @@ const COMPOSER_MODEL_PICKER_WIDTH: f32 = 430.0;
 const COMPOSER_MODEL_PICKER_RAIL_WIDTH: f32 = 52.0;
 const COMPOSER_MODEL_PICKER_Z: i32 = 1400;
 pub const COMPOSER_RUN_CONFIG_Z: i32 = 1400;
+/// Model & settings menu above the merged label; its cascading submenus
+/// (option list, model picker) stack above it.
+pub const COMPOSER_SETTINGS_MENU_Z: i32 = 1400;
+const COMPOSER_SETTINGS_SUBMENU_Z: i32 = COMPOSER_SETTINGS_MENU_Z + 10;
+/// CSS widths of the settings submenus: the compact option list and the
+/// rail-less model picker.
+const COMPOSER_SETTINGS_OPTION_PICKER_WIDTH: f32 = 250.0;
+const COMPOSER_SETTINGS_MODEL_PICKER_WIDTH: f32 = 340.0;
 const COMPOSER_PROVIDER_OPTIONS = [_]Provider{ .codex, .claude, .cursor, .opencode, .pi, .fx, .grok, .muse };
 
 fn paletteEstimatedFontAdvance(_: ?*anyopaque, text: []const u8, byte_offset: usize, font_size: f32) palette.FontAdvance {
@@ -2862,7 +2872,7 @@ fn paletteComposerPromptEvent(context: ?*anyopaque, event: palette.ComposerPromp
         // hit-rect path) still open the host popovers.
         .directory_clicked => state.openPaletteDirectoryPicker(),
         .runtime_clicked => state.openPaletteRuntimePicker(),
-        .model_clicked => state.openPaletteModelPicker(),
+        .model_clicked => state.toggleComposerSettingsMenu(),
         .reasoning_clicked => state.toggleRunConfigPopover(),
     }
 }
@@ -3254,6 +3264,20 @@ fn paletteModelPickerStyle() palette.RichPickerStyle {
         .scrollbar_track_color = paletteColor(theme.withAlpha(theme.COLOR_PANEL_MUTED, 110)),
         .scrollbar_thumb_color = paletteColor(theme.withAlpha(theme.COLOR_TEXT_MUTED, 220)),
     };
+}
+
+/// Calm neutral styling for the settings submenus: no selected-row fill
+/// (the check marks the current value), a soft neutral hover, and the
+/// resting edge instead of an accent border.
+fn paletteSettingsSubmenuStyle() palette.RichPickerStyle {
+    var style = paletteModelPickerStyle();
+    style.border_color = paletteColor(theme.restingEdge());
+    style.highlighted_color = paletteColor(theme.withAlpha(theme.COLOR_WHITE, 16));
+    style.selected_color = paletteColor(theme.withAlpha(theme.COLOR_WHITE, 0));
+    style.description_color = paletteColor(theme.COLOR_TEXT_SUBTLE);
+    style.accent_color = paletteColor(theme.COLOR_WHITE);
+    style.icon_color = paletteColor(theme.COLOR_TEXT_MUTED);
+    return style;
 }
 
 pub const PaletteModelPicker = palette.richPicker(.{
@@ -3918,10 +3942,83 @@ fn paletteRuntimePickerEvent(context: ?*anyopaque, event: palette.RichPickerEven
     }
 }
 
+pub const ComposerSettingsRow = composer_controller.SettingsRow;
+pub const ComposerSettingsSubmenu = composer_controller.SettingsSubmenu;
+pub const ComposerSettingsLayout = composer_controller.SettingsMenuLayout;
+
+fn settingsOptionPickerLabel(context: ?*anyopaque, index: usize) []const u8 {
+    const state = appStateFromContext(context) orelse return "";
+    return switch (state.composer_controller.settings_submenu orelse return "") {
+        .effort => runReasoningStepLabel(state, index),
+        .access => if (index < RUN_ACCESS_STEP_LABELS.len) RUN_ACCESS_STEP_LABELS[index] else "",
+        .model => "",
+    };
+}
+
+fn settingsOptionPickerDescription(context: ?*anyopaque, index: usize) []const u8 {
+    const state = appStateFromContext(context) orelse return "";
+    return switch (state.composer_controller.settings_submenu orelse return "") {
+        .effort => runReasoningStepDescription(state, index),
+        .access => if (index < RUN_ACCESS_STEP_DESCRIPTIONS.len) RUN_ACCESS_STEP_DESCRIPTIONS[index] else "",
+        .model => "",
+    };
+}
+
+/// Effort / Access submenu of the model & settings menu: a short choice list
+/// with a trailing check on the current value.
+pub const PaletteSettingsOptionPicker = palette.richPicker(.{
+    .width = COMPOSER_SETTINGS_OPTION_PICKER_WIDTH,
+    .row_height = 32.0,
+    .row_height_with_description = 46.0,
+    .max_body_height = 320.0,
+    .padding_x = 6.0,
+    .padding_y = 6.0,
+    .row_padding_x = 10.0,
+    .anchor_gap = 6.0,
+    .corner_radius = 12.0,
+    .border_width = 1.0,
+    .font_size = 14.5,
+    .description_font_size = 12.0,
+    .search_enabled = false,
+    .item_label = settingsOptionPickerLabel,
+    .item_description = settingsOptionPickerDescription,
+    .check_icon = "\u{EAB2}",
+    .placement = .above,
+    .scrollbar_width = 5.0,
+    .z_index = COMPOSER_SETTINGS_SUBMENU_Z,
+});
+
+fn paletteSettingsOptionPickerEvent(context: ?*anyopaque, event: palette.RichPickerEvent) void {
+    const state = appStateFromContext(context) orelse return;
+    switch (event) {
+        .selected => |index| {
+            // Same events the run-config steppers emit, so persistence and
+            // provider rules stay in one place.
+            const composer_event: palette.ComposerPromptEvent = switch (state.composer_controller.settings_submenu orelse return) {
+                .effort => .{ .reasoning_changed = index },
+                .access => .{ .access_changed = index == 1 },
+                .model => return,
+            };
+            paletteComposerPromptEvent(state, composer_event);
+            // A pick closes the whole menu; the picker's own close follows
+            // and restores composer focus via `open_changed`.
+            state.markComposerSettingsMenuClosed();
+            state.syncPaletteComposerControls();
+        },
+        .action => {},
+        .open_changed => |open| {
+            if (!open) state.noteSettingsSubmenuClosed(.effort);
+        },
+        .highlighted => {},
+    }
+}
+
 fn paletteModelPickerEvent(context: ?*anyopaque, event: palette.RichPickerEvent) void {
     const state = appStateFromContext(context) orelse return;
     switch (event) {
         .selected => |index| {
+            // Picking a model from the settings submenu closes the menu too.
+            if (state.composer_controller.settings_open) state.markComposerSettingsMenuClosed();
             const entry = modelPickerEntryAt(state, index) orelse return;
             const option = modelPickerOptionAt(state, index) orelse return;
             if (entry.provider != state.currentThread().provider) {
@@ -3953,7 +4050,7 @@ fn paletteModelPickerEvent(context: ?*anyopaque, event: palette.RichPickerEvent)
             state.markDirty();
         },
         .open_changed => |open| {
-            if (!open) state.restoreComposerAfterShortcutPopover();
+            if (!open) state.noteSettingsSubmenuClosed(.model);
         },
         .highlighted => {},
     }
@@ -4487,6 +4584,7 @@ const ComposerControllerState = composer_controller.State(
     PaletteRuntimePicker,
     PaletteRunStepper,
     RunStepperContext,
+    PaletteSettingsOptionPicker,
 );
 
 pub const HandoffTargetSurface = handoff_controller.TargetSurface;
@@ -5754,7 +5852,8 @@ pub const AppState = struct {
             self.composer_controller.model_picker.isOpen() or
             self.composer_controller.directory_picker.isOpen() or
             self.composer_controller.runtime_picker.isOpen() or
-            self.composer_controller.run_config_open;
+            self.composer_controller.run_config_open or
+            self.composer_controller.settings_open;
     }
 
     fn maybePresentRuntimeTrustProposal(self: *AppState) bool {
@@ -12352,11 +12451,11 @@ pub const AppState = struct {
             log.warn("failed to refresh OpenCode reasoning menu: {s}", .{@errorName(err)});
             self.clearOpencodeReasoningMenu();
         };
-        // The run half of the merged model label (detail words + chevron)
-        // is always visible: it anchors the run-config popover. Its option list stays un-synced on purpose — the built-in dropdown
-        // is disabled via setExternalReasoningMenu and the run-config steppers
-        // own the reasoning data instead.
-        self.composer_controller.composer.setShowReasoningToggle(true);
+        // The merged model label is one click target (logo + name + chevron)
+        // that opens the model & settings menu; effort, speed and access
+        // live in that menu, so the label has no run half or detail words.
+        self.composer_controller.composer.setShowReasoningToggle(false);
+        self.composer_controller.composer.setLabelActive(self.composer_controller.settings_open);
         self.composer_controller.composer.model_index = self.composerModelIndex(thread.provider, thread.model_ref);
         const send_pending = thread.isSendPendingForUi();
         self.composer_controller.composer.setSendState(if (send_pending) .stop else .send);
@@ -12368,28 +12467,7 @@ pub const AppState = struct {
                 };
             }
         }
-        // The merged model label shows the variant words after the model
-        // name; clicking them opens the run-config popover (the `.reasoning`
-        // half). Access stays in the popover only.
-        var detail_buf: [128]u8 = undefined;
-        self.composer_controller.composer.setModelDetailLabel(self.allocator, self.composerModelDetailText(&detail_buf)) catch |err| {
-            log.warn("failed to sync palette composer model detail label: {s}", .{@errorName(err)});
-        };
         if (self.composer_controller.run_config_open) self.syncRunConfigSteppers();
-    }
-
-    /// Space-joined variant words (reasoning level, "Fast" when fast mode is
-    /// on) shown muted after the model name in the composer's merged label.
-    pub fn composerModelDetailText(self: *const AppState, buf: []u8) []const u8 {
-        var writer: std.Io.Writer = .fixed(buf);
-        if (self.currentComposerShowsReasoningSegment()) {
-            writer.writeAll(self.currentComposerReasoningLabel()) catch {};
-        }
-        if (self.currentComposerShowsFastToggle() and self.currentThread().fast_mode == .on) {
-            if (writer.buffered().len > 0) writer.writeAll(" ") catch {};
-            writer.writeAll(self.currentComposerFastLabel()) catch {};
-        }
-        return writer.buffered();
     }
 
     pub fn syncPaletteModelPicker(self: *AppState) void {
@@ -12399,7 +12477,8 @@ pub const AppState = struct {
             // Ctrl+V pastes into the embedded search field while open.
             .get_clipboard = paletteComposerGetClipboard,
         });
-        self.composer_controller.model_picker.setStyle(paletteModelPickerStyle());
+        const settings_submenu = self.composer_controller.settings_open and self.composer_controller.settings_submenu == .model;
+        self.composer_controller.model_picker.setStyle(if (settings_submenu) paletteSettingsSubmenuStyle() else paletteModelPickerStyle());
         self.composer_controller.model_picker.setUiScale(theme.uiScaleFactor());
         self.composer_controller.model_picker.setFontMetrics(paletteEstimatedFontMetrics(theme.scaledUi(15.5)));
         self.rebuildModelPickerEntries() catch |err| {
@@ -12466,6 +12545,20 @@ pub const AppState = struct {
     }
 
     pub fn setPaletteModelPickerBoundsFromToolbar(self: *AppState) void {
+        const picker = &self.composer_controller.model_picker;
+        if (self.composer_controller.settings_open and self.composer_controller.settings_submenu == .model) {
+            // Settings submenu: compact, beside the menu, section headers
+            // instead of the provider rail.
+            picker.setRailSuppressed(true);
+            picker.setWidthOverride(COMPOSER_SETTINGS_MODEL_PICKER_WIDTH);
+            picker.setZIndex(COMPOSER_SETTINGS_SUBMENU_Z);
+            self.placeSettingsSubmenu(picker, .model);
+            return;
+        }
+        picker.setSideAnchor(null);
+        picker.setRailSuppressed(false);
+        picker.setWidthOverride(null);
+        picker.setZIndex(COMPOSER_MODEL_PICKER_Z);
         const anchor = self.composer_controller.toolbar_model_rect;
         if (anchor.w <= 0.0 or anchor.h <= 0.0) return;
         const picker_width = (COMPOSER_MODEL_PICKER_WIDTH + COMPOSER_MODEL_PICKER_RAIL_WIDTH) * theme.uiScaleFactor();
@@ -12488,6 +12581,27 @@ pub const AppState = struct {
     pub fn openPaletteModelPicker(self: *AppState) void {
         if (self.project_controller.projects.items.len == 0) return;
         self.composer_controller.popover_restore_focus = false;
+        self.refreshModelPickerOptionCaches();
+        self.closeRunConfigPopover();
+        self.closePaletteDirectoryPicker();
+        self.closePaletteRuntimePicker();
+        self.composer_controller.composer.active_menu = null;
+        self.composer_controller.composer.hovered_menu_index = null;
+        self.syncPaletteModelPicker();
+        _ = self.composer_controller.model_picker.handleInput(self.allocator, .open) catch |err| blk: {
+            log.warn("failed to open model picker: {s}", .{@errorName(err)});
+            break :blk false;
+        };
+        self.composer_controller.composer.focused = false;
+        self.composer_controller.focused = false;
+        // The popover owns typing (search) and arrows while open.
+        self.terminal_controller.focused = false;
+        self.noteInteraction();
+    }
+
+    /// Starts async option refreshes for providers whose model list has not
+    /// loaded yet, so an opening picker fills in without a manual retry.
+    fn refreshModelPickerOptionCaches(self: *AppState) void {
         if (self.opencode_model_options.items.len == 0) {
             self.refreshOpencodeModelOptionsCacheAsync();
         }
@@ -12509,24 +12623,10 @@ pub const AppState = struct {
         if (self.muse_model_options.items.len == 0) {
             self.refreshMuseModelOptionsCacheAsync();
         }
-        self.closeRunConfigPopover();
-        self.closePaletteDirectoryPicker();
-        self.closePaletteRuntimePicker();
-        self.composer_controller.composer.active_menu = null;
-        self.composer_controller.composer.hovered_menu_index = null;
-        self.syncPaletteModelPicker();
-        _ = self.composer_controller.model_picker.handleInput(self.allocator, .open) catch |err| blk: {
-            log.warn("failed to open model picker: {s}", .{@errorName(err)});
-            break :blk false;
-        };
-        self.composer_controller.composer.focused = false;
-        self.composer_controller.focused = false;
-        // The popover owns typing (search) and arrows while open.
-        self.terminal_controller.focused = false;
-        self.noteInteraction();
     }
 
     pub fn closePaletteModelPicker(self: *AppState) void {
+        self.closeComposerSettingsMenu();
         self.composer_controller.popover_restore_focus = false;
         if (!self.composer_controller.model_picker.isOpen()) return;
         _ = self.composer_controller.model_picker.handleInput(self.allocator, .close) catch |err| blk: {
@@ -13355,6 +13455,10 @@ pub const AppState = struct {
         if (self.composer_controller.model_picker.wantsPointerAt(point)) return true;
         if (self.composer_controller.directory_picker.wantsPointerAt(point)) return true;
         if (self.composer_controller.runtime_picker.wantsPointerAt(point)) return true;
+        if (self.composer_controller.settings_open) {
+            if (self.composer_controller.settings_option_picker.wantsPointerAt(point)) return true;
+            if (self.layoutComposerSettingsMenu().rowAt(point) != null) return true;
+        }
         if (!self.settings_controller.modal_visible) {
             for (self.card_toggle_hits.items) |hit| {
                 if (hit.rect.contains(point)) return true;
@@ -13471,6 +13575,7 @@ pub const AppState = struct {
     }
 
     pub fn closeRunConfigPopover(self: *AppState) void {
+        self.closeComposerSettingsMenu();
         self.composer_controller.popover_restore_focus = false;
         self.composer_controller.run_config_open = false;
     }
@@ -13506,6 +13611,370 @@ pub const AppState = struct {
         const restore_focus = self.composer_controller.popover_restore_focus;
         self.composer_controller.popover_restore_focus = false;
         if (restore_focus) self.requestComposerFocus();
+    }
+
+    // -- Model & settings menu --------------------------------------------
+    //
+    // Clicking the composer's merged model label opens a compact menu above
+    // it (Fast switch, Effort / Access / Model rows). Effort and Access open
+    // `settings_option_picker` beside the menu; Model opens the rich model
+    // picker there with its provider rail swapped for section headers.
+
+    /// Settings menu rows for the current provider, anchored above the
+    /// merged model label.
+    pub fn layoutComposerSettingsMenu(self: *const AppState) ComposerSettingsLayout {
+        var kinds: [4]ComposerSettingsRow = undefined;
+        const count = composer_controller.settingsRows(self.currentComposerShowsFastToggle(), self.composerSettingsEffortOptionCount(), &kinds);
+        return composer_controller.layoutSettingsMenu(
+            self.composer_controller.toolbar_model_rect,
+            self.composer_controller.composer.bounds(),
+            kinds[0..count],
+            theme.uiScaleFactor(),
+        );
+    }
+
+    /// Reasoning levels the Effort submenu lists; mirrors the run-config
+    /// reasoning stepper's step count.
+    fn composerSettingsEffortOptionCount(self: *const AppState) usize {
+        const thread = self.currentThread();
+        return if (thread.provider == .codex) codexReasoningOptions(thread.model_ref).len else self.opencode_reasoning_menu.items.len;
+    }
+
+    /// Opens the settings menu, optionally with one submenu already open
+    /// (the model shortcut lands in the Model submenu).
+    pub fn openComposerSettingsMenu(self: *AppState, submenu: ?ComposerSettingsSubmenu) void {
+        if (self.project_controller.projects.items.len == 0) return;
+        self.composer_controller.popover_restore_focus = false;
+        self.closeRunConfigPopover();
+        self.closePaletteModelPicker();
+        self.closePaletteDirectoryPicker();
+        self.closePaletteRuntimePicker();
+        self.composer_controller.composer.active_menu = null;
+        self.composer_controller.composer.hovered_menu_index = null;
+        self.composer_controller.settings_open = true;
+        self.composer_controller.settings_submenu = null;
+        self.composer_controller.settings_focused_row = null;
+        self.composer_controller.composer.setLabelActive(true);
+        if (submenu) |kind| {
+            self.composer_controller.settings_focused_row = self.layoutComposerSettingsMenu().indexOf(settingsRowForSubmenu(kind));
+            self.openComposerSettingsSubmenu(kind);
+        }
+        self.composer_controller.composer.focused = false;
+        self.composer_controller.focused = false;
+        // The menu (or its model search) owns arrows and typing while open.
+        self.terminal_controller.focused = false;
+        self.noteInteraction();
+    }
+
+    pub fn closeComposerSettingsMenu(self: *AppState) void {
+        if (!self.composer_controller.settings_open) return;
+        self.composer_controller.popover_restore_focus = false;
+        self.markComposerSettingsMenuClosed();
+        self.closeSettingsSubmenuPickers();
+    }
+
+    pub fn toggleComposerSettingsMenu(self: *AppState) void {
+        if (self.composer_controller.settings_open) {
+            self.closeComposerSettingsMenu();
+        } else {
+            self.openComposerSettingsMenu(null);
+        }
+    }
+
+    /// `chat_run_config` opens the menu; `chat_model_picker` opens it with
+    /// the Model submenu (or switches an open menu to it).
+    pub fn toggleComposerSettingsMenuFromShortcut(self: *AppState, submenu: ?ComposerSettingsSubmenu) void {
+        const restore_focus = self.composer_controller.popover_restore_focus or
+            self.composer_controller.composer.focused or self.composer_controller.focused;
+        if (self.composer_controller.settings_open) {
+            if (submenu) |kind| {
+                if (self.composer_controller.settings_submenu != kind) {
+                    self.composer_controller.settings_focused_row = self.layoutComposerSettingsMenu().indexOf(settingsRowForSubmenu(kind));
+                    self.openComposerSettingsSubmenu(kind);
+                    return;
+                }
+            }
+            self.closeComposerSettingsMenu();
+            if (restore_focus) self.requestComposerFocus();
+            self.noteInteraction();
+            return;
+        }
+        self.openComposerSettingsMenu(submenu);
+        if (self.composer_controller.settings_open) self.composer_controller.popover_restore_focus = restore_focus;
+    }
+
+    /// Clears menu state without touching the submenu pickers; used when a
+    /// picker is already closing itself after a pick.
+    fn markComposerSettingsMenuClosed(self: *AppState) void {
+        self.composer_controller.settings_open = false;
+        self.composer_controller.settings_submenu = null;
+        self.composer_controller.settings_focused_row = null;
+        self.composer_controller.composer.setLabelActive(false);
+    }
+
+    fn closeComposerSettingsMenuFromKeyboard(self: *AppState) void {
+        const restore_focus = self.composer_controller.popover_restore_focus;
+        self.closeComposerSettingsMenu();
+        if (restore_focus) self.requestComposerFocus();
+    }
+
+    /// A submenu picker closed itself (pick, Escape, outside click). Outside
+    /// the settings menu this is the plain popover close path.
+    fn noteSettingsSubmenuClosed(self: *AppState, closed: ComposerSettingsSubmenu) void {
+        if (!self.composer_controller.settings_open) {
+            self.restoreComposerAfterShortcutPopover();
+            return;
+        }
+        const current = self.composer_controller.settings_submenu orelse return;
+        // Effort and Access share one picker, so either closing clears both.
+        if ((current == .model) == (closed == .model)) self.composer_controller.settings_submenu = null;
+    }
+
+    fn closeSettingsSubmenuPickers(self: *AppState) void {
+        if (self.composer_controller.settings_option_picker.isOpen()) {
+            _ = self.composer_controller.settings_option_picker.handleInput(self.allocator, .close) catch {};
+        }
+        if (self.composer_controller.model_picker.isOpen()) {
+            _ = self.composer_controller.model_picker.handleInput(self.allocator, .close) catch {};
+        }
+    }
+
+    fn closeComposerSettingsSubmenu(self: *AppState) void {
+        if (self.composer_controller.settings_submenu == null) return;
+        self.closeSettingsSubmenuPickers();
+        self.composer_controller.settings_submenu = null;
+    }
+
+    fn openComposerSettingsSubmenu(self: *AppState, kind: ComposerSettingsSubmenu) void {
+        if (!self.composer_controller.settings_open) return;
+        if (self.composer_controller.settings_submenu == kind and self.settingsSubmenuRect() != null) return;
+        self.closeSettingsSubmenuPickers();
+        self.composer_controller.settings_submenu = kind;
+        switch (kind) {
+            .model => {
+                self.refreshModelPickerOptionCaches();
+                self.syncPaletteModelPicker();
+                _ = self.composer_controller.model_picker.handleInput(self.allocator, .open) catch |err| blk: {
+                    log.warn("failed to open settings model picker: {s}", .{@errorName(err)});
+                    break :blk false;
+                };
+            },
+            .effort, .access => {
+                self.syncSettingsOptionPicker();
+                _ = self.composer_controller.settings_option_picker.handleInput(self.allocator, .open) catch |err| blk: {
+                    log.warn("failed to open settings option picker: {s}", .{@errorName(err)});
+                    break :blk false;
+                };
+            },
+        }
+        self.noteInteraction();
+    }
+
+    fn settingsRowForSubmenu(kind: ComposerSettingsSubmenu) ComposerSettingsRow {
+        return switch (kind) {
+            .effort => .effort,
+            .access => .access,
+            .model => .model,
+        };
+    }
+
+    /// Bounds of the open submenu picker, or null when none is open.
+    fn settingsSubmenuRect(self: *const AppState) ?palette.Rect {
+        const kind = self.composer_controller.settings_submenu orelse return null;
+        return switch (kind) {
+            .model => if (self.composer_controller.model_picker.isOpen()) self.composer_controller.model_picker.pickerRect() else null,
+            .effort, .access => if (self.composer_controller.settings_option_picker.isOpen()) self.composer_controller.settings_option_picker.pickerRect() else null,
+        };
+    }
+
+    /// Places a submenu picker beside the settings menu, level with its row
+    /// and never below the menu's bottom edge.
+    fn placeSettingsSubmenu(self: *const AppState, picker: anytype, kind: ComposerSettingsSubmenu) void {
+        const layout = self.layoutComposerSettingsMenu();
+        const row_index = layout.indexOf(settingsRowForSubmenu(kind)) orelse return;
+        const bounds = self.composer_controller.composer.bounds();
+        const top = theme.scaledUi(composer_controller.SETTINGS_MENU_TOP_INSET);
+        picker.setViewportRect(.{
+            .x = bounds.x,
+            .y = top,
+            .w = bounds.w,
+            .h = @max(layout.panel.y + layout.panel.h - top, theme.scaledUi(120.0)),
+        });
+        picker.setSideAnchor(.{ .panel = layout.panel, .row = layout.rows[row_index] });
+    }
+
+    pub fn syncSettingsOptionPicker(self: *AppState) void {
+        const picker = &self.composer_controller.settings_option_picker;
+        picker.setCallbacks(.{ .context = self, .on_event = paletteSettingsOptionPickerEvent });
+        picker.setStyle(paletteSettingsSubmenuStyle());
+        picker.setUiScale(theme.uiScaleFactor());
+        picker.setFontMetrics(paletteEstimatedFontMetrics(theme.scaledUi(14.5)));
+        const kind = self.composer_controller.settings_submenu orelse return;
+        const thread = self.currentThread();
+        switch (kind) {
+            .effort => {
+                picker.setItemCount(self.composerSettingsEffortOptionCount());
+                picker.setSelectedItem(composerReasoningIndexForThread(self, thread));
+            },
+            .access => {
+                picker.setItemCount(RUN_ACCESS_STEP_LABELS.len);
+                picker.setSelectedItem(if (thread.access_mode == .full_access) 1 else 0);
+            },
+            .model => return,
+        }
+        self.placeSettingsSubmenu(picker, kind);
+    }
+
+    /// Click / Enter / Space / Right on a menu row: Fast flips in place,
+    /// the other rows open their submenu.
+    fn activateComposerSettingsRow(self: *AppState, index: usize) void {
+        const layout = self.layoutComposerSettingsMenu();
+        if (index >= layout.count) return;
+        self.composer_controller.settings_focused_row = index;
+        switch (composer_controller.settingsRowActivation(layout.kinds[index], self.currentThread().fast_mode == .on)) {
+            .fast_changed => |enabled| {
+                self.closeComposerSettingsSubmenu();
+                paletteComposerPromptEvent(self, .{ .fast_changed = enabled });
+                self.syncPaletteComposerControls();
+            },
+            .open_submenu => |kind| self.openComposerSettingsSubmenu(kind),
+        }
+        self.noteInteraction();
+    }
+
+    /// Menu-level keys once no submenu picker claimed them.
+    fn routeComposerSettingsKey(self: *AppState, key: composer_controller.SettingsKey) bool {
+        if (!self.composer_controller.settings_open) return false;
+        const layout = self.layoutComposerSettingsMenu();
+        // Before any hover or arrow the menu has no focused row: the first
+        // arrow picks an end, the first activation key picks the top row.
+        const focused = self.composer_controller.settings_focused_row orelse switch (key) {
+            .up, .escape, .left => 0,
+            .down => layout.count -| 1,
+            .right, .enter, .space => {
+                self.composer_controller.settings_focused_row = 0;
+                self.noteInteraction();
+                return true;
+            },
+        };
+        switch (composer_controller.settingsKeyAction(key, focused, layout.count, self.composer_controller.settings_submenu != null)) {
+            .close_submenu => self.closeComposerSettingsSubmenu(),
+            .close_menu => self.closeComposerSettingsMenuFromKeyboard(),
+            .focus_row => |index| self.composer_controller.settings_focused_row = index,
+            .activate_row => |index| self.activateComposerSettingsRow(index),
+        }
+        self.noteInteraction();
+        return true;
+    }
+
+    /// Palette keys while the menu is open: an open Effort / Access list owns
+    /// arrows and Enter (Left backs out to the menu); otherwise the menu
+    /// navigates its rows.
+    fn routeComposerSettingsPaletteKey(self: *AppState, key: palette.Key) bool {
+        if (!self.composer_controller.settings_open) return false;
+        if (self.composer_controller.settings_option_picker.isOpen()) {
+            if (key.code == .left) return self.routeComposerSettingsKey(.left);
+            const handled = self.composer_controller.settings_option_picker.handleInput(self.allocator, .{ .key = key }) catch |err| blk: {
+                log.warn("settings option picker key failed: {s}", .{@errorName(err)});
+                break :blk false;
+            };
+            if (handled) self.noteInteraction();
+            return true;
+        }
+        const settings_key: composer_controller.SettingsKey = switch (key.code) {
+            .up => .up,
+            .down => .down,
+            .left => .left,
+            .right => .right,
+            .enter => .enter,
+            else => return false,
+        };
+        return self.routeComposerSettingsKey(settings_key);
+    }
+
+    fn settingsSubmenuPickerInput(self: *AppState, input: palette.RichPickerInput) bool {
+        const kind = self.composer_controller.settings_submenu orelse return false;
+        if (kind == .model) return self.modelPickerInput(input);
+        const handled = self.composer_controller.settings_option_picker.handleInput(self.allocator, input) catch |err| blk: {
+            log.warn("settings option picker input failed: {s}", .{@errorName(err)});
+            break :blk false;
+        };
+        if (handled) self.noteInteraction();
+        return handled;
+    }
+
+    /// Clicks while the menu is open: the menu and its submenu own clicks
+    /// inside them, the label toggles the menu shut, and any other click
+    /// closes both (strip chips still open their own picker in one click).
+    fn routeComposerSettingsMouseButton(self: *AppState, point: palette.draw.Vec2, down: bool, clicks: u8) bool {
+        if (!self.composer_controller.settings_open) return false;
+        const submenu_rect = self.settingsSubmenuRect();
+        if (!down) {
+            // Ends a search-field or scrollbar drag in the submenu.
+            if (submenu_rect != null) _ = self.settingsSubmenuPickerInput(.{ .mouse_up = point });
+            if (submenu_rect) |rect| {
+                if (rect.contains(point)) return true;
+            }
+            return self.layoutComposerSettingsMenu().panel.contains(point);
+        }
+        if (submenu_rect) |rect| {
+            if (rect.contains(point)) {
+                _ = self.settingsSubmenuPickerInput(.{ .mouse_down = .{ .point = point, .clicks = clicks } });
+                return true;
+            }
+        }
+        const layout = self.layoutComposerSettingsMenu();
+        if (layout.panel.contains(point)) {
+            if (layout.rowAt(point)) |index| self.activateComposerSettingsRow(index);
+            return true;
+        }
+        self.closeComposerSettingsMenu();
+        self.noteInteraction();
+        if (self.composer_controller.toolbar_overlay_valid and
+            (self.composer_controller.toolbar_directory_rect.contains(point) or
+                self.composer_controller.toolbar_runtime_rect.contains(point)))
+        {
+            return false;
+        }
+        return true;
+    }
+
+    /// Hover moves the row highlight and opens that row's submenu (Fast
+    /// closes any open one); motion over the submenu goes to its picker.
+    fn routeComposerSettingsMouseMove(self: *AppState, point: palette.draw.Vec2, dragging: bool) bool {
+        if (!self.composer_controller.settings_open) return false;
+        if (self.settingsSubmenuRect()) |rect| {
+            if (dragging or rect.contains(point)) {
+                const input: palette.RichPickerInput = if (dragging) .{ .mouse_drag = point } else .{ .mouse_move = point };
+                const handled = self.settingsSubmenuPickerInput(input);
+                if (rect.contains(point) or handled) return true;
+            }
+        }
+        const layout = self.layoutComposerSettingsMenu();
+        if (layout.rowAt(point)) |index| {
+            if (self.composer_controller.settings_focused_row != index) {
+                self.composer_controller.settings_focused_row = index;
+                self.noteInteraction();
+            }
+            if (layout.kinds[index].submenu()) |kind| {
+                self.openComposerSettingsSubmenu(kind);
+            } else {
+                self.closeComposerSettingsSubmenu();
+            }
+            return true;
+        }
+        return layout.panel.contains(point);
+    }
+
+    fn routeComposerSettingsWheel(self: *AppState, point: palette.draw.Vec2, y: f32) bool {
+        if (!self.composer_controller.settings_open) return false;
+        if (self.settingsSubmenuRect()) |rect| {
+            if (rect.contains(point)) {
+                _ = self.settingsSubmenuPickerInput(.{ .mouse_wheel = .{ .point = point, .y = y } });
+                return true;
+            }
+        }
+        return self.layoutComposerSettingsMenu().panel.contains(point);
     }
 
     pub fn routePaletteComposerTextInput(self: *AppState, text: []const u8) bool {
@@ -13554,6 +14023,9 @@ pub const AppState = struct {
             if (self.composer_controller.runtime_picker.isOpen()) {
                 return self.routePaletteRuntimePickerKey(.{ .code = .escape });
             }
+            // An open model submenu handled Escape above (query, then
+            // itself); this closes an Effort / Access list, then the menu.
+            if (self.composer_controller.settings_open) return self.routeComposerSettingsKey(.escape);
             if (self.composer_controller.run_config_open) {
                 self.closeRunConfigPopoverFromKeyboard();
                 self.noteInteraction();
@@ -13576,6 +14048,13 @@ pub const AppState = struct {
                 return true;
             }
         }
+        // Space toggles / opens the focused settings row; Palette keys have
+        // no space code, so read the raw SDL key.
+        if (event.key == .space and self.composer_controller.settings_open and
+            !self.composer_controller.model_picker.isOpen() and !self.composer_controller.settings_option_picker.isOpen())
+        {
+            return self.routeComposerSettingsKey(.space);
+        }
         const palette_key = paletteComposerKeyFromSdl(event) orelse return false;
         if (self.composer_controller.directory_picker.isOpen()) {
             return self.routePaletteDirectoryPickerKey(palette_key);
@@ -13584,10 +14063,17 @@ pub const AppState = struct {
             return self.routePaletteRuntimePickerKey(palette_key);
         }
         if (self.composer_controller.model_picker.isOpen()) {
+            // Left on an empty model search backs out to the settings menu.
+            if (self.composer_controller.settings_submenu == .model and palette_key.code == .left and
+                !palette_key.shift and self.composer_controller.model_picker.searchText().len == 0)
+            {
+                return self.routeComposerSettingsKey(.left);
+            }
             // The picker owns typing while open: navigation keys move the
             // highlight, everything else edits the embedded search field.
             return self.routePaletteModelPickerKey(palette_key);
         }
+        if (self.routeComposerSettingsPaletteKey(palette_key)) return true;
         if (self.routeRunConfigKey(palette_key)) return true;
         if (palette_key.primary and palette_key.code == .v) {
             if (self.paletteComposerEditBlockedByAcceptance()) return true;
@@ -13693,7 +14179,7 @@ pub const AppState = struct {
             return true;
         }
         if (self.composer_controller.toolbar_model_rect.contains(point)) {
-            self.openPaletteModelPicker();
+            self.toggleComposerSettingsMenu();
             return true;
         }
         if (self.composer_controller.toolbar_reasoning_rect.contains(point) and self.composer_controller.composer.showReasoningToggle()) {
@@ -13740,6 +14226,7 @@ pub const AppState = struct {
         if (self.project_controller.projects.items.len == 0) return false;
         if (event.button != 1) return false;
         const point = paletteMousePoint(event.x, event.y, ui_scale);
+        if (self.routeComposerSettingsMouseButton(point, event.down, event.clicks)) return true;
         if (self.routePaletteModelPickerMouseButton(point, event.down, event.clicks)) return true;
         if (self.routePaletteDirectoryPickerMouseButton(point, event.down, event.clicks)) return true;
         if (self.routePaletteRuntimePickerMouseButton(point, event.down, event.clicks)) return true;
@@ -13749,6 +14236,7 @@ pub const AppState = struct {
     pub fn routeComposerPopoverMouseMotion(self: *AppState, event: *const sdl.MouseMotionEvent, ui_scale: f32) bool {
         if (self.project_controller.projects.items.len == 0) return false;
         const point = paletteMousePoint(event.x, event.y, ui_scale);
+        if (self.routeComposerSettingsMouseMove(point, event.state.left != 0)) return true;
         if (self.routePaletteModelPickerMouseMove(point, event.state.left != 0)) return true;
         if (self.routePaletteDirectoryPickerMouseMove(point, event.state.left != 0)) return true;
         if (self.routePaletteRuntimePickerMouseMove(point, event.state.left != 0)) return true;
@@ -13758,6 +14246,7 @@ pub const AppState = struct {
     pub fn routeComposerPopoverWheel(self: *AppState, event: *const sdl.MouseWheelEvent, ui_scale: f32) bool {
         if (self.project_controller.projects.items.len == 0) return false;
         const point = paletteMousePoint(event.mouse_x, event.mouse_y, ui_scale);
+        if (self.routeComposerSettingsWheel(point, event.y)) return true;
         if (self.routePaletteModelPickerWheel(point, event.y)) return true;
         if (self.routePaletteDirectoryPickerWheel(point, event.y)) return true;
         if (self.routePaletteRuntimePickerWheel(point, event.y)) return true;
@@ -16619,6 +17108,7 @@ test "empty workspace ignores hidden composer and slash input" {
     state.syncPaletteComposerControls();
     state.openPaletteModelPicker();
     state.openRunConfigPopover();
+    state.openComposerSettingsMenu(.model);
     state.clearCurrentDraftImageAt(0);
 }
 
@@ -18087,6 +18577,7 @@ test "sidebar open pane focus keeps the clicked terminal pane maximized" {
     state.composer_controller.model_picker = PaletteModelPicker.init(0);
     state.composer_controller.popover_restore_focus = false;
     state.composer_controller.run_config_open = false;
+    state.composer_controller.settings_open = false;
     state.palette_modal_text_focus = .none;
     state.lifecycle.dirty = false;
     state.lifecycle.last_dirty_at_ms = 0;
@@ -18238,6 +18729,7 @@ test "sidebar pane selection restores a sibling browser URL snapshot" {
     state.composer_controller.model_picker = PaletteModelPicker.init(0);
     state.composer_controller.popover_restore_focus = false;
     state.composer_controller.run_config_open = false;
+    state.composer_controller.settings_open = false;
     state.palette_modal_text_focus = .none;
     state.lifecycle.dirty = false;
     state.lifecycle.last_dirty_at_ms = 0;
@@ -18298,6 +18790,7 @@ test "configured chat web links focus and reveal the Verde browser pane" {
     state.composer_controller.model_picker = PaletteModelPicker.init(0);
     state.composer_controller.popover_restore_focus = false;
     state.composer_controller.run_config_open = false;
+    state.composer_controller.settings_open = false;
     state.palette_modal_text_focus = .none;
     state.lifecycle.dirty = false;
     state.lifecycle.last_dirty_at_ms = 0;
@@ -18346,6 +18839,7 @@ test "sidebar and pane cycling preserve zoom while rebinding a browser runtime" 
     state.composer_controller.model_picker = PaletteModelPicker.init(0);
     state.composer_controller.popover_restore_focus = false;
     state.composer_controller.run_config_open = false;
+    state.composer_controller.settings_open = false;
     state.palette_modal_text_focus = .none;
     state.lifecycle.dirty = false;
     state.lifecycle.last_dirty_at_ms = 0;
@@ -18402,6 +18896,7 @@ test "workspace selection restores focused pane keyboard ownership" {
     state.composer_controller.model_picker = PaletteModelPicker.init(0);
     state.composer_controller.popover_restore_focus = false;
     state.composer_controller.run_config_open = false;
+    state.composer_controller.settings_open = false;
     state.palette_modal_text_focus = .none;
     state.workspace_header_open_menu_open = false;
     state.workspace_header_open_menu_pane_id = null;
@@ -18690,6 +19185,7 @@ test "ordinary browser focus and deletion preserve exact pane runtime ownership"
     state.composer_controller.model_picker = PaletteModelPicker.init(0);
     state.composer_controller.popover_restore_focus = false;
     state.composer_controller.run_config_open = false;
+    state.composer_controller.settings_open = false;
     state.palette_modal_text_focus = .none;
     state.lifecycle.dirty = false;
     state.lifecycle.last_dirty_at_ms = 0;

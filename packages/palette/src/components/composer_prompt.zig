@@ -38,7 +38,9 @@ pub const ComposerPromptConfig = struct {
     /// Draws the model and run pills as one right-aligned ghost label:
     /// `[icon] Model detail ⌄`. The name half still hit-tests as `.model` and
     /// the detail + chevron half as `.reasoning`, so hosts keep their popover
-    /// anchors. The fast/access pills are not drawn in this mode.
+    /// anchors; with the reasoning toggle hidden the whole label is `.model`
+    /// and no detail words draw. The fast/access pills are not drawn in this
+    /// mode.
     merged_model_label: bool = false,
     /// Host-drawn leading icon cell and gap in the merged label; fall back to
     /// `pill_overlay_icon_reserve` / `pill_icon_gap`.
@@ -57,6 +59,10 @@ pub const ComposerPromptConfig = struct {
     strip_icon_reserve: ?f32 = null,
     strip_icon_gap: ?f32 = null,
     strip_chevron: bool = true,
+    /// `running_only` hides the send button while idle (Enter still
+    /// submits) and shows it only as the stop / pending control; the
+    /// toolbar reclaims its width.
+    send_button: ComposerPromptSendButton = .always,
     control_gap: f32 = 8.0,
     separator_width: f32 = 1.0,
     corner_radius: f32 = 14.0,
@@ -204,6 +210,13 @@ pub const ComposerPromptSendState = enum {
     pending,
 };
 
+/// When the toolbar shows the round send/stop button; see
+/// `ComposerPromptConfig.send_button`.
+pub const ComposerPromptSendButton = enum {
+    always,
+    running_only,
+};
+
 pub const ComposerPromptOptionTarget = enum {
     model,
     reasoning,
@@ -269,6 +282,9 @@ pub const ComposerPromptPreviewLabels = struct {
     detail: ?[]const u8 = null,
     directory: ?[]const u8 = null,
     runtime: ?[]const u8 = null,
+    /// The preview's own send state, so a `running_only` send button
+    /// matches that pane's turn instead of the live composer's.
+    send_state: ?ComposerPromptSendState = null,
 };
 
 pub const ComposerPromptInput = union(enum) {
@@ -455,6 +471,9 @@ pub fn ComposerPrompt(comptime config: ComposerPromptConfig) type {
         fast_enabled: bool = false,
         access_enabled: bool = false,
         send_state: ComposerPromptSendState = .send,
+        /// Host-owned popover anchored to the merged label is open; keeps
+        /// the label's hover fill while the pointer is over the popover.
+        label_active: bool = false,
         stop_pulse_factor: f32 = 1.0,
         undo_stack: std.ArrayList(EditSnapshot) = .empty,
         redo_stack: std.ArrayList(EditSnapshot) = .empty,
@@ -774,6 +793,18 @@ pub fn ComposerPrompt(comptime config: ComposerPromptConfig) type {
             self.send_state = state;
         }
 
+        pub fn setLabelActive(self: *Component, active: bool) void {
+            self.label_active = active;
+        }
+
+        /// Whether the send/stop button takes toolbar space right now.
+        pub fn sendVisible(self: *const Component) bool {
+            return switch (config.send_button) {
+                .always => true,
+                .running_only => self.send_state == .stop or self.send_state == .pending,
+            };
+        }
+
         /// Sets the host-driven 0..1 breathing emphasis for the stop control.
         pub fn setStopPulseFactor(self: *Component, factor: f32) void {
             self.stop_pulse_factor = @max(0.0, @min(factor, 1.0));
@@ -873,7 +904,7 @@ pub fn ComposerPrompt(comptime config: ComposerPromptConfig) type {
 
         pub fn hitTest(self: *const Component, point: draw.Vec2) ?ComposerPromptPart {
             const geometry = self.toolbarGeometry();
-            if (geometry.send.contains(point)) return .send;
+            if (geometry.send.w > 0.0 and geometry.send.contains(point)) return .send;
             if (self.show_directory_toggle and geometry.directory.w > 0.0 and geometry.directory.contains(point)) return .directory;
             if (geometry.runtime.w > 0.0 and geometry.runtime.contains(point)) return .runtime;
             if (geometry.model.contains(point)) return .model;
@@ -983,6 +1014,7 @@ pub fn ComposerPrompt(comptime config: ComposerPromptConfig) type {
         pub fn previewGeometry(self: *const Component, rect: draw.Rect, labels: ComposerPromptPreviewLabels) ComposerPromptGeometry {
             var preview = self.*;
             preview.preview_labels = labels;
+            if (labels.send_state) |send_state| preview.send_state = send_state;
             preview.rect = rect;
             preview.buffer = .empty;
             preview.scroll_y = 0.0;
@@ -1080,11 +1112,12 @@ pub fn ComposerPrompt(comptime config: ComposerPromptConfig) type {
         }
 
         /// Natural width of the right-aligned inline cluster (controls plus
-        /// send button), independent of the current mode.
+        /// send button when shown), independent of the current mode.
         fn inlineClusterWidth(self: *const Component) f32 {
             const gap = self.scaled(config.control_gap);
-            const send = self.sendSize(self.scaled(config.toolbar_height)) + self.sendOffset();
-            if (config.merged_model_label) return self.mergedLabelNaturalWidth() + gap + send;
+            const send_visible = self.sendVisible();
+            const send = if (send_visible) self.sendSize(self.scaled(config.toolbar_height)) + self.sendOffset() else 0.0;
+            if (config.merged_model_label) return self.mergedLabelNaturalWidth() + if (send_visible) gap + send else 0.0;
             const model_w = self.pillWidth(true, 0.0, config.model_icon, self.modelLabel(), config.chevron_icon, config.model_min_width, config.model_max_width);
             const reasoning_w: f32 = if (self.show_reasoning_toggle)
                 self.pillWidth(false, self.reasoningIconSlotsWidth(), "", self.reasoningLabel(), config.chevron_icon, config.reasoning_min_width, config.reasoning_max_width)
@@ -1092,7 +1125,7 @@ pub fn ComposerPrompt(comptime config: ComposerPromptConfig) type {
                 0.0;
             const fast_w: f32 = if (self.show_fast_toggle) self.pillWidth(true, 0.0, config.fast_icon, self.fastLabel(), "", config.fast_min_width, config.fast_max_width) else 0.0;
             const access_w: f32 = if (self.show_access_toggle) self.pillWidth(true, 0.0, config.access_icon, self.accessLabel(), "", config.access_min_width, config.access_max_width) else 0.0;
-            var width = self.toolbarPillsTotalWidth(model_w, reasoning_w, fast_w, access_w) + gap * 2.0 + send;
+            var width = self.toolbarPillsTotalWidth(model_w, reasoning_w, fast_w, access_w) + if (send_visible) gap * 2.0 + send else 0.0;
             if (self.show_directory_toggle and !self.directoryOutside()) {
                 width += self.pillWidth(true, 0.0, config.directory_icon, self.directoryLabel(), config.chevron_icon, config.directory_min_width, config.directory_max_width) + gap;
             }
@@ -1294,6 +1327,7 @@ pub fn ComposerPrompt(comptime config: ComposerPromptConfig) type {
                 }
             }
 
+            if (geometry.send.w <= 0.0) return;
             const send_disabled = self.send_state == .disabled or self.send_state == .pending;
             const send_panel_color: draw.Color = blk: {
                 if (send_disabled)
@@ -1386,7 +1420,7 @@ pub fn ComposerPrompt(comptime config: ComposerPromptConfig) type {
             const model = geometry.model;
             if (model.w <= 0.0 or model.h <= 0.0) return;
             const has_detail = self.show_reasoning_toggle and geometry.reasoning.w > 0.0;
-            if (self.hovered_part == .model or self.active_menu == .model) {
+            if (self.hovered_part == .model or self.active_menu == .model or self.label_active) {
                 try batch.panel(allocator, model, self.style.control_hover_color, null, model.h * 0.5, 0.0);
             } else if (has_detail and (self.hovered_part == .reasoning or self.active_menu == .reasoning)) {
                 try batch.panel(allocator, geometry.reasoning, self.style.control_hover_color, null, geometry.reasoning.h * 0.5, 0.0);
@@ -2365,16 +2399,20 @@ pub fn ComposerPrompt(comptime config: ComposerPromptConfig) type {
             const toolbar = self.toolbarRect();
             const control_h = @round(@min(toolbar.h, self.scaled(34.0)));
             const y = @round(toolbar.y + (toolbar.h - control_h) * 0.5);
+            // A hidden send button collapses to a zero-width rect at the
+            // toolbar's right edge so the controls extend to the edge.
             const send_size = self.sendSize(toolbar.h);
+            const send_w: f32 = if (self.sendVisible()) send_size else 0.0;
+            const send_offset: f32 = if (self.sendVisible()) self.sendOffset() else 0.0;
             const send: draw.Rect = snapRect(.{
-                .x = toolbar.x + toolbar.w - send_size - self.sendOffset(),
+                .x = toolbar.x + toolbar.w - send_w - send_offset,
                 .y = toolbar.y + (toolbar.h - send_size) * 0.5,
-                .w = send_size,
+                .w = send_w,
                 .h = send_size,
             });
             if (config.merged_model_label) return self.mergedToolbarGeometry(toolbar, y, control_h, send);
             // Extra air before the send control so the rightmost pill is not visually glued to the button.
-            const max_x = send.x - self.scaled(config.control_gap) * 2.0;
+            const max_x = if (send.w > 0.0) send.x - self.scaled(config.control_gap) * 2.0 else send.x;
             const avail_total = @max(max_x - toolbar.x, 0.0);
 
             // The directory pill sits ahead of the shared four-pill budget: it
@@ -2495,10 +2533,12 @@ pub fn ComposerPrompt(comptime config: ComposerPromptConfig) type {
 
         /// Toolbar layout for `merged_model_label`: an optional inline
         /// directory pill on the left and the merged label flush against the
-        /// send button on the right, split into the `.model` (logo + name)
+        /// send button (or the toolbar edge while it is hidden) on the right,
+        /// split into the `.model` (logo + name)
         /// and `.reasoning` (detail + chevron) hit halves.
         fn mergedToolbarGeometry(self: *const Component, toolbar: draw.Rect, y: f32, control_h: f32, send: draw.Rect) ToolbarGeometry {
             const gap = self.scaled(config.control_gap);
+            const label_right_edge = if (send.w > 0.0) send.x - gap else send.x;
             var left = toolbar.x;
             var directory: draw.Rect = snapRect(.{ .x = toolbar.x, .y = y, .w = 0.0, .h = control_h });
             var runtime: draw.Rect = snapRect(.{ .x = toolbar.x + toolbar.w, .y = y, .w = 0.0, .h = control_h });
@@ -2513,7 +2553,7 @@ pub fn ComposerPrompt(comptime config: ComposerPromptConfig) type {
                     left += directory.w + gap;
                 }
             }
-            const label_right = @round(send.x - gap);
+            const label_right = @round(label_right_edge);
             const width = @round(@min(self.mergedLabelNaturalWidth(), @max(label_right - left, 0.0)));
             const label_x = label_right - width;
             const layout = self.mergedLabelLayout(width);
@@ -3356,4 +3396,75 @@ test "composer prompt merged label maps name to model and detail to reasoning" {
         }
     }
     try std.testing.expectEqual(@as(usize, 1), detail_runs);
+}
+
+const RunningOnlySendPrompt = ComposerPrompt(.{
+    .inline_toolbar = true,
+    .merged_model_label = true,
+    .send_button = .running_only,
+    .font_size = 10,
+    .fixed_advance = 5,
+    .toolbar_fixed_advance = 5,
+    .padding_x = 16,
+    .padding_y = 14,
+    .toolbar_height = 32,
+    .toolbar_gap = 10,
+    .control_gap = 6,
+    .pill_overlay_icon_reserve = 18,
+});
+
+test "composer prompt running-only send button hides while idle without overlap" {
+    var prompt = RunningOnlySendPrompt.init();
+    defer prompt.deinit(std.testing.allocator);
+    // One click target: no reasoning half, no detail words.
+    prompt.setShowReasoningToggle(false);
+    prompt.setBounds(.{ .x = 0, .y = 0, .w = 600, .h = prompt.preferredHeight(600, false, 1, 10) });
+
+    try std.testing.expect(prompt.inlineActive());
+    const frame = prompt.frameRect();
+    const idle = prompt.layoutGeometry();
+    try std.testing.expectEqual(@as(f32, 0.0), idle.send.w);
+    try std.testing.expectEqual(@as(f32, 0.0), idle.reasoning.w);
+    try expectRectInside(idle.model, frame);
+    try std.testing.expect(idle.text.x + idle.text.w <= idle.model.x);
+    // The label becomes the right-most control, flush with the toolbar edge.
+    try std.testing.expectEqual(idle.toolbar.x + idle.toolbar.w, idle.model.x + idle.model.w);
+    const chevron_point: draw.Vec2 = .{ .x = idle.chevron.x + 1, .y = idle.chevron.y + idle.chevron.h * 0.5 };
+    try std.testing.expectEqual(@as(?ComposerPromptPart, .model), prompt.hitTest(chevron_point));
+    try std.testing.expectEqual(@as(?ComposerPromptPart, .model), prompt.hitTest(.{ .x = idle.model_text.x + 1, .y = chevron_point.y }));
+
+    // Idle render draws no send panel: only the frame fills the toolbar row.
+    var batch: draw.RenderBatch = .{};
+    defer batch.deinit(std.testing.allocator);
+    try prompt.render(std.testing.allocator, &batch);
+    for (batch.commands.items) |command| {
+        if (command.kind != .rect) continue;
+        try std.testing.expect(!(command.rect.w == 32.0 and command.rect.h == 32.0));
+    }
+
+    // A running turn brings the stop button back beside the label.
+    prompt.setSendState(.stop);
+    const running = prompt.layoutGeometry();
+    try std.testing.expect(running.send.w > 0.0);
+    try expectRectInside(running.send, frame);
+    try std.testing.expect(running.model.x + running.model.w <= running.send.x);
+    try std.testing.expect(running.text.x + running.text.w <= running.model.x);
+    try std.testing.expectEqual(@as(?ComposerPromptPart, .send), prompt.hitTest(.{ .x = running.send.x + running.send.w * 0.5, .y = running.send.y + running.send.h * 0.5 }));
+
+    // Previews take the pane's own send state.
+    const preview = prompt.previewGeometry(.{ .x = 0, .y = 0, .w = 600, .h = 46 }, .{ .send_state = .send });
+    try std.testing.expectEqual(@as(f32, 0.0), preview.send.w);
+    try std.testing.expectEqual(preview.toolbar.x + preview.toolbar.w, preview.model.x + preview.model.w);
+
+    // Label-active keeps the hover fill while a host popover is open.
+    prompt.setSendState(.send);
+    prompt.setLabelActive(true);
+    var active_batch: draw.RenderBatch = .{};
+    defer active_batch.deinit(std.testing.allocator);
+    try prompt.render(std.testing.allocator, &active_batch);
+    var label_fills: usize = 0;
+    for (active_batch.commands.items) |command| {
+        if (command.kind == .rect and command.rect.x == idle.model.x and command.rect.w == idle.model.w and command.rect.y == idle.model.y) label_fills += 1;
+    }
+    try std.testing.expect(label_fills >= 1);
 }

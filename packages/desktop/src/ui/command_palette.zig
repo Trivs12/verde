@@ -1291,12 +1291,14 @@ fn runNewChat(state: *runtime.AppState) void {
     state.createThreadForProject(@min(state.project_controller.selected_index, state.project_controller.projects.items.len - 1));
 }
 
+// Both open the composer's model & settings menu, matching the toolbar
+// label and the `chat_model_picker` / `chat_run_config` shortcuts.
 fn runChooseChatModel(state: *runtime.AppState) void {
-    state.openPaletteModelPicker();
+    state.openComposerSettingsMenu(.model);
 }
 
 fn runChatRunConfig(state: *runtime.AppState) void {
-    state.openRunConfigPopover();
+    state.openComposerSettingsMenu(null);
 }
 
 fn runChooseChatDirectory(state: *runtime.AppState) void {
