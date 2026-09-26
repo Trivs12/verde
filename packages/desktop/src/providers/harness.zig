@@ -35,6 +35,7 @@ pub const StreamDiffUpdate = types.StreamDiffUpdate;
 pub const ToolCallKind = types.ToolCallKind;
 pub const ToolCallStatus = types.ToolCallStatus;
 pub const ToolCallUpdate = types.ToolCallUpdate;
+pub const ContextUsage = types.ContextUsage;
 pub const StreamEvent = types.StreamEvent;
 pub const SendPromptRequest = types.SendPromptRequest;
 pub const SendPromptResult = types.SendPromptResult;

@@ -15250,6 +15250,8 @@ fn chatSinkEvent(context: ?*anyopaque, event: harness.StreamEvent) void {
             defer allocator.free(payload);
             turn.appendEvent(allocator, "diff", payload);
         },
+        // Recorded and forwarded to clients in a follow-up change.
+        .context_usage => {},
     }
 }
 

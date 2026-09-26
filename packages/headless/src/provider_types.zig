@@ -254,6 +254,32 @@ pub const ToolCallUpdate = struct {
     transcript_delta: ?[]const u8 = null,
 };
 
+/// Context-window occupancy after the provider's most recent model call.
+///
+/// `used_tokens` is the prompt the model just saw (input plus cached input),
+/// not a cumulative session total: it is what the next turn starts from.
+/// `window_tokens` is the model's context window reported by the provider.
+pub const ContextUsage = struct {
+    used_tokens: u64,
+    window_tokens: u64,
+
+    /// Returns null unless both values are present and the window is nonzero,
+    /// so callers can pass raw provider numbers straight through.
+    pub fn init(used_tokens: ?u64, window_tokens: ?u64) ?ContextUsage {
+        const window = window_tokens orelse return null;
+        const used = used_tokens orelse return null;
+        if (window == 0) return null;
+        return .{ .used_tokens = used, .window_tokens = window };
+    }
+
+    /// Whole-number percentage of the window in use, clamped to 0...100.
+    pub fn percent(self: ContextUsage) u8 {
+        if (self.window_tokens == 0) return 0;
+        const scaled = (@as(u128, self.used_tokens) * 100 + self.window_tokens / 2) / self.window_tokens;
+        return @intCast(@min(scaled, 100));
+    }
+};
+
 pub const StreamEvent = union(enum) {
     message: struct {
         title: []const u8,
@@ -261,6 +287,8 @@ pub const StreamEvent = union(enum) {
     },
     tool_call: ToolCallUpdate,
     diff: StreamDiffUpdate,
+    /// Metadata only: never a transcript row.
+    context_usage: ContextUsage,
 };
 
 pub const SendPromptRequest = struct {
@@ -342,4 +370,13 @@ test "subagent tool names match delegation tools only" {
     try std.testing.expect(!isSubagentToolName("TaskCreate"));
     try std.testing.expect(!isSubagentToolName("bash"));
     try std.testing.expect(!isSubagentToolName(""));
+}
+
+test "context usage rejects missing or empty windows and clamps percent" {
+    try std.testing.expect(ContextUsage.init(10, null) == null);
+    try std.testing.expect(ContextUsage.init(null, 100) == null);
+    try std.testing.expect(ContextUsage.init(10, 0) == null);
+    const usage = ContextUsage.init(76_000, 200_000).?;
+    try std.testing.expectEqual(@as(u8, 38), usage.percent());
+    try std.testing.expectEqual(@as(u8, 100), ContextUsage.init(300, 200).?.percent());
 }

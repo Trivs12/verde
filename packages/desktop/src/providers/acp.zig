@@ -641,6 +641,16 @@ pub fn getOptionalObjectBool(value: std.json.Value, key: []const u8) ?bool {
     };
 }
 
+/// ACP's (unstable) `usage_update` session update: `used` is the tokens in
+/// the session's context now and `size` the model's window. Agents that do
+/// not implement it simply never send one.
+fn contextUsageFromUsageUpdate(update: std.json.Value) ?provider_types.ContextUsage {
+    const used = getOptionalObjectInteger(update, "used") orelse return null;
+    const size = getOptionalObjectInteger(update, "size") orelse return null;
+    if (used < 0 or size <= 0) return null;
+    return provider_types.ContextUsage.init(@intCast(used), @intCast(size));
+}
+
 fn handleReadSessionUpdate(
     allocator: std.mem.Allocator,
     harness: Harness,
@@ -687,6 +697,14 @@ fn handleLiveSessionUpdate(
 ) !void {
     const update = sessionUpdateObject(value) orelse return;
     const kind = getOptionalObjectString(update, "sessionUpdate") orelse return;
+    if (std.mem.eql(u8, kind, "usage_update")) {
+        if (contextUsageFromUsageUpdate(update)) |usage| {
+            if (request.on_stream_event) |on_stream_event| {
+                on_stream_event(request.stream_context, .{ .context_usage = usage });
+            }
+        }
+        return;
+    }
     if (std.mem.eql(u8, kind, "agent_thought_chunk")) {
         // Reasoning text is never shown; like Codex, it only drives the
         // transient "Thinking" indicator until visible output arrives.
@@ -2248,4 +2266,37 @@ test "ACP prompts preserve multiple images and reject unsupported attachments" {
     try std.testing.expectEqualStrings("Zmlyc3QtaW1hZ2U=", getOptionalObjectString(blocks[1], "data").?);
     try std.testing.expectEqualStrings("c2Vjb25kLWltYWdl", getOptionalObjectString(blocks[2], "data").?);
     try std.testing.expectError(error.AcpAttachmentsUnsupported, makePromptRequestAlloc(allocator, 3, "session", request, false));
+}
+
+test "acp usage_update reports context occupancy as a metadata event" {
+    const Capture = struct {
+        var usage: ?provider_types.ContextUsage = null;
+        var other_events: usize = 0;
+        fn onEvent(_: ?*anyopaque, event: provider_types.StreamEvent) void {
+            switch (event) {
+                .context_usage => |value| usage = value,
+                else => other_events += 1,
+            }
+        }
+    };
+    Capture.usage = null;
+    Capture.other_events = 0;
+    var state: SendPromptState = .{};
+    defer state.deinit(std.testing.allocator);
+    state.prompt_submitted = true;
+    const request = provider_types.SendPromptRequest{ .prompt = "yo", .on_stream_event = Capture.onEvent };
+    const line =
+        \\{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"usage_update","used":53000,"size":200000,"cost":{"amount":0.04,"currency":"USD"}}}}
+    ;
+    _ = try handleSendPromptLine(std.testing.allocator, TEST_HARNESS, line, request, &state, null);
+    try std.testing.expectEqual(@as(u64, 53000), Capture.usage.?.used_tokens);
+    try std.testing.expectEqual(@as(u64, 200000), Capture.usage.?.window_tokens);
+    try std.testing.expectEqual(@as(usize, 0), Capture.other_events);
+
+    Capture.usage = null;
+    const missing_size =
+        \\{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"usage_update","used":53000}}}
+    ;
+    _ = try handleSendPromptLine(std.testing.allocator, TEST_HARNESS, missing_size, request, &state, null);
+    try std.testing.expect(Capture.usage == null);
 }

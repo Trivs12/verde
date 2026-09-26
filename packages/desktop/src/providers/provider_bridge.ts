@@ -1254,6 +1254,37 @@ async function handleClaudeDispatchSlashCommand(sdk, request) {
   }
 }
 
+function claudeTokenCount(value) {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.floor(value) : 0;
+}
+
+// Prompt size of one top-level API call: uncached input plus cache reads and
+// writes. Subagent frames (parent_tool_use_id set) run in their own context.
+function claudeMainContextSample(message) {
+  if (message?.type !== "assistant" || message.parent_tool_use_id) return null;
+  const usage = message.message?.usage;
+  if (!usage || typeof usage !== "object") return null;
+  const used = claudeTokenCount(usage.input_tokens) +
+    claudeTokenCount(usage.cache_creation_input_tokens) +
+    claudeTokenCount(usage.cache_read_input_tokens);
+  if (used <= 0) return null;
+  return { used, model: typeof message.message?.model === "string" ? message.message.model : null };
+}
+
+// The result's modelUsage carries each model's context window. Prefer the
+// model that produced the last top-level call; fall back to the largest window.
+function claudeContextUsageEvent(sample, resultMessage) {
+  if (!sample) return null;
+  const models = resultMessage?.modelUsage;
+  if (!models || typeof models !== "object") return null;
+  let window = sample.model ? claudeTokenCount(models[sample.model]?.contextWindow) : 0;
+  if (window <= 0) {
+    for (const entry of Object.values(models)) window = Math.max(window, claudeTokenCount(entry?.contextWindow));
+  }
+  if (window <= 0) return null;
+  return { type: "context_usage", used_tokens: sample.used, window_tokens: window };
+}
+
 async function handleClaudeSendPrompt(sdk, request) {
   const stderrChunks = [];
   const commandByToolUseId = new Map();
@@ -1280,9 +1311,11 @@ async function handleClaudeSendPrompt(sdk, request) {
     let reply = "";
     let streamedText = "";
     const backgroundState = { trackedToolUseIds: new Set(), scheduledToolUseIds: new Set(), pendingBackgrounds: [], taskToolUseIds: new Map(), liveBackgroundTasks: [] };
+    let contextSample = null;
     for await (const message of query) {
       const rateLimitFailure = claudeRejectedRateLimitMessage(message);
       if (rateLimitFailure) throw new Error(rateLimitFailure);
+      contextSample = claudeMainContextSample(message) ?? contextSample;
       if (message?.type === "stream_event") {
         if (emitClaudeChildTranscriptDelta(message, subagentByToolUseId, nestedAncestorByToolUseId)) continue;
         const streamedDelta = claudeTextDeltaFromStreamEvent(message);
@@ -1310,6 +1343,8 @@ async function handleClaudeSendPrompt(sdk, request) {
           throw new Error(errors.join("\n") || message.stop_reason || "Claude request failed during execution.");
         }
         if (typeof message.result === "string") reply = message.result;
+        const contextUsage = claudeContextUsageEvent(contextSample, message);
+        if (contextUsage) write(contextUsage);
         if (backgroundState.pendingBackgrounds.length > 0) {
           await Promise.allSettled(backgroundState.pendingBackgrounds);
           backgroundState.pendingBackgrounds.length = 0;
