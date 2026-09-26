@@ -52,7 +52,6 @@ const WORKING_PULSE_PERIOD_MS: i64 = 2200;
 const QUICK_PANE_MIN_W_CSS: f32 = 320.0;
 const QUICK_PANE_MIN_H_CSS: f32 = 220.0;
 const QUICK_PANE_MARGIN_CSS: f32 = 12.0;
-const QUICK_PANE_DRAG_H_CSS: f32 = 28.0;
 const QUICK_PANE_RESIZE_GRIP_CSS: f32 = 18.0;
 // Smooth SDL deltas are small; this keeps a laptop swipe close to the
 // compositor-style distance shown by one workspace gesture.
@@ -78,6 +77,8 @@ const LU_CHEVRON_UP = "\u{E070}";
 const LU_SQUARE_PEN = "\u{E172}";
 const LU_HISTORY = "\u{E1F5}";
 const LU_SQUARE_TERMINAL = "\u{E20A}";
+const LU_PIN = "\u{E259}";
+const LU_MINUS = "\u{E11C}";
 const LU_COMMAND = "\u{E09A}";
 const LU_SHIFT = "\u{E1E4}";
 const LU_OPTION = "\u{E1F8}";
@@ -108,6 +109,20 @@ const EMPTY_HINT_FONT_CSS: f32 = 12.5;
 const EMPTY_HINT_GAP_CSS: f32 = 18.0;
 const EMPTY_SIDE_GUTTER_CSS: f32 = 24.0;
 const EMPTY_BOTTOM_LIFT_CSS: f32 = 60.0;
+// Quick pane frame (design px, x `DESIGN_SCALE`).
+const QUICK_PANE_RADIUS_CSS: f32 = 14.0;
+const QUICK_PANE_STRIP_H_CSS: f32 = 32.0;
+/// Side/bottom content inset: at least 0.293 x radius so the pane's square
+/// corners stay inside the rounded frame.
+const QUICK_PANE_CONTENT_INSET_CSS: f32 = 4.5;
+const QUICK_PANE_GRIP_W_CSS: f32 = 36.0;
+const QUICK_PANE_GRIP_H_CSS: f32 = 4.0;
+const QUICK_PANE_BUTTON_CSS: f32 = 26.0;
+const QUICK_PANE_BUTTON_GAP_CSS: f32 = 2.0;
+const QUICK_PANE_BUTTON_ICON_CSS: f32 = 13.0;
+const QUICK_PANE_STRIP_RIGHT_PAD_CSS: f32 = 6.0;
+const QUICK_PANE_RESIZE_DOT_CSS: f32 = 1.6;
+const QUICK_PANE_RESIZE_DOT_STEP_CSS: f32 = 3.5;
 /// Lucide modifier glyphs sit a touch smaller than the key text.
 const SHORTCUT_GLYPH_RATIO: f32 = 0.95;
 
@@ -156,6 +171,10 @@ const WorkspacePaneAction = enum {
     scrolling_next,
     move_quick_pane,
     resize_quick_pane,
+    quick_pane_pin,
+    quick_pane_tile,
+    quick_pane_maximize,
+    quick_pane_minimize,
 };
 
 const ScrollingEdgeDirection = enum { previous, next };
@@ -1319,39 +1338,140 @@ fn queueShortcutKeys(state: *runtime.AppState, x: f32, cy: f32, hint: []const u8
     return cursor - x;
 }
 
-// Floating quick-pane overlay above the unchanged tiled workspace.
+// Floating quick-pane overlay above the unchanged tiled workspace: a rounded
+// frame whose top strip moves the pane and carries its window controls, with
+// the pane content inset below it and a resize mark in the corner.
 fn renderQuickPane(state: *runtime.AppState, workspace_rect: palette.Rect, target_workspace_width: f32) void {
     const quick = state.currentProjectQuickPane() orelse return;
     if (!quick.visible) return;
     if (!quick.pinned) {
         queueRect(state, workspace_rect, paletteColor(theme.withAlpha(theme.COLOR_PANEL, 92)));
     }
-    const rect = quickPaneRect(quick, workspace_rect);
+    const frame = context_menu.snap(quickPaneRect(quick, workspace_rect));
     var target_workspace_rect = workspace_rect;
     target_workspace_rect.w = target_workspace_width;
-    const target_rect = quickPaneRect(quick, target_workspace_rect);
-    queueRect(state, .{
-        .x = rect.x - theme.scaledUi(2.0),
-        .y = rect.y - theme.scaledUi(2.0),
-        .w = rect.w + theme.scaledUi(4.0),
-        .h = rect.h + theme.scaledUi(4.0),
-    }, paletteColor(theme.withAlpha(theme.COLOR_PANEL, 210)));
-    renderLeafWithTranscriptLayoutWidth(state, quick.pane_id, rect, target_rect.w);
+    const target_frame = quickPaneRect(quick, target_workspace_rect);
+    const radius = designUi(QUICK_PANE_RADIUS_CSS);
+    const strip_h = designUi(QUICK_PANE_STRIP_H_CSS);
+    const inset = designUi(QUICK_PANE_CONTENT_INSET_CSS);
 
-    const drag_h = theme.scaledUi(QUICK_PANE_DRAG_H_CSS);
-    appendHit(.{
-        .pane_id = quick.pane_id,
-        .action = .move_quick_pane,
-        .rect = .{ .x = rect.x, .y = rect.y, .w = @max(0.0, rect.w - theme.scaledUi(112.0)), .h = drag_h },
-    });
+    // Two stacked, offset scrims read as a soft shadow without a blur pass.
+    const shadow_layers = [_]struct { spread: f32, drop: f32, alpha: f32 }{
+        .{ .spread = 14.0, .drop = 12.0, .alpha = 0.06 },
+        .{ .spread = 4.0, .drop = 4.0, .alpha = 0.10 },
+    };
+    for (shadow_layers) |layer| {
+        const spread = designUi(layer.spread);
+        queueRounded(state, context_menu.snap(.{
+            .x = frame.x - spread,
+            .y = frame.y - spread + designUi(layer.drop),
+            .w = frame.w + spread * 2.0,
+            .h = frame.h + spread * 2.0,
+        }), paletteColor(theme.scrim(layer.alpha)), radius + spread);
+    }
+    queueRounded(state, frame, paletteColor(theme.COLOR_PANEL), radius);
+
+    const content = quickPaneContentRect(frame, strip_h, inset);
+    const target_content_w = @max(1.0, target_frame.w - inset * 2.0);
+    renderLeafWithTranscriptLayoutWidth(state, quick.pane_id, content, target_content_w);
+
+    const strip: palette.Rect = .{ .x = frame.x, .y = frame.y, .w = frame.w, .h = strip_h };
+    appendHit(.{ .pane_id = quick.pane_id, .action = .move_quick_pane, .rect = strip });
+    // Grip affordance centred on the drag strip.
+    const grip_w = designUi(QUICK_PANE_GRIP_W_CSS);
+    const grip_h = designUi(QUICK_PANE_GRIP_H_CSS);
+    queueRounded(state, .{
+        .x = @round(strip.x + (strip.w - grip_w) * 0.5),
+        .y = @round(strip.y + (strip.h - grip_h) * 0.5),
+        .w = grip_w,
+        .h = grip_h,
+    }, paletteColor(theme.borderMuted()), grip_h * 0.5);
+    renderQuickPaneControls(state, quick, strip);
+
     if (!quick.maximized) {
         const grip = theme.scaledUi(QUICK_PANE_RESIZE_GRIP_CSS);
         appendHit(.{
             .pane_id = quick.pane_id,
             .action = .resize_quick_pane,
-            .rect = .{ .x = rect.x + rect.w - grip, .y = rect.y + rect.h - grip, .w = grip, .h = grip },
+            .rect = .{ .x = frame.x + frame.w - grip, .y = frame.y + frame.h - grip, .w = grip, .h = grip },
         });
-        queueBorder(state, rect, paletteColor(theme.accent()), theme.scaledUi(6.0), theme.scaledUi(2.0));
+        renderQuickPaneResizeMark(state, frame, inset);
+    }
+    queueBorder(state, frame, paletteColor(theme.borderMuted()), radius, @max(@round(theme.scaledUi(1.0)), 1.0));
+}
+
+/// Pane content below the drag strip. The side/bottom inset keeps the square
+/// pane corners inside the frame's rounded ones.
+fn quickPaneContentRect(frame: palette.Rect, strip_h: f32, inset: f32) palette.Rect {
+    return context_menu.snap(.{
+        .x = frame.x + inset,
+        .y = frame.y + strip_h,
+        .w = @max(1.0, frame.w - inset * 2.0),
+        .h = @max(1.0, frame.h - strip_h - inset),
+    });
+}
+
+// Pin, return-to-tile, maximize/restore and minimize buttons, right-aligned
+// on the drag strip; they run the same state changes as their palette commands.
+fn renderQuickPaneControls(state: *runtime.AppState, quick: runtime.FloatingQuickPane, strip: palette.Rect) void {
+    const size = designUi(QUICK_PANE_BUTTON_CSS);
+    const gap = designUi(QUICK_PANE_BUTTON_GAP_CSS);
+    const icon_size = designUi(QUICK_PANE_BUTTON_ICON_CSS);
+    const controls = [_]struct { action: WorkspacePaneAction, icon: []const u8, active: bool }{
+        .{ .action = .quick_pane_pin, .icon = LU_PIN, .active = quick.pinned },
+        .{ .action = .quick_pane_tile, .icon = LU_COLUMNS, .active = false },
+        .{ .action = .quick_pane_maximize, .icon = if (quick.maximized) LU_MINIMIZE else LU_MAXIMIZE, .active = false },
+        .{ .action = .quick_pane_minimize, .icon = LU_MINUS, .active = false },
+    };
+    const count: f32 = @floatFromInt(controls.len);
+    var x = strip.x + strip.w - designUi(QUICK_PANE_STRIP_RIGHT_PAD_CSS) - count * size - (count - 1.0) * gap;
+    const y = strip.y + (strip.h - size) * 0.5;
+    const mouse_x = state.transcript_controller.palette_mouse_x;
+    const mouse_y = state.transcript_controller.palette_mouse_y;
+    for (controls) |control| {
+        const rect: palette.Rect = .{ .x = x, .y = y, .w = size, .h = size };
+        const hovered = state.transcript_controller.palette_mouse_in_workspace and rectContains(rect, mouse_x, mouse_y);
+        if (hovered or control.active) {
+            queueRounded(state, rect, paletteColor(theme.withAlpha(theme.COLOR_WHITE, if (hovered) PANE_CHROME_HOVER_ALPHA else PANE_CHROME_HOVER_ALPHA / 2)), designUi(6.0));
+        }
+        const color = if (hovered or control.active) theme.COLOR_WHITE else theme.COLOR_TEXT_SUBTLE;
+        queueLucideIcon(state, rect, control.icon, paletteColor(color), icon_size, strip);
+        appendHit(.{ .pane_id = quick.pane_id, .action = control.action, .rect = rect });
+        x += size + gap;
+    }
+}
+
+// Small diagonal dot mark in the bottom-right corner over the resize grip.
+fn renderQuickPaneResizeMark(state: *runtime.AppState, frame: palette.Rect, inset: f32) void {
+    const dot = @max(@round(designUi(QUICK_PANE_RESIZE_DOT_CSS)), 1.0);
+    const step = @round(designUi(QUICK_PANE_RESIZE_DOT_STEP_CSS));
+    const right = frame.x + frame.w - inset - designUi(3.0);
+    const bottom = frame.y + frame.h - inset - designUi(3.0);
+    const color = paletteColor(theme.withAlpha(theme.COLOR_TEXT_SUBTLE, 150));
+    // Lower-right triangle of a 3x3 grid: row r keeps columns >= 2 - r.
+    var row: usize = 0;
+    while (row < 3) : (row += 1) {
+        var col: usize = 2 - row;
+        while (col < 3) : (col += 1) {
+            const fx: f32 = @floatFromInt(2 - col);
+            const fy: f32 = @floatFromInt(2 - row);
+            queueRounded(state, .{
+                .x = @round(right - dot - fx * step),
+                .y = @round(bottom - dot - fy * step),
+                .w = dot,
+                .h = dot,
+            }, color, dot * 0.5);
+        }
+    }
+}
+
+fn activateQuickPaneControl(state: *runtime.AppState, action: WorkspacePaneAction) void {
+    switch (action) {
+        .quick_pane_pin => _ = state.toggleCurrentProjectQuickPanePinned(),
+        .quick_pane_tile => _ = state.returnCurrentProjectQuickPaneToTile(),
+        .quick_pane_maximize => _ = state.toggleCurrentProjectQuickPaneMaximized(),
+        .quick_pane_minimize => _ = state.minimizeCurrentProjectQuickPane(),
+        else => {},
     }
 }
 
@@ -1569,6 +1689,7 @@ pub fn handlePaletteMouseButton(state: *runtime.AppState, x: f32, y: f32, button
                 };
                 _ = state.focusCurrentProjectWorkspacePane(hit.pane_id);
             },
+            .quick_pane_pin, .quick_pane_tile, .quick_pane_maximize, .quick_pane_minimize => activateQuickPaneControl(state, hit.action),
         }
         return true;
     }
@@ -1633,6 +1754,9 @@ pub fn handlePaneChromeMouseButton(state: *runtime.AppState, x: f32, y: f32, but
                     };
                     _ = state.focusCurrentProjectWorkspacePane(hit.pane_id);
                 }
+            },
+            .quick_pane_pin, .quick_pane_tile, .quick_pane_maximize, .quick_pane_minimize => {
+                if (down) activateQuickPaneControl(state, hit.action);
             },
             else => continue,
         }
