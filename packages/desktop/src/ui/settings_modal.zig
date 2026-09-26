@@ -161,6 +161,7 @@ const UI_FONT_FAMILY_OPTIONS = std.enums.values(app_config.UiFontFamily);
 // Lucide (ISC) glyphs drawn through the `icon_alt` role.
 const LU_CHEVRON_DOWN = "\u{E06D}";
 const LU_CHEVRON_UP = "\u{E070}";
+const LU_CHECK = "\u{E06C}";
 const LU_X = "\u{E1B2}";
 const LU_PLUS = "\u{E13D}";
 const LU_MINUS = "\u{E11C}";
@@ -168,175 +169,371 @@ const LU_MINUS = "\u{E11C}";
 /// are drawn this much larger about their slot's centre.
 const LUCIDE_OPTICAL_SCALE: f32 = 1.08;
 
+/// The Settings artboard is specified in CSS px; app UI units are design px
+/// × 1.2 (design body 15px = app 18 units), matching the sidebar's factor.
+const DESIGN_SCALE: f32 = 18.0 / 15.0;
+
+fn designUi(px: f32) f32 {
+    return theme.scaledUi(px * DESIGN_SCALE);
+}
+
+// Dialog shell (design px).
+const DIALOG_W: f32 = 920.0;
+const DIALOG_H: f32 = 700.0;
+const DIALOG_RADIUS: f32 = 18.0;
+/// Smallest gap kept between the dialog and the window edge on small windows.
+const DIALOG_MIN_MARGIN: f32 = 16.0;
+/// Scrim strength behind the dialog: enough to separate it, soft enough that
+/// the workspace stays legible while settings live-apply.
+const SHELL_SCRIM_ALPHA: f32 = 0.22;
+
+// Left section nav.
+const NAV_W: f32 = 210.0;
+const NAV_PAD_X: f32 = 10.0;
+const NAV_PAD_TOP: f32 = 18.0;
+const NAV_TITLE_FONT: f32 = 15.0;
+const NAV_TITLE_GAP: f32 = 14.0;
+const NAV_ROW_H: f32 = 34.0;
+const NAV_ROW_GAP: f32 = 1.0;
+const NAV_ROW_RADIUS: f32 = 8.0;
+const NAV_ROW_PAD_X: f32 = 10.0;
+const NAV_FONT: f32 = 14.0;
+
+// Section header above the scrolling body.
+const HEADER_H: f32 = 58.0;
+const HEADER_PAD_LEFT: f32 = 32.0;
+const HEADER_PAD_RIGHT: f32 = 14.0;
+const HEADER_TITLE_FONT: f32 = 17.0;
+const CLOSE_SIZE: f32 = 32.0;
+const CLOSE_ICON: f32 = 16.0;
+
+// Scrolling body.
+const BODY_PAD_TOP: f32 = 4.0;
+const BODY_PAD_X: f32 = 32.0;
+const BODY_PAD_BOTTOM: f32 = 24.0;
+const GROUP_GAP: f32 = 22.0;
+const CAPTION_FONT: f32 = 12.0;
+const CAPTION_H: f32 = 16.0;
+const CAPTION_GAP: f32 = 8.0;
+
+// Grouped cards and their rows.
+const CARD_RADIUS: f32 = 12.0;
+const ROW_H: f32 = 56.0;
+const SUB_ROW_H: f32 = 44.0;
+const ROW_PAD_X: f32 = 16.0;
+/// Extra left inset of the per-area rows under a master switch.
+const SUB_ROW_INDENT: f32 = 16.0;
+const ROW_LABEL_FONT: f32 = 14.0;
+const SUB_ROW_LABEL_FONT: f32 = 13.5;
+const ROW_DESCRIPTION_FONT: f32 = 12.5;
+/// Minimum gap between a row's label column and its control.
+const ROW_CONTROL_GAP: f32 = 16.0;
+/// Share of the row a right-aligned control may take on narrow windows.
+const ROW_CONTROL_MAX_FRACTION: f32 = 0.6;
+
+// Row controls.
+const CONTROL_H: f32 = 32.0;
+const CONTROL_RADIUS: f32 = 8.0;
+const CONTROL_FONT: f32 = 13.0;
+const CONTROL_PAD_X: f32 = 10.0;
+const DROPDOWN_W: f32 = 170.0;
+const DROPDOWN_WIDE_W: f32 = 220.0;
+const CHEVRON_SIZE: f32 = 12.0;
+const MENU_ROW_H: f32 = 30.0;
+const MENU_MIN_W: f32 = 200.0;
+const MENU_GAP: f32 = 4.0;
+const MENU_PAD: f32 = 4.0;
+const STEP_W: f32 = 34.0;
+const STEP_VALUE_W: f32 = 48.0;
+const SWITCH_W: f32 = 38.0;
+const SWITCH_H: f32 = 22.0;
+const SWITCH_KNOB_PAD: f32 = 2.0;
+const SEGMENT_PAD_X: f32 = 12.0;
+const SEGMENT_INSET: f32 = 2.0;
+const SLIDER_W: f32 = 200.0;
+const SLIDER_VALUE_W: f32 = 52.0;
+const BUTTON_PAD_X: f32 = 12.0;
+
+/// Shared vertical rhythm for the free-form blocks (providers footer,
+/// connection rows, release notes) that do not use the fixed row grid.
 const Metrics = struct {
-    modal_pad: f32,
-    header_h: f32,
-    nav_w: f32,
-    footer_h: f32,
     card_pad: f32,
-    card_gap: f32,
-    title_h: f32,
     label_h: f32,
     row_h: f32,
     row_gap: f32,
     inner_gap: f32,
-    step_w: f32,
-    value_w: f32,
 
     fn init() Metrics {
         return .{
-            .modal_pad = theme.scaledUi(24.0),
-            .header_h = theme.scaledUi(52.0),
-            .nav_w = theme.scaledUi(124.0),
-            .footer_h = 0.0,
-            .card_pad = theme.scaledUi(18.0),
-            .card_gap = theme.scaledUi(14.0),
-            .title_h = theme.scaledUi(22.0),
-            .label_h = theme.scaledUi(16.0),
-            .row_h = theme.scaledUi(36.0),
-            .row_gap = theme.scaledUi(12.0),
-            .inner_gap = theme.scaledUi(8.0),
-            .step_w = theme.scaledUi(32.0),
-            .value_w = theme.scaledUi(44.0),
+            .card_pad = designUi(ROW_PAD_X),
+            .label_h = designUi(16.0),
+            .row_h = designUi(CONTROL_H),
+            .row_gap = designUi(12.0),
+            .inner_gap = designUi(8.0),
         };
-    }
-
-    fn stepperW(self: Metrics) f32 {
-        return self.step_w * 2.0 + self.value_w;
-    }
-
-    fn labeledBlockH(self: Metrics, row_count: usize) f32 {
-        return self.card_pad * 2.0 + self.title_h + self.row_gap + self.label_h + self.inner_gap +
-            @as(f32, @floatFromInt(row_count)) * self.row_h +
-            @as(f32, @floatFromInt(if (row_count > 0) row_count - 1 else 0)) * self.row_gap;
     }
 };
 
+const OFFSCREEN: palette.Rect = .{ .x = -10000.0, .y = -10000.0, .w = 0.0, .h = 0.0 };
+const OFFSCREEN_Y: f32 = -10000.0;
+
+const MAX_PAGE_GROUPS: usize = 8;
+const MAX_PAGE_ROWS: usize = 24;
+
+const RowStyle = enum { normal, sub, custom };
+
+/// One settings row inside a group card. Labels and static descriptions are
+/// drawn by `drawPageChrome`; the page draws the row's control.
+const PageRow = struct {
+    rect: palette.Rect,
+    label: []const u8,
+    description: []const u8,
+    /// Label sits on the upper line; a (possibly dynamic) description below.
+    two_line: bool,
+    style: RowStyle,
+    /// Inset hairline above this row (every row but a card's first).
+    divider: bool,
+    /// Width of the right-aligned control, so the label column stops short.
+    control_w: f32,
+};
+
+/// A captioned card holding consecutive rows.
+const PageGroup = struct {
+    caption: []const u8,
+    caption_y: f32,
+    card: palette.Rect,
+};
+
+const PagePlan = struct {
+    groups: [MAX_PAGE_GROUPS]PageGroup = undefined,
+    group_count: usize = 0,
+    rows: [MAX_PAGE_ROWS]PageRow = undefined,
+    row_count: usize = 0,
+};
+
+const StepperRects = struct { dec: palette.Rect, inc: palette.Rect };
+
+/// Lays out one settings page top-down: caption, card, rows, next group.
+const PageBuilder = struct {
+    plan: *PagePlan,
+    x: f32,
+    w: f32,
+    top: f32,
+    y: f32,
+
+    fn init(plan: *PagePlan, x: f32, w: f32, top: f32) PageBuilder {
+        return .{ .plan = plan, .x = x, .w = w, .top = top, .y = top };
+    }
+
+    fn group(self: *PageBuilder, caption: []const u8) void {
+        std.debug.assert(self.plan.group_count < MAX_PAGE_GROUPS);
+        if (self.y > self.top) self.y += designUi(GROUP_GAP);
+        const caption_y = self.y;
+        if (caption.len > 0) self.y += designUi(CAPTION_H + CAPTION_GAP);
+        self.plan.groups[self.plan.group_count] = .{
+            .caption = caption,
+            .caption_y = caption_y,
+            .card = .{ .x = self.x, .y = self.y, .w = self.w, .h = 0.0 },
+        };
+        self.plan.group_count += 1;
+    }
+
+    fn rowWith(self: *PageBuilder, label: []const u8, description: []const u8, two_line: bool, style: RowStyle, h: f32, control_w: f32) palette.Rect {
+        std.debug.assert(self.plan.group_count > 0 and self.plan.row_count < MAX_PAGE_ROWS);
+        const card = &self.plan.groups[self.plan.group_count - 1].card;
+        const rect: palette.Rect = .{ .x = self.x, .y = self.y, .w = self.w, .h = h };
+        self.plan.rows[self.plan.row_count] = .{
+            .rect = rect,
+            .label = label,
+            .description = description,
+            .two_line = two_line,
+            .style = style,
+            .divider = self.y > card.y,
+            .control_w = control_w,
+        };
+        self.plan.row_count += 1;
+        self.y += h;
+        card.h = self.y - card.y;
+        return rect;
+    }
+
+    /// Switch row; the whole row is the hit target.
+    fn switchRow(self: *PageBuilder, label: []const u8) palette.Rect {
+        return self.rowWith(label, "", false, .normal, designUi(ROW_H), designUi(SWITCH_W));
+    }
+
+    fn switchRowDescribed(self: *PageBuilder, label: []const u8, description: []const u8) palette.Rect {
+        return self.rowWith(label, description, true, .normal, designUi(ROW_H), designUi(SWITCH_W));
+    }
+
+    fn subSwitchRow(self: *PageBuilder, label: []const u8) palette.Rect {
+        return self.rowWith(label, "", false, .sub, designUi(SUB_ROW_H), designUi(SWITCH_W));
+    }
+
+    /// Row with a right-aligned dropdown; returns the dropdown rect.
+    fn dropdownRow(self: *PageBuilder, label: []const u8, design_w: f32) palette.Rect {
+        const row = self.rowWith(label, "", false, .normal, designUi(ROW_H), 0.0);
+        const control = rowControl(row, designUi(design_w), designUi(CONTROL_H));
+        self.plan.rows[self.plan.row_count - 1].control_w = control.w;
+        return control;
+    }
+
+    fn stepperRow(self: *PageBuilder, label: []const u8) StepperRects {
+        const pill_w = designUi(STEP_W * 2.0 + STEP_VALUE_W);
+        const row = self.rowWith(label, "", false, .normal, designUi(ROW_H), pill_w);
+        const pill = rowControl(row, pill_w, designUi(CONTROL_H));
+        const step_w = designUi(STEP_W);
+        return .{
+            .dec = .{ .x = pill.x, .y = pill.y, .w = step_w, .h = pill.h },
+            .inc = .{ .x = pill.x + pill.w - step_w, .y = pill.y, .w = step_w, .h = pill.h },
+        };
+    }
+
+    /// Row with a right-aligned segmented control of equal-width segments.
+    fn segmentRow(self: *PageBuilder, comptime n: usize, label: []const u8, labels: [n][]const u8) [n]palette.Rect {
+        var seg_w: f32 = 0.0;
+        for (labels) |value| seg_w = @max(seg_w, text_measure.textWidth(.ui, designUi(CONTROL_FONT), value));
+        seg_w += designUi(SEGMENT_PAD_X) * 2.0;
+        const inset = designUi(SEGMENT_INSET);
+        const want_w = seg_w * @as(f32, @floatFromInt(n)) + inset * 2.0;
+        const row = self.rowWith(label, "", false, .normal, designUi(ROW_H), 0.0);
+        const track = rowControl(row, want_w, designUi(CONTROL_H));
+        self.plan.rows[self.plan.row_count - 1].control_w = track.w;
+        const each = (track.w - inset * 2.0) / @as(f32, @floatFromInt(n));
+        var rects: [n]palette.Rect = undefined;
+        for (&rects, 0..) |*rect, index| {
+            rect.* = .{
+                .x = track.x + inset + each * @as(f32, @floatFromInt(index)),
+                .y = track.y + inset,
+                .w = each,
+                .h = track.h - inset * 2.0,
+            };
+        }
+        return rects;
+    }
+
+    /// Full-width row whose content the page draws itself.
+    fn customRow(self: *PageBuilder, h: f32) palette.Rect {
+        return self.rowWith("", "", false, .custom, h, 0.0);
+    }
+
+    /// Advances past free content below the last card.
+    fn space(self: *PageBuilder, h: f32) void {
+        self.y += h;
+    }
+
+    fn height(self: *const PageBuilder) f32 {
+        return self.y - self.top;
+    }
+};
+
+/// Right-aligned control rect inside `row`, vertically centred.
+fn rowControl(row: palette.Rect, w: f32, h: f32) palette.Rect {
+    const cw = @min(w, row.w * ROW_CONTROL_MAX_FRACTION);
+    return .{
+        .x = row.x + row.w - designUi(ROW_PAD_X) - cw,
+        .y = row.y + (row.h - h) * 0.5,
+        .w = cw,
+        .h = h,
+    };
+}
+
 const SettingsLayout = struct {
     modal: palette.Rect,
+    nav_panel: palette.Rect,
     header: palette.Rect,
-    footer: palette.Rect,
     body_clip: palette.Rect,
-    max_scroll_y: f32,
+    max_scroll_y: f32 = 0.0,
+    page_h: f32 = 0.0,
     close: palette.Rect,
     nav: [settings_controller.Category.all.len]palette.Rect,
-    content: palette.Rect,
-    cancel: palette.Rect,
-    save: palette.Rect,
-    appearance_card: palette.Rect,
-    theme_dropdown: palette.Rect,
-    companion_character_label_y: f32,
-    companion_character_dropdown: palette.Rect,
-    ui_font_dec: palette.Rect,
-    ui_font_family_label_y: f32,
-    ui_font_family_dropdown: palette.Rect,
-    ui_font_inc: palette.Rect,
-    reduced_motion: palette.Rect,
-    reduced_motion_parts: [REDUCED_MOTION_PARTS.len]palette.Rect,
-    reduced_motion_hint_y: f32,
-    workspace_tabs_label_y: f32,
-    workspace_tabs_automatic: palette.Rect,
-    workspace_tabs_always: palette.Rect,
-    workspace_tabs_disabled: palette.Rect,
-    transcript_card: palette.Rect,
-    tool_groups_collapsed: palette.Rect,
-    tool_groups_expanded: palette.Rect,
-    tool_groups_remember_last: palette.Rect,
-    diff_layout_stacked: palette.Rect,
-    diff_layout_split: palette.Rect,
-    chat_card: palette.Rect,
-    automatic_chat_titles: palette.Rect,
-    chat_title_provider_dropdown: palette.Rect,
-    chat_title_model_dropdown: palette.Rect,
-    chat_hint_y: f32,
-    new_chat_provider_dropdown: palette.Rect,
-    new_chat_model_dropdown: palette.Rect,
-    new_chat_reasoning_dropdown: palette.Rect,
-    new_chat_defaults_hint_y: f32,
-    terminal_card: palette.Rect,
-    terminal_font_dec: palette.Rect,
-    terminal_font_inc: palette.Rect,
-    terminal_hint_y: f32,
-    browser_card: palette.Rect,
-    links_verde_browser: palette.Rect,
-    links_system_browser: palette.Rect,
-    chat_links_global: palette.Rect,
-    chat_links_verde_browser: palette.Rect,
-    chat_links_system_browser: palette.Rect,
-    terminal_links_global: palette.Rect,
-    terminal_links_verde_browser: palette.Rect,
-    terminal_links_system_browser: palette.Rect,
-    browser_scroll_speed: palette.Rect,
-    browser_hint_y: f32,
-    experimental_card: palette.Rect,
-    companion_toggle: palette.Rect,
-    companion_hint_y: f32,
-    workspace_card: palette.Rect,
-    open_cells: [OPEN_CHOICES.len]palette.Rect,
-    open_action_dropdown: palette.Rect,
-    custom_open: ?palette.Rect = null,
-    new_chat_new_pane: palette.Rect,
-    new_chat_replace_pane: palette.Rect,
-    workspace_split_default_chat: palette.Rect,
-    workspace_split_default_terminal: palette.Rect,
-    workspace_split_default_hint_y: f32,
-    workspace_new_tab_chat: palette.Rect,
-    workspace_new_tab_terminal: palette.Rect,
-    workspace_new_tab_hint_y: f32,
-    file_links_neovim_pane: palette.Rect,
-    file_links_hint_y: f32,
-    workspace_unzoom_on_navigation: palette.Rect,
-    workspace_unzoom_on_navigation_hint_y: f32,
-    workspace_pane_gap_dec: palette.Rect,
-    workspace_pane_gap_inc: palette.Rect,
-    workspace_pane_gap_hint_y: f32,
-    workspace_panes_per_view_dec: palette.Rect,
-    workspace_panes_per_view_inc: palette.Rect,
-    workspace_panes_per_view_hint_y: f32,
-    workspace_scroll_use_global: palette.Rect,
-    workspace_scroll_override: palette.Rect,
-    workspace_scroll_scope_hint_y: f32,
-    workspace_scroll_mode_automatic: palette.Rect,
-    workspace_scroll_mode_always: palette.Rect,
-    workspace_scroll_mode_disabled: palette.Rect,
-    workspace_scroll_mode_hint_y: f32,
-    workspace_scroll_threshold_dec: palette.Rect,
-    workspace_scroll_threshold_inc: palette.Rect,
-    workspace_scroll_threshold_hint_y: f32,
-    workspace_scroll_horizontal: palette.Rect,
-    workspace_scroll_vertical: palette.Rect,
-    workspace_scroll_direction_hint_y: f32,
-    runtimes_card: palette.Rect,
-    runtimes: RuntimeCardPlan,
-    integrations_card: palette.Rect,
-    mcp_tools: palette.Rect,
-    mcp_hint_y: f32,
-    hooks_label_y: f32,
-    hooks_claude: palette.Rect,
-    hooks_codex: palette.Rect,
-    hooks_cursor: palette.Rect,
-    hooks_opencode: palette.Rect,
-    hooks_grok: palette.Rect,
-    hooks_amp: palette.Rect,
-    hooks_pi: palette.Rect,
-    integrations_hint_y: f32,
-    updates_card: palette.Rect,
-    updates_check: palette.Rect,
-    updates_download: palette.Rect,
-    updates_automatic: palette.Rect,
-    updates_status_y: f32,
-    updates_notes_y: f32,
+    page: PagePlan = .{},
+    // Appearance
+    theme_dropdown: palette.Rect = OFFSCREEN,
+    ui_font_family_dropdown: palette.Rect = OFFSCREEN,
+    ui_font_dec: palette.Rect = OFFSCREEN,
+    ui_font_inc: palette.Rect = OFFSCREEN,
+    reduced_motion: palette.Rect = OFFSCREEN,
+    reduced_motion_parts: [REDUCED_MOTION_PARTS.len]palette.Rect = [_]palette.Rect{OFFSCREEN} ** REDUCED_MOTION_PARTS.len,
+    companion_toggle: palette.Rect = OFFSCREEN,
+    companion_character_dropdown: palette.Rect = OFFSCREEN,
+    // Workspace
+    open_action_dropdown: palette.Rect = OFFSCREEN,
+    workspace_tabs_automatic: palette.Rect = OFFSCREEN,
+    workspace_tabs_always: palette.Rect = OFFSCREEN,
+    workspace_tabs_disabled: palette.Rect = OFFSCREEN,
+    new_chat_new_pane: palette.Rect = OFFSCREEN,
+    new_chat_replace_pane: palette.Rect = OFFSCREEN,
+    workspace_split_default_chat: palette.Rect = OFFSCREEN,
+    workspace_split_default_terminal: palette.Rect = OFFSCREEN,
+    workspace_new_tab_chat: palette.Rect = OFFSCREEN,
+    workspace_new_tab_terminal: palette.Rect = OFFSCREEN,
+    workspace_unzoom_on_navigation: palette.Rect = OFFSCREEN,
+    workspace_pane_gap_dec: palette.Rect = OFFSCREEN,
+    workspace_pane_gap_inc: palette.Rect = OFFSCREEN,
+    workspace_panes_per_view_dec: palette.Rect = OFFSCREEN,
+    workspace_panes_per_view_inc: palette.Rect = OFFSCREEN,
+    workspace_scroll_mode_automatic: palette.Rect = OFFSCREEN,
+    workspace_scroll_mode_always: palette.Rect = OFFSCREEN,
+    workspace_scroll_mode_disabled: palette.Rect = OFFSCREEN,
+    workspace_scroll_threshold_dec: palette.Rect = OFFSCREEN,
+    workspace_scroll_threshold_inc: palette.Rect = OFFSCREEN,
+    workspace_scroll_horizontal: palette.Rect = OFFSCREEN,
+    workspace_scroll_vertical: palette.Rect = OFFSCREEN,
+    // Chat
+    tool_groups_collapsed: palette.Rect = OFFSCREEN,
+    tool_groups_expanded: palette.Rect = OFFSCREEN,
+    tool_groups_remember_last: palette.Rect = OFFSCREEN,
+    diff_layout_stacked: palette.Rect = OFFSCREEN,
+    diff_layout_split: palette.Rect = OFFSCREEN,
+    automatic_chat_titles: palette.Rect = OFFSCREEN,
+    chat_title_provider_dropdown: palette.Rect = OFFSCREEN,
+    chat_title_model_dropdown: palette.Rect = OFFSCREEN,
+    new_chat_provider_dropdown: palette.Rect = OFFSCREEN,
+    new_chat_model_dropdown: palette.Rect = OFFSCREEN,
+    new_chat_reasoning_dropdown: palette.Rect = OFFSCREEN,
+    file_links_neovim_pane: palette.Rect = OFFSCREEN,
+    // Terminal
+    terminal_font_dec: palette.Rect = OFFSCREEN,
+    terminal_font_inc: palette.Rect = OFFSCREEN,
+    // Browser
+    links_verde_browser: palette.Rect = OFFSCREEN,
+    links_system_browser: palette.Rect = OFFSCREEN,
+    chat_links_global: palette.Rect = OFFSCREEN,
+    chat_links_verde_browser: palette.Rect = OFFSCREEN,
+    chat_links_system_browser: palette.Rect = OFFSCREEN,
+    terminal_links_global: palette.Rect = OFFSCREEN,
+    terminal_links_verde_browser: palette.Rect = OFFSCREEN,
+    terminal_links_system_browser: palette.Rect = OFFSCREEN,
+    browser_scroll_speed: palette.Rect = OFFSCREEN,
+    // Providers
+    provider_rows: [PROVIDER_ROW_COUNT]palette.Rect = [_]palette.Rect{OFFSCREEN} ** PROVIDER_ROW_COUNT,
+    provider_updates: [PROVIDER_ROW_COUNT]palette.Rect = [_]palette.Rect{OFFSCREEN} ** PROVIDER_ROW_COUNT,
+    providers_hint_y: f32 = OFFSCREEN_Y,
+    providers_update_hint_y: f32 = OFFSCREEN_Y,
+    providers_recheck: palette.Rect = OFFSCREEN,
+    // Connections
+    runtimes: RuntimeCardPlan = .{},
+    // Agents
+    mcp_tools: palette.Rect = OFFSCREEN,
+    hooks_claude: palette.Rect = OFFSCREEN,
+    hooks_codex: palette.Rect = OFFSCREEN,
+    hooks_cursor: palette.Rect = OFFSCREEN,
+    hooks_opencode: palette.Rect = OFFSCREEN,
+    hooks_grok: palette.Rect = OFFSCREEN,
+    hooks_amp: palette.Rect = OFFSCREEN,
+    hooks_pi: palette.Rect = OFFSCREEN,
+    // App
+    updates_version_row: palette.Rect = OFFSCREEN,
+    updates_check: palette.Rect = OFFSCREEN,
+    updates_download: palette.Rect = OFFSCREEN,
+    updates_automatic: palette.Rect = OFFSCREEN,
+    updates_notes_row: palette.Rect = OFFSCREEN,
+    updates_package_hint_y: f32 = OFFSCREEN_Y,
+    updates_notes_y: f32 = OFFSCREEN_Y,
     updates_notes_toggle: ?palette.Rect = null,
-    updates_release_page: palette.Rect,
-    notifications_card: palette.Rect,
-    notifications_toggle: palette.Rect,
-    notifications_hint_y: f32,
-    providers_card: palette.Rect,
-    provider_rows: [PROVIDER_ROW_COUNT]palette.Rect,
-    provider_updates: [PROVIDER_ROW_COUNT]palette.Rect,
-    providers_hint_y: f32,
-    providers_update_hint_y: f32,
-    providers_recheck: palette.Rect,
+    updates_release_page: palette.Rect = OFFSCREEN,
+    notifications_toggle: palette.Rect = OFFSCREEN,
 };
 
 const log = std.log.scoped(.native_ui_settings);
@@ -345,78 +542,91 @@ const log = std.log.scoped(.native_ui_settings);
 // animation progress at the top of render.
 var current_fade_alpha: f32 = 1.0;
 
-fn radiusSm() f32 {
-    return theme.scaledUi(6.0);
+/// Primary copy: row labels, values, titles.
+fn textPrimary() [4]f32 {
+    return theme.COLOR_WHITE;
 }
 
-/// Corner radius of the floating settings sheet.
-fn radiusShell() f32 {
-    return theme.scaledUi(14.0);
-}
-
-/// Gap between the settings sheet and the window / sidebar edges, so the
-/// rounded shell reads as a sheet over the dimmed workspace.
-fn shellInset() f32 {
-    return theme.scaledUi(8.0);
-}
-
-/// Scrim strength behind the sheet: enough to separate it, soft enough that
-/// the workspace stays legible while settings live-apply.
-const SHELL_SCRIM_ALPHA: f32 = 0.22;
-
-/// Secondary copy: field labels, unselected nav rows, chevrons.
+/// Secondary copy: captions, unselected nav rows, sub-row labels, chevrons.
 fn textLabel() [4]f32 {
     return theme.COLOR_TEXT_MUTED;
 }
 
-/// Row and field labels ("Theme", "Font family") read in the body text colour.
-fn fieldLabel() [4]f32 {
-    return theme.COLOR_WHITE;
-}
-
-const FIELD_LABEL_FONT_SIZE: f32 = 13.0;
-
-/// Tertiary copy: row descriptions, hints, version strings.
+/// Tertiary copy: descriptions, hints, version strings.
 fn textHint() [4]f32 {
     return theme.COLOR_TEXT_SUBTLE;
 }
 
-// Neutral panel→text tint strengths for sheet fills (see `panelTint`).
-const HOVER_TINT: f32 = 0.045;
-const SELECTED_TINT: f32 = 0.08;
-const CONTROL_TINT: f32 = 0.025;
-const MENU_TINT: f32 = 0.05;
-
-// Settings paints on `COLOR_PANEL`, so fills mix from it toward the text
-// colour. Omarchy's terminal color0/color8 may be light, so panel_alt /
-// panel_muted are unsuitable as opaque fills even though they remain useful
-// as palette accents elsewhere.
-fn panelTint(amount: f32) [4]f32 {
-    return theme.mix(theme.COLOR_PANEL, theme.COLOR_WHITE, amount);
+// Fills mix from the window background toward the text colour so they keep
+// their relationship on light, dark and Omarchy palettes (whose panel_alt /
+// panel_muted may be unsuitable as opaque fills).
+fn inkTint(amount: f32) [4]f32 {
+    return theme.mix(theme.background(), theme.COLOR_WHITE, amount);
 }
 
-/// Resting fill for dropdowns, steppers and segmented tracks.
+/// Dialog body behind the cards.
+fn sheetSurface() [4]f32 {
+    return theme.background();
+}
+
+/// Left section nav column.
+fn navSurface() [4]f32 {
+    return inkTint(0.03);
+}
+
+fn navHoverSurface() [4]f32 {
+    return inkTint(0.055);
+}
+
+fn navSelectedSurface() [4]f32 {
+    return inkTint(0.085);
+}
+
+/// Group cards: white on light palettes, a step above the sheet on dark ones.
+fn cardSurface() [4]f32 {
+    return if (theme.isLightPalette()) theme.COLOR_PANEL else inkTint(0.045);
+}
+
+/// Card and nav-column edge.
+fn cardEdge() [4]f32 {
+    return inkTint(0.08);
+}
+
+/// Inset hairline between rows of one card.
+fn rowHairline() [4]f32 {
+    return inkTint(0.05);
+}
+
+/// Resting fill for dropdowns, steppers, menus and buttons (sits on a card).
 fn controlSurface() [4]f32 {
-    return panelTint(CONTROL_TINT);
+    return cardSurface();
 }
 
-/// Soft hover fill shared by rows, nav items and ghost buttons.
+/// Soft hover fill shared by rows, controls and ghost buttons.
 fn controlHoverSurface() [4]f32 {
-    return panelTint(HOVER_TINT);
+    return theme.mix(cardSurface(), theme.COLOR_WHITE, 0.045);
 }
 
-/// Neutral selected fill (nav row, segment, menu option). The accent is
-/// reserved for primary actions and switches that are on.
+/// Neutral selected fill (menu option).
 fn selectedSurface() [4]f32 {
-    return panelTint(SELECTED_TINT);
+    return theme.mix(cardSurface(), theme.COLOR_WHITE, 0.075);
 }
 
 /// Opaque popup surface for dropdown menus.
 fn menuSurface() [4]f32 {
-    return panelTint(MENU_TINT);
+    return cardSurface();
 }
 
-/// Hairline edge for resting controls, menus and dividers.
+/// Segmented-control track and the raised selected segment on it.
+fn segmentTrack() [4]f32 {
+    return theme.mix(cardSurface(), theme.COLOR_WHITE, 0.05);
+}
+
+fn segmentRaised() [4]f32 {
+    return if (theme.isLightPalette()) theme.COLOR_PANEL else theme.mix(cardSurface(), theme.COLOR_WHITE, 0.14);
+}
+
+/// Hairline edge for resting controls and menus.
 fn controlEdge() [4]f32 {
     return theme.restingEdge();
 }
@@ -426,54 +636,27 @@ fn controlOpenEdge() [4]f32 {
     return theme.focusRing();
 }
 
+/// Solid "on" fill: switch tracks, slider fill and primary buttons use the
+/// text colour (dark on light palettes) rather than the accent.
+fn strongFill() [4]f32 {
+    return theme.COLOR_WHITE;
+}
+
 fn metrics() Metrics {
     return Metrics.init();
 }
 
-fn sidebarDockWidth(state: *const runtime.AppState, width: f32) f32 {
-    if (state.isSidebarHidden()) return 0.0;
-    if (state.isSidebarCollapsed()) return theme.clampf(width * 0.07, theme.scaledUi(60.0), theme.scaledUi(76.0));
-    if (width < theme.scaledUi(900.0)) return theme.clampf(width * 0.34, theme.scaledUi(180.0), theme.scaledUi(240.0));
-    return theme.clampf(width * 0.19, theme.scaledUi(260.0), @min(theme.scaledUi(360.0), width * 0.32));
-}
-
-fn panelWidth(state: *const runtime.AppState, width: f32, dock_x: f32) f32 {
-    const preferred = if (state.settings_controller.active_category == .connections)
-        theme.scaledUi(760.0)
-    else
-        theme.scaledUi(560.0);
-    const max_w = @max(width - dock_x - theme.scaledUi(12.0), theme.scaledUi(300.0));
-    return @min(preferred, max_w);
-}
-
-// Floating sheet beside the sidebar, inset from the window edges so its
-// rounded corners and hairline edge read against the scrim.
-fn layoutPanel(state: *const runtime.AppState, width: f32, height: f32) palette.Rect {
-    const inset = shellInset();
-    const x = sidebarDockWidth(state, width) + inset;
-    const modal_w = panelWidth(state, width, x);
+// Centred dialog at the artboard size, shrunk to fit small windows.
+fn layoutDialog(width: f32, height: f32) palette.Rect {
+    const margin = designUi(DIALOG_MIN_MARGIN);
+    const w = @max(@min(designUi(DIALOG_W), width - margin * 2.0), @min(width, designUi(320.0)));
+    const h = @max(@min(designUi(DIALOG_H), height - margin * 2.0), @min(height, designUi(240.0)));
     return .{
-        .x = x,
-        .y = inset,
-        .w = modal_w,
-        .h = @max(height - inset * 2.0, 0.0),
+        .x = @round((width - w) * 0.5),
+        .y = @round((height - h) * 0.5),
+        .w = w,
+        .h = h,
     };
-}
-
-fn stepperRects(card: palette.Rect, card_pad: f32, row_y: f32, m: Metrics) struct { dec: palette.Rect, inc: palette.Rect } {
-    const inc: palette.Rect = .{
-        .x = card.x + card.w - card_pad - m.step_w,
-        .y = row_y,
-        .w = m.step_w,
-        .h = m.row_h,
-    };
-    const dec: palette.Rect = .{
-        .x = inc.x - m.value_w - m.step_w,
-        .y = row_y,
-        .w = m.step_w,
-        .h = m.row_h,
-    };
-    return .{ .dec = dec, .inc = inc };
 }
 
 fn consumePendingRuntimesScroll(state: *runtime.AppState, layout: SettingsLayout) bool {
@@ -483,540 +666,279 @@ fn consumePendingRuntimesScroll(state: *runtime.AppState, layout: SettingsLayout
 }
 
 fn computeLayout(state: *runtime.AppState, width: f32, height: f32) SettingsLayout {
-    const m = metrics();
-    const labeled = m.label_h + m.inner_gap + m.row_h;
-    const companion_enabled = state.settings_controller.draft.companion_enabled;
-    const auto_titles = state.settings_controller.draft.automatic_chat_titles_enabled;
-    const auto_scroll = state.settings_controller.draft.workspace_scroll_mode == .automatic;
-
-    const appearance_h = m.card_pad * 2.0 + m.title_h + m.row_gap +
-        labeled + m.row_gap +
-        m.row_h + m.row_gap +
-        labeled + m.row_gap +
-        m.row_h + m.row_gap +
-        @as(f32, @floatFromInt(REDUCED_MOTION_PARTS.len)) * (m.row_h + m.row_gap) +
-        m.row_h +
-        if (companion_enabled) m.row_gap + labeled else 0.0;
-    const transcript_h = m.card_pad * 2.0 + m.title_h + m.row_gap +
-        labeled + m.row_gap +
-        labeled;
-    const chat_h = m.card_pad * 2.0 + m.title_h + m.row_gap + m.row_h +
-        (if (auto_titles) m.row_gap + labeled else 0.0) +
-        m.row_gap + labeled +
-        m.row_gap + m.row_h;
-    const terminal_h = m.card_pad * 2.0 + m.title_h + m.row_gap + m.row_h;
-    const browser_h = m.card_pad * 2.0 + m.title_h + m.row_gap +
-        labeled * 4.0 + m.row_gap * 3.0;
-    const experimental_h: f32 = 0.0;
-    const workspace_h = m.card_pad * 2.0 + m.title_h + m.row_gap +
-        labeled + m.row_gap +
-        labeled + m.row_gap +
-        labeled + m.row_gap +
-        labeled + m.row_gap +
-        labeled + m.row_gap +
-        m.row_h + m.row_gap +
-        m.row_h + m.row_gap +
-        m.row_h + m.row_gap +
-        labeled +
-        (if (auto_scroll) m.row_gap + m.row_h else 0.0) +
-        m.row_gap + labeled;
-    const modal = layoutPanel(state, width, height);
-    const category = state.settings_controller.active_category;
-    const header: palette.Rect = .{ .x = modal.x, .y = modal.y, .w = modal.w, .h = m.header_h };
-    const nav_x = modal.x + theme.scaledUi(8.0);
-    const nav_y = header.y + header.h + theme.scaledUi(8.0);
-    const nav_row_h = theme.scaledUi(32.0);
+    const modal = layoutDialog(width, height);
+    const nav_w = @min(designUi(NAV_W), modal.w * 0.28);
+    const nav_panel: palette.Rect = .{ .x = modal.x, .y = modal.y, .w = nav_w, .h = modal.h };
     var nav: [settings_controller.Category.all.len]palette.Rect = undefined;
-    for (settings_controller.Category.all, 0..) |_, index| {
-        nav[index] = .{
-            .x = nav_x,
-            .y = nav_y + @as(f32, @floatFromInt(index)) * nav_row_h,
-            .w = m.nav_w,
-            .h = nav_row_h - theme.scaledUi(2.0),
+    const nav_top = modal.y + designUi(NAV_PAD_TOP) + designUi(NAV_TITLE_FONT * 1.25) + designUi(NAV_TITLE_GAP);
+    // Short windows compress the section rows so all nine stay inside.
+    const nav_room = modal.y + modal.h - designUi(NAV_PAD_X) - nav_top;
+    const nav_count: f32 = @floatFromInt(settings_controller.Category.all.len);
+    const nav_row_h = theme.clampf(nav_room / nav_count - designUi(NAV_ROW_GAP), designUi(22.0), designUi(NAV_ROW_H));
+    for (&nav, 0..) |*rect, index| {
+        rect.* = .{
+            .x = nav_panel.x + designUi(NAV_PAD_X),
+            .y = nav_top + @as(f32, @floatFromInt(index)) * (nav_row_h + designUi(NAV_ROW_GAP)),
+            .w = nav_panel.w - designUi(NAV_PAD_X) * 2.0,
+            .h = nav_row_h,
         };
     }
-    const content_inset = theme.scaledUi(12.0);
-    const content: palette.Rect = .{
-        .x = modal.x + m.nav_w + content_inset,
-        .y = header.y + header.h,
-        .w = @max(modal.w - m.nav_w - content_inset * 2.0, theme.scaledUi(200.0)),
-        .h = @max(modal.h - header.h, 0.0),
-    };
-    const content_w = content.w;
-    const runtimes_w = content_w;
-    const runtimes_h = planRuntimeCard(state, 0.0, 0.0, runtimes_w, m).height;
-    const integrations_h = m.card_pad * 2.0 + m.title_h + m.row_gap * 2.0 + m.label_h * 4.0 + m.row_h * 8.0 + m.inner_gap * 10.0;
-    const notifications_h = m.card_pad * 2.0 + m.title_h + m.row_gap + m.label_h + m.inner_gap + m.row_h + m.inner_gap + m.label_h;
-    const updates_notes_w = @max(content_w - m.card_pad * 2.0, theme.scaledUi(80.0));
-    const updates_notes_h = notesBlockHeight(state, updates_notes_w, m);
-    const package_hint_h = if (state.settings_controller.package_update_command != null) wrappedNotesRows(PACKAGE_UPDATE_HINT, updates_notes_w) * notesLineHeight() + m.label_h + m.inner_gap else 0.0;
-    const updates_h = package_hint_h + m.card_pad * 2.0 + m.title_h + m.inner_gap + m.label_h + m.inner_gap + m.row_h + m.inner_gap + m.row_h + m.inner_gap + updates_notes_h + m.inner_gap + m.label_h;
 
-    const provider_rows_h = @as(f32, @floatFromInt(PROVIDER_ROW_COUNT)) * providerRowHeight();
-    const providers_h = m.card_pad * 2.0 + m.title_h + m.row_gap + provider_rows_h + m.label_h * 2.0 + m.row_gap + m.row_h;
-    const appearance_page_h = appearance_h;
-    const chat_page_h = transcript_h + m.card_gap + chat_h;
-    const workspace_page_h = workspace_h;
-    const app_page_h = updates_h + m.card_gap + notifications_h;
-    const body_h = switch (category) {
-        .appearance => appearance_page_h,
-        .workspace => workspace_page_h,
-        .chat => chat_page_h,
-        .providers => providers_h,
-        .terminal => terminal_h,
-        .browser => browser_h,
-        .connections => runtimes_h,
-        .agents => integrations_h,
-        .app => app_page_h,
-    };
-
-    const footer: palette.Rect = .{ .x = modal.x, .y = modal.y + modal.h, .w = modal.w, .h = 0.0 };
-    const content_y = content.y + m.modal_pad;
-    const body_view_h = @max(content.h - m.modal_pad * 2.0, 0.0);
-    const max_scroll_y = @max(body_h - body_view_h, 0.0);
-    const scroll_y = theme.clampf(state.settings_controller.scroll_y, 0.0, max_scroll_y);
-    const body_clip: palette.Rect = content;
-
-    const close_size = theme.scaledUi(30.0);
+    const header: palette.Rect = .{ .x = modal.x + nav_w, .y = modal.y, .w = modal.w - nav_w, .h = designUi(HEADER_H) };
+    const close_size = designUi(CLOSE_SIZE);
     const close: palette.Rect = .{
-        .x = modal.x + modal.w - m.modal_pad - close_size,
-        .y = modal.y + (m.header_h - close_size) * 0.5,
+        .x = header.x + header.w - designUi(HEADER_PAD_RIGHT) - close_size,
+        .y = header.y + (header.h - close_size) * 0.5,
         .w = close_size,
         .h = close_size,
     };
-    const save: palette.Rect = .{ .x = 0.0, .y = 0.0, .w = 0.0, .h = 0.0 };
-    const cancel: palette.Rect = save;
-
-    const content_x = content.x;
-    const offscreen_y: f32 = -10000.0;
-    const page_y = content_y - scroll_y;
-    var y = if (category == .appearance) page_y else offscreen_y;
-
-    const appearance_card: palette.Rect = .{ .x = content_x, .y = y, .w = content_w, .h = appearance_h };
-    const theme_row_y = appearance_card.y + m.card_pad + m.title_h + m.row_gap + m.label_h + m.inner_gap;
-    const theme_x = appearance_card.x + m.card_pad;
-    const theme_dropdown: palette.Rect = .{ .x = theme_x, .y = theme_row_y, .w = content_w - m.card_pad * 2.0, .h = m.row_h };
-    const ui_font_y = theme_row_y + m.row_h + m.row_gap;
-    const ui_stepper = stepperRects(appearance_card, m.card_pad, ui_font_y, m);
-    // Font family sits directly under the UI font size stepper.
-    const ui_font_family_label_y = ui_font_y + m.row_h + m.row_gap;
-    const ui_font_family_dropdown: palette.Rect = .{
-        .x = theme_x,
-        .y = ui_font_family_label_y + m.label_h + m.inner_gap,
-        .w = content_w - m.card_pad * 2.0,
-        .h = m.row_h,
-    };
-    const reduced_motion_y = ui_font_family_dropdown.y + m.row_h + m.row_gap;
-    const reduced_motion: palette.Rect = .{ .x = theme_x, .y = reduced_motion_y, .w = content_w - m.card_pad * 2.0, .h = m.row_h };
-    const reduced_motion_hint_y = reduced_motion_y + m.row_h;
-    // Per-area switches sit indented under the master toggle.
-    const motion_part_indent = theme.scaledUi(18.0);
-    var reduced_motion_parts: [REDUCED_MOTION_PARTS.len]palette.Rect = undefined;
-    var motion_part_y = reduced_motion_y + m.row_h + m.row_gap;
-    for (&reduced_motion_parts) |*rect| {
-        rect.* = .{ .x = theme_x + motion_part_indent, .y = motion_part_y, .w = content_w - m.card_pad * 2.0 - motion_part_indent, .h = m.row_h };
-        motion_part_y += m.row_h + m.row_gap;
-    }
-    const companion_toggle_y = motion_part_y;
-    const companion_toggle: palette.Rect = .{ .x = theme_x, .y = companion_toggle_y, .w = content_w - m.card_pad * 2.0, .h = m.row_h };
-    const companion_hint_y = companion_toggle_y + m.row_h;
-    const companion_character_label_y = if (companion_enabled) companion_toggle_y + m.row_h + m.row_gap else offscreen_y;
-    const companion_row_y = if (companion_enabled) companion_character_label_y + m.label_h + m.inner_gap else offscreen_y;
-    const companion_character_dropdown: palette.Rect = .{
-        .x = theme_x,
-        .y = companion_row_y,
-        .w = content_w - m.card_pad * 2.0,
-        .h = m.row_h,
+    const body_clip: palette.Rect = .{
+        .x = header.x,
+        .y = header.y + header.h,
+        .w = header.w,
+        .h = @max(modal.y + modal.h - (header.y + header.h), 0.0),
     };
 
-    const experimental_card: palette.Rect = .{
-        .x = content_x,
-        .y = offscreen_y,
-        .w = content_w,
-        .h = experimental_h,
-    };
-
-    y = if (category == .chat) page_y else offscreen_y;
-
-    const transcript_card: palette.Rect = .{ .x = content_x, .y = y, .w = content_w, .h = transcript_h };
-    const tool_group_y = transcript_card.y + m.card_pad + m.title_h + m.row_gap + m.label_h + m.inner_gap;
-    const tool_group_w = (content_w - m.card_pad * 2.0 - m.inner_gap * 2.0) / 3.0;
-    const tool_groups_collapsed: palette.Rect = .{ .x = transcript_card.x + m.card_pad, .y = tool_group_y, .w = tool_group_w, .h = m.row_h };
-    const tool_groups_expanded: palette.Rect = .{ .x = tool_groups_collapsed.x + tool_group_w + m.inner_gap, .y = tool_group_y, .w = tool_group_w, .h = m.row_h };
-    const tool_groups_remember_last: palette.Rect = .{ .x = tool_groups_expanded.x + tool_group_w + m.inner_gap, .y = tool_group_y, .w = tool_group_w, .h = m.row_h };
-    const diff_layout_y = tool_group_y + m.row_h + m.row_gap + m.label_h + m.inner_gap;
-    const diff_layout_w = (content_w - m.card_pad * 2.0) * 0.5;
-    const diff_layout_stacked: palette.Rect = .{ .x = transcript_card.x + m.card_pad, .y = diff_layout_y, .w = diff_layout_w, .h = m.row_h };
-    const diff_layout_split: palette.Rect = .{ .x = diff_layout_stacked.x + diff_layout_w, .y = diff_layout_y, .w = diff_layout_w, .h = m.row_h };
-
-    y = if (category == .chat) transcript_card.y + transcript_card.h + m.card_gap else offscreen_y;
-
-    const chat_card: palette.Rect = .{ .x = content_x, .y = y, .w = content_w, .h = chat_h };
-    const automatic_chat_titles_y = chat_card.y + m.card_pad + m.title_h + m.row_gap;
-    const automatic_chat_titles: palette.Rect = .{ .x = chat_card.x + m.card_pad, .y = automatic_chat_titles_y, .w = content_w - m.card_pad * 2.0, .h = m.row_h };
-    const title_generator_label_y = if (auto_titles) automatic_chat_titles_y + m.row_h + m.row_gap else offscreen_y;
-    const title_generator_y = if (auto_titles) title_generator_label_y + m.label_h + m.inner_gap else offscreen_y;
-    const title_generator_w = content_w - m.card_pad * 2.0;
-    const title_provider_w = (title_generator_w - m.inner_gap) * 0.42;
-    const chat_title_provider_dropdown: palette.Rect = .{
-        .x = chat_card.x + m.card_pad,
-        .y = title_generator_y,
-        .w = title_provider_w,
-        .h = m.row_h,
-    };
-    const chat_title_model_dropdown: palette.Rect = .{
-        .x = chat_title_provider_dropdown.x + chat_title_provider_dropdown.w + m.inner_gap,
-        .y = title_generator_y,
-        .w = title_generator_w - title_provider_w - m.inner_gap,
-        .h = m.row_h,
-    };
-    const chat_hint_y = if (auto_titles) title_generator_y + m.row_h else automatic_chat_titles_y + m.row_h;
-    const new_chat_defaults_label_y = chat_hint_y + m.row_gap;
-    const new_chat_defaults_y = new_chat_defaults_label_y + m.label_h + m.inner_gap;
-    const new_chat_defaults_w = content_w - m.card_pad * 2.0;
-    const default_provider_w = (new_chat_defaults_w - m.inner_gap * 2.0) * 0.31;
-    const default_reasoning_w = (new_chat_defaults_w - m.inner_gap * 2.0) * 0.23;
-    const new_chat_provider_dropdown: palette.Rect = .{
-        .x = chat_card.x + m.card_pad,
-        .y = new_chat_defaults_y,
-        .w = default_provider_w,
-        .h = m.row_h,
-    };
-    const new_chat_model_dropdown: palette.Rect = .{
-        .x = new_chat_provider_dropdown.x + new_chat_provider_dropdown.w + m.inner_gap,
-        .y = new_chat_defaults_y,
-        .w = new_chat_defaults_w - default_provider_w - default_reasoning_w - m.inner_gap * 2.0,
-        .h = m.row_h,
-    };
-    const new_chat_reasoning_dropdown: palette.Rect = .{
-        .x = new_chat_model_dropdown.x + new_chat_model_dropdown.w + m.inner_gap,
-        .y = new_chat_defaults_y,
-        .w = default_reasoning_w,
-        .h = m.row_h,
-    };
-    const new_chat_defaults_hint_y = new_chat_defaults_y + m.row_h;
-    const file_links_y = new_chat_defaults_y + m.row_h + m.row_gap;
-    const file_links_neovim_pane: palette.Rect = .{ .x = chat_card.x + m.card_pad, .y = file_links_y, .w = content_w - m.card_pad * 2.0, .h = m.row_h };
-    const file_links_hint_y = file_links_y + m.row_h;
-
-    y = if (category == .providers) page_y else offscreen_y;
-
-    const providers_card: palette.Rect = .{ .x = content_x, .y = y, .w = content_w, .h = providers_h };
-    var provider_rows: [PROVIDER_ROW_COUNT]palette.Rect = undefined;
-    var provider_updates: [PROVIDER_ROW_COUNT]palette.Rect = undefined;
-    var provider_row_y = providers_card.y + m.card_pad + m.title_h + m.row_gap;
-    const provider_action_w = @max(
-        @max(@max(buttonWidth("Install"), buttonWidth("Update")), buttonWidth("Sign in")),
-        @max(buttonWidth("Latest"), buttonWidth("Checking…")),
-    );
-    const provider_badge_w = providerBadgeColumnWidth();
-    const provider_switch_reserve = theme.scaledUi(10.0 + 40.0 + 20.0);
-    const provider_dot = theme.scaledUi(7.0);
-    for (&provider_rows, &provider_updates) |*row, *update| {
-        row.* = .{ .x = providers_card.x + m.card_pad, .y = provider_row_y, .w = content_w - m.card_pad * 2.0, .h = providerRowHeight() };
-        const badge_x = row.x + row.w - provider_switch_reserve - provider_badge_w;
-        // Keep the installer button on the name line so the version line underneath can use the full width.
-        const update_h = theme.scaledUi(22.0);
-        update.* = .{
-            .x = badge_x - provider_dot - theme.scaledUi(7.0 + 8.0) - provider_action_w,
-            .y = row.y + theme.scaledUi(3.0),
-            .w = provider_action_w,
-            .h = update_h,
-        };
-        provider_row_y += providerRowHeight();
-    }
-    const providers_hint_y = provider_row_y + m.row_gap;
-    const providers_update_hint_y = providers_hint_y + m.label_h;
-    const providers_recheck: palette.Rect = .{
-        .x = providers_card.x + m.card_pad,
-        .y = providers_update_hint_y + m.label_h + m.row_gap,
-        .w = buttonWidth(PROVIDERS_RECHECK_LABEL),
-        .h = m.row_h,
-    };
-
-    y = if (category == .terminal) page_y else offscreen_y;
-
-    const terminal_card: palette.Rect = .{ .x = content_x, .y = y, .w = content_w, .h = terminal_h };
-    const terminal_font_y = terminal_card.y + m.card_pad + m.title_h + m.row_gap;
-    const terminal_stepper = stepperRects(terminal_card, m.card_pad, terminal_font_y, m);
-    const terminal_hint_y = terminal_font_y + m.row_h + m.inner_gap;
-
-    y = if (category == .browser) page_y else offscreen_y;
-
-    const browser_card: palette.Rect = .{ .x = content_x, .y = y, .w = content_w, .h = browser_h };
-    const link_label_y = browser_card.y + m.card_pad + m.title_h + m.row_gap;
-    const link_row_y = link_label_y + m.label_h + m.inner_gap;
-    const link_content_w = content_w - m.card_pad * 2.0;
-    const link_cell_w = link_content_w * 0.5;
-    const links_verde_browser: palette.Rect = .{ .x = browser_card.x + m.card_pad, .y = link_row_y, .w = link_cell_w, .h = m.row_h };
-    const links_system_browser: palette.Rect = .{ .x = links_verde_browser.x + link_cell_w, .y = link_row_y, .w = link_cell_w, .h = m.row_h };
-    const chat_links_label_y = link_row_y + m.row_h + m.row_gap;
-    const chat_links_y = chat_links_label_y + m.label_h + m.inner_gap;
-    const override_cell_w = link_content_w / 3.0;
-    const chat_links_global: palette.Rect = .{ .x = browser_card.x + m.card_pad, .y = chat_links_y, .w = override_cell_w, .h = m.row_h };
-    const chat_links_verde_browser: palette.Rect = .{ .x = chat_links_global.x + override_cell_w, .y = chat_links_y, .w = override_cell_w, .h = m.row_h };
-    const chat_links_system_browser: palette.Rect = .{ .x = chat_links_verde_browser.x + override_cell_w, .y = chat_links_y, .w = override_cell_w, .h = m.row_h };
-    const terminal_links_label_y = chat_links_y + m.row_h + m.row_gap;
-    const terminal_links_y = terminal_links_label_y + m.label_h + m.inner_gap;
-    const terminal_links_global: palette.Rect = .{ .x = browser_card.x + m.card_pad, .y = terminal_links_y, .w = override_cell_w, .h = m.row_h };
-    const terminal_links_verde_browser: palette.Rect = .{ .x = terminal_links_global.x + override_cell_w, .y = terminal_links_y, .w = override_cell_w, .h = m.row_h };
-    const terminal_links_system_browser: palette.Rect = .{ .x = terminal_links_verde_browser.x + override_cell_w, .y = terminal_links_y, .w = override_cell_w, .h = m.row_h };
-    const browser_scroll_label_y = terminal_links_y + m.row_h + m.row_gap;
-    const browser_scroll_speed_y = browser_scroll_label_y + m.label_h + m.inner_gap;
-    const browser_scroll_speed: palette.Rect = .{ .x = browser_card.x + m.card_pad, .y = browser_scroll_speed_y, .w = content_w - m.card_pad * 2.0, .h = m.row_h };
-    const browser_hint_y = browser_scroll_speed_y + m.row_h + m.inner_gap;
-
-    y = if (category == .workspace) page_y else offscreen_y;
-
-    const workspace_card: palette.Rect = .{ .x = content_x, .y = y, .w = content_w, .h = workspace_h };
-    const open_x = workspace_card.x + m.card_pad;
-    const workspace_tabs_label_y = workspace_card.y + m.card_pad + m.title_h + m.row_gap;
-    const workspace_tabs_y = workspace_tabs_label_y + m.label_h + m.inner_gap;
-    const workspace_tabs_w = (content_w - m.card_pad * 2.0 - m.inner_gap * 2.0) / 3.0;
-    const workspace_tabs_automatic: palette.Rect = .{ .x = open_x, .y = workspace_tabs_y, .w = workspace_tabs_w, .h = m.row_h };
-    const workspace_tabs_always: palette.Rect = .{ .x = workspace_tabs_automatic.x + workspace_tabs_w + m.inner_gap, .y = workspace_tabs_y, .w = workspace_tabs_w, .h = m.row_h };
-    const workspace_tabs_disabled: palette.Rect = .{ .x = workspace_tabs_always.x + workspace_tabs_w + m.inner_gap, .y = workspace_tabs_y, .w = workspace_tabs_w, .h = m.row_h };
-    const open_y = workspace_tabs_y + m.row_h + m.row_gap + m.label_h + m.inner_gap;
-    const open_cells = [_]palette.Rect{.{ .x = 0.0, .y = offscreen_y, .w = 0.0, .h = 0.0 }} ** OPEN_CHOICES.len;
-    const custom_open: ?palette.Rect = null;
-    const new_chat_label_y = open_y + m.row_h + m.row_gap;
-    const new_chat_y = new_chat_label_y + m.label_h + m.inner_gap;
-    const new_chat_cell_w = (content_w - m.card_pad * 2.0) * 0.5;
-    const new_chat_new_pane: palette.Rect = .{ .x = open_x, .y = new_chat_y, .w = new_chat_cell_w, .h = m.row_h };
-    const new_chat_replace_pane: palette.Rect = .{ .x = new_chat_new_pane.x + new_chat_cell_w, .y = new_chat_y, .w = new_chat_cell_w, .h = m.row_h };
-    const workspace_split_default_label_y = new_chat_y + m.row_h + m.row_gap;
-    const workspace_split_default_y = workspace_split_default_label_y + m.label_h + m.inner_gap;
-    const workspace_split_default_w = (content_w - m.card_pad * 2.0) * 0.5;
-    const workspace_split_default_chat: palette.Rect = .{ .x = open_x, .y = workspace_split_default_y, .w = workspace_split_default_w, .h = m.row_h };
-    const workspace_split_default_terminal: palette.Rect = .{ .x = workspace_split_default_chat.x + workspace_split_default_w, .y = workspace_split_default_y, .w = workspace_split_default_w, .h = m.row_h };
-    const workspace_split_default_hint_y = workspace_split_default_y + m.row_h;
-    const workspace_new_tab_label_y = workspace_split_default_hint_y + m.row_gap;
-    const workspace_new_tab_y = workspace_new_tab_label_y + m.label_h + m.inner_gap;
-    const workspace_new_tab_chat: palette.Rect = .{ .x = open_x, .y = workspace_new_tab_y, .w = workspace_split_default_w, .h = m.row_h };
-    const workspace_new_tab_terminal: palette.Rect = .{ .x = workspace_new_tab_chat.x + workspace_split_default_w, .y = workspace_new_tab_y, .w = workspace_split_default_w, .h = m.row_h };
-    const workspace_new_tab_hint_y = workspace_new_tab_y + m.row_h;
-    const workspace_unzoom_on_navigation_y = workspace_new_tab_hint_y + m.row_gap;
-    const workspace_unzoom_on_navigation: palette.Rect = .{ .x = open_x, .y = workspace_unzoom_on_navigation_y, .w = content_w - m.card_pad * 2.0, .h = m.row_h };
-    const workspace_unzoom_on_navigation_hint_y = workspace_unzoom_on_navigation_y + m.row_h;
-    const workspace_pane_gap_y = workspace_unzoom_on_navigation_hint_y + m.row_gap;
-    const workspace_pane_gap_stepper = stepperRects(workspace_card, m.card_pad, workspace_pane_gap_y, m);
-    const workspace_pane_gap_hint_y = workspace_pane_gap_y + m.row_h;
-    const workspace_panes_per_view_y = workspace_pane_gap_hint_y + m.row_gap;
-    const workspace_panes_per_view_stepper = stepperRects(workspace_card, m.card_pad, workspace_panes_per_view_y, m);
-    const workspace_panes_per_view_hint_y = workspace_panes_per_view_y + m.row_h;
-    const workspace_scroll_mode_label_y = workspace_panes_per_view_hint_y + m.row_gap;
-    const workspace_scroll_mode_y = workspace_scroll_mode_label_y + m.label_h + m.inner_gap;
-    const workspace_scroll_mode_w = (content_w - m.card_pad * 2.0) / 3.0;
-    const workspace_scroll_mode_automatic: palette.Rect = .{ .x = open_x, .y = workspace_scroll_mode_y, .w = workspace_scroll_mode_w, .h = m.row_h };
-    const workspace_scroll_mode_always: palette.Rect = .{ .x = workspace_scroll_mode_automatic.x + workspace_scroll_mode_w, .y = workspace_scroll_mode_y, .w = workspace_scroll_mode_w, .h = m.row_h };
-    const workspace_scroll_mode_disabled: palette.Rect = .{ .x = workspace_scroll_mode_always.x + workspace_scroll_mode_w, .y = workspace_scroll_mode_y, .w = workspace_scroll_mode_w, .h = m.row_h };
-    const workspace_scroll_mode_hint_y = workspace_scroll_mode_y + m.row_h;
-    const workspace_scroll_threshold_y = if (auto_scroll) workspace_scroll_mode_hint_y + m.row_gap else offscreen_y;
-    const workspace_scroll_threshold_stepper = stepperRects(workspace_card, m.card_pad, workspace_scroll_threshold_y, m);
-    const workspace_scroll_threshold_hint_y = workspace_scroll_threshold_y + m.row_h;
-    const workspace_scroll_direction_label_y = (if (auto_scroll) workspace_scroll_threshold_hint_y else workspace_scroll_mode_hint_y) + m.row_gap;
-    const workspace_scroll_direction_y = workspace_scroll_direction_label_y + m.label_h + m.inner_gap;
-    const workspace_scroll_direction_w = (content_w - m.card_pad * 2.0) * 0.5;
-    const workspace_scroll_horizontal: palette.Rect = .{ .x = open_x, .y = workspace_scroll_direction_y, .w = workspace_scroll_direction_w, .h = m.row_h };
-    const workspace_scroll_vertical: palette.Rect = .{ .x = workspace_scroll_horizontal.x + workspace_scroll_direction_w, .y = workspace_scroll_direction_y, .w = workspace_scroll_direction_w, .h = m.row_h };
-    const workspace_scroll_direction_hint_y = workspace_scroll_direction_y + m.row_h;
-    const workspace_scroll_use_global: palette.Rect = .{ .x = 0.0, .y = offscreen_y, .w = 0.0, .h = 0.0 };
-    const workspace_scroll_override: palette.Rect = workspace_scroll_use_global;
-    const workspace_scroll_scope_hint_y = offscreen_y;
-
-    y = if (category == .connections) page_y else offscreen_y;
-
-    const runtimes_card: palette.Rect = .{ .x = content_x, .y = y, .w = content_w, .h = runtimes_h };
-    const runtimes = planRuntimeCard(state, content_x, y, content_w, m);
-    y = if (category == .agents) page_y else offscreen_y;
-
-    const integrations_card: palette.Rect = .{ .x = content_x, .y = y, .w = content_w, .h = integrations_h };
-    const mcp_tools_y = integrations_card.y + m.card_pad + m.title_h + m.row_gap + m.label_h + m.inner_gap;
-    const mcp_tools: palette.Rect = .{ .x = integrations_card.x + m.card_pad, .y = mcp_tools_y, .w = content_w - m.card_pad * 2.0, .h = m.row_h };
-    const mcp_hint_y = mcp_tools_y + m.row_h + m.inner_gap;
-    const hooks_label_y = mcp_hint_y + m.label_h + m.row_gap;
-    const hooks_claude_y = hooks_label_y + m.label_h + m.inner_gap;
-    const hooks_claude: palette.Rect = .{ .x = integrations_card.x + m.card_pad, .y = hooks_claude_y, .w = content_w - m.card_pad * 2.0, .h = m.row_h };
-    const hooks_codex_y = hooks_claude_y + m.row_h + m.inner_gap;
-    const hooks_codex: palette.Rect = .{ .x = integrations_card.x + m.card_pad, .y = hooks_codex_y, .w = content_w - m.card_pad * 2.0, .h = m.row_h };
-    const hooks_cursor_y = hooks_codex_y + m.row_h + m.inner_gap;
-    const hooks_cursor: palette.Rect = .{ .x = integrations_card.x + m.card_pad, .y = hooks_cursor_y, .w = content_w - m.card_pad * 2.0, .h = m.row_h };
-    const hooks_opencode_y = hooks_cursor_y + m.row_h + m.inner_gap;
-    const hooks_opencode: palette.Rect = .{ .x = integrations_card.x + m.card_pad, .y = hooks_opencode_y, .w = content_w - m.card_pad * 2.0, .h = m.row_h };
-    const hooks_grok_y = hooks_opencode_y + m.row_h + m.inner_gap;
-    const hooks_grok: palette.Rect = .{ .x = integrations_card.x + m.card_pad, .y = hooks_grok_y, .w = content_w - m.card_pad * 2.0, .h = m.row_h };
-    const hooks_amp_y = hooks_grok_y + m.row_h + m.inner_gap;
-    const hooks_amp: palette.Rect = .{ .x = integrations_card.x + m.card_pad, .y = hooks_amp_y, .w = content_w - m.card_pad * 2.0, .h = m.row_h };
-    const hooks_pi_y = hooks_amp_y + m.row_h + m.inner_gap;
-    const hooks_pi: palette.Rect = .{ .x = integrations_card.x + m.card_pad, .y = hooks_pi_y, .w = content_w - m.card_pad * 2.0, .h = m.row_h };
-    const integrations_hint_y = hooks_pi_y + m.row_h + m.inner_gap;
-
-    y = if (category == .app) page_y else offscreen_y;
-
-    const updates_card: palette.Rect = .{ .x = content_x, .y = y, .w = content_w, .h = updates_h };
-    const updates_status_y = updates_card.y + m.card_pad + m.title_h + m.inner_gap;
-    const updates_actions_y = updates_status_y + m.label_h + m.inner_gap;
-    const update_action_w = (content_w - m.card_pad * 2.0 - m.inner_gap) * 0.5;
-    const updates_check: palette.Rect = .{ .x = updates_card.x + m.card_pad, .y = updates_actions_y, .w = update_action_w, .h = m.row_h };
-    const updates_download: palette.Rect = .{ .x = updates_check.x + update_action_w + m.inner_gap, .y = updates_actions_y, .w = update_action_w, .h = m.row_h };
-    const updates_automatic: palette.Rect = .{ .x = updates_check.x, .y = updates_actions_y + m.row_h + m.inner_gap, .w = content_w - m.card_pad * 2.0, .h = m.row_h };
-    const updates_notes_y = updates_automatic.y + m.row_h + m.inner_gap + package_hint_h;
-    const updates_links_y = updates_notes_y + updates_notes_h + m.inner_gap;
-    var updates_notes_toggle: ?palette.Rect = null;
-    if (state.settings_controller.update.release != null) {
-        updates_notes_toggle = .{
-            .x = updates_card.x + m.card_pad,
-            .y = updates_links_y,
-            .w = text_measure.textWidth(.ui, theme.scaledUi(NOTES_LINK_FONT_SIZE), notesToggleLabel(state)),
-            .h = m.label_h,
-        };
-    }
-    const release_page_x = if (updates_notes_toggle) |toggle| toggle.x + toggle.w + m.row_gap * 2.0 else updates_card.x + m.card_pad;
-    const updates_release_page: palette.Rect = .{
-        .x = release_page_x,
-        .y = updates_links_y,
-        .w = text_measure.textWidth(.ui, theme.scaledUi(NOTES_LINK_FONT_SIZE), RELEASE_PAGE_LABEL),
-        .h = m.label_h,
-    };
-
-    y = if (category == .app) updates_card.y + updates_card.h + m.card_gap else offscreen_y;
-
-    const notifications_card: palette.Rect = .{ .x = content_x, .y = y, .w = content_w, .h = notifications_h };
-    const notifications_toggle_y = notifications_card.y + m.card_pad + m.title_h + m.row_gap + m.label_h + m.inner_gap;
-    const notifications_toggle: palette.Rect = .{ .x = notifications_card.x + m.card_pad, .y = notifications_toggle_y, .w = content_w - m.card_pad * 2.0, .h = m.row_h };
-    const notifications_hint_y = notifications_toggle_y + m.row_h + m.inner_gap;
-
-    return .{
+    var layout: SettingsLayout = .{
         .modal = modal,
+        .nav_panel = nav_panel,
         .header = header,
-        .footer = footer,
         .body_clip = body_clip,
-        .max_scroll_y = max_scroll_y,
         .close = close,
         .nav = nav,
-        .content = content,
-        .cancel = cancel,
-        .save = save,
-        .appearance_card = appearance_card,
-        .theme_dropdown = theme_dropdown,
-        .companion_character_label_y = companion_character_label_y,
-        .companion_character_dropdown = companion_character_dropdown,
-        .ui_font_family_label_y = ui_font_family_label_y,
-        .ui_font_family_dropdown = ui_font_family_dropdown,
-        .ui_font_dec = ui_stepper.dec,
-        .ui_font_inc = ui_stepper.inc,
-        .reduced_motion = reduced_motion,
-        .reduced_motion_parts = reduced_motion_parts,
-        .reduced_motion_hint_y = reduced_motion_hint_y,
-        .workspace_tabs_label_y = workspace_tabs_label_y,
-        .workspace_tabs_automatic = workspace_tabs_automatic,
-        .workspace_tabs_always = workspace_tabs_always,
-        .workspace_tabs_disabled = workspace_tabs_disabled,
-        .transcript_card = transcript_card,
-        .tool_groups_collapsed = tool_groups_collapsed,
-        .tool_groups_expanded = tool_groups_expanded,
-        .tool_groups_remember_last = tool_groups_remember_last,
-        .diff_layout_stacked = diff_layout_stacked,
-        .diff_layout_split = diff_layout_split,
-        .chat_card = chat_card,
-        .automatic_chat_titles = automatic_chat_titles,
-        .chat_title_provider_dropdown = chat_title_provider_dropdown,
-        .chat_title_model_dropdown = chat_title_model_dropdown,
-        .chat_hint_y = chat_hint_y,
-        .new_chat_provider_dropdown = new_chat_provider_dropdown,
-        .new_chat_model_dropdown = new_chat_model_dropdown,
-        .new_chat_reasoning_dropdown = new_chat_reasoning_dropdown,
-        .new_chat_defaults_hint_y = new_chat_defaults_hint_y,
-        .terminal_card = terminal_card,
-        .terminal_font_dec = terminal_stepper.dec,
-        .terminal_font_inc = terminal_stepper.inc,
-        .terminal_hint_y = terminal_hint_y,
-        .browser_card = browser_card,
-        .links_verde_browser = links_verde_browser,
-        .links_system_browser = links_system_browser,
-        .chat_links_global = chat_links_global,
-        .chat_links_verde_browser = chat_links_verde_browser,
-        .chat_links_system_browser = chat_links_system_browser,
-        .terminal_links_global = terminal_links_global,
-        .terminal_links_verde_browser = terminal_links_verde_browser,
-        .terminal_links_system_browser = terminal_links_system_browser,
-        .browser_scroll_speed = browser_scroll_speed,
-        .browser_hint_y = browser_hint_y,
-        .experimental_card = experimental_card,
-        .companion_toggle = companion_toggle,
-        .companion_hint_y = companion_hint_y,
-        .workspace_card = workspace_card,
-        .open_cells = open_cells,
-        .open_action_dropdown = .{
-            .x = open_x,
-            .y = open_y,
-            .w = content_w - m.card_pad * 2.0,
-            .h = m.row_h,
-        },
-        .custom_open = custom_open,
-        .new_chat_new_pane = new_chat_new_pane,
-        .workspace_split_default_chat = workspace_split_default_chat,
-        .workspace_split_default_terminal = workspace_split_default_terminal,
-        .workspace_split_default_hint_y = workspace_split_default_hint_y,
-        .workspace_new_tab_chat = workspace_new_tab_chat,
-        .workspace_new_tab_terminal = workspace_new_tab_terminal,
-        .workspace_new_tab_hint_y = workspace_new_tab_hint_y,
-        .new_chat_replace_pane = new_chat_replace_pane,
-        .file_links_neovim_pane = file_links_neovim_pane,
-        .file_links_hint_y = file_links_hint_y,
-        .workspace_unzoom_on_navigation = workspace_unzoom_on_navigation,
-        .workspace_unzoom_on_navigation_hint_y = workspace_unzoom_on_navigation_hint_y,
-        .workspace_pane_gap_dec = workspace_pane_gap_stepper.dec,
-        .workspace_pane_gap_inc = workspace_pane_gap_stepper.inc,
-        .workspace_pane_gap_hint_y = workspace_pane_gap_hint_y,
-        .workspace_panes_per_view_dec = workspace_panes_per_view_stepper.dec,
-        .workspace_panes_per_view_inc = workspace_panes_per_view_stepper.inc,
-        .workspace_panes_per_view_hint_y = workspace_panes_per_view_hint_y,
-        .workspace_scroll_use_global = workspace_scroll_use_global,
-        .workspace_scroll_override = workspace_scroll_override,
-        .workspace_scroll_scope_hint_y = workspace_scroll_scope_hint_y,
-        .workspace_scroll_mode_automatic = workspace_scroll_mode_automatic,
-        .workspace_scroll_mode_always = workspace_scroll_mode_always,
-        .workspace_scroll_mode_disabled = workspace_scroll_mode_disabled,
-        .workspace_scroll_mode_hint_y = workspace_scroll_mode_hint_y,
-        .workspace_scroll_threshold_dec = workspace_scroll_threshold_stepper.dec,
-        .workspace_scroll_threshold_inc = workspace_scroll_threshold_stepper.inc,
-        .workspace_scroll_threshold_hint_y = workspace_scroll_threshold_hint_y,
-        .workspace_scroll_horizontal = workspace_scroll_horizontal,
-        .workspace_scroll_vertical = workspace_scroll_vertical,
-        .workspace_scroll_direction_hint_y = workspace_scroll_direction_hint_y,
-        .runtimes_card = runtimes_card,
-        .runtimes = runtimes,
-        .integrations_card = integrations_card,
-        .mcp_tools = mcp_tools,
-        .mcp_hint_y = mcp_hint_y,
-        .hooks_label_y = hooks_label_y,
-        .hooks_claude = hooks_claude,
-        .hooks_codex = hooks_codex,
-        .hooks_cursor = hooks_cursor,
-        .hooks_opencode = hooks_opencode,
-        .hooks_grok = hooks_grok,
-        .hooks_amp = hooks_amp,
-        .hooks_pi = hooks_pi,
-        .integrations_hint_y = integrations_hint_y,
-        .updates_card = updates_card,
-        .updates_check = updates_check,
-        .updates_download = updates_download,
-        .updates_automatic = updates_automatic,
-        .updates_status_y = updates_status_y,
-        .updates_notes_y = updates_notes_y,
-        .updates_notes_toggle = updates_notes_toggle,
-        .updates_release_page = updates_release_page,
-        .notifications_card = notifications_card,
-        .notifications_toggle = notifications_toggle,
-        .notifications_hint_y = notifications_hint_y,
-        .providers_card = providers_card,
-        .provider_rows = provider_rows,
-        .provider_updates = provider_updates,
-        .providers_hint_y = providers_hint_y,
-        .providers_update_hint_y = providers_update_hint_y,
-        .providers_recheck = providers_recheck,
     };
+    // Build once unscrolled to learn the page height, then again at the
+    // clamped scroll offset.
+    buildPage(state, &layout, 0.0);
+    const body_h = layout.page_h + designUi(BODY_PAD_TOP + BODY_PAD_BOTTOM);
+    const max_scroll_y = @max(body_h - body_clip.h, 0.0);
+    const scroll_y = theme.clampf(state.settings_controller.scroll_y, 0.0, max_scroll_y);
+    if (scroll_y != 0.0) {
+        const fresh: SettingsLayout = .{
+            .modal = modal,
+            .nav_panel = nav_panel,
+            .header = header,
+            .body_clip = body_clip,
+            .close = close,
+            .nav = nav,
+        };
+        layout = fresh;
+        buildPage(state, &layout, scroll_y);
+    }
+    layout.max_scroll_y = max_scroll_y;
+    return layout;
+}
+
+// Places the active category's groups, rows and controls.
+fn buildPage(state: *runtime.AppState, layout: *SettingsLayout, scroll_y: f32) void {
+    const pad_x = @min(designUi(BODY_PAD_X), layout.body_clip.w * 0.06);
+    const content_x = layout.body_clip.x + pad_x;
+    const content_w = @max(layout.body_clip.w - pad_x * 2.0, designUi(160.0));
+    const top = layout.body_clip.y + designUi(BODY_PAD_TOP) - scroll_y;
+    var b = PageBuilder.init(&layout.page, content_x, content_w, top);
+    const draft = &state.settings_controller.draft;
+
+    switch (state.settings_controller.active_category) {
+        .appearance => {
+            b.group("Look");
+            layout.theme_dropdown = b.dropdownRow("Theme", DROPDOWN_W + 20.0);
+            layout.ui_font_family_dropdown = b.dropdownRow("Font family", DROPDOWN_W);
+            const ui_font = b.stepperRow("UI font size");
+            layout.ui_font_dec = ui_font.dec;
+            layout.ui_font_inc = ui_font.inc;
+
+            b.group("Motion");
+            layout.reduced_motion = b.switchRowDescribed("Reduce motion", "Turn off animation everywhere, or pick areas below");
+            for (REDUCED_MOTION_PARTS, &layout.reduced_motion_parts) |part, *rect| {
+                rect.* = b.subSwitchRow(part.label);
+            }
+
+            b.group("Companion");
+            layout.companion_toggle = b.switchRow("Companion");
+            if (draft.companion_enabled) {
+                layout.companion_character_dropdown = b.dropdownRow("Character", DROPDOWN_W - 50.0);
+            }
+        },
+        .workspace => {
+            b.group("General");
+            layout.open_action_dropdown = b.dropdownRow("Open with", DROPDOWN_W - 30.0);
+            const tabs = b.segmentRow(3, "Tabs", .{ "Auto", "Always", "Off" });
+            layout.workspace_tabs_automatic = tabs[0];
+            layout.workspace_tabs_always = tabs[1];
+            layout.workspace_tabs_disabled = tabs[2];
+
+            b.group("Panes");
+            const new_chat = b.segmentRow(2, "New chat", .{ "New pane", "Replace" });
+            layout.new_chat_new_pane = new_chat[0];
+            layout.new_chat_replace_pane = new_chat[1];
+            const split = b.segmentRow(2, "Split", .{ "Chat", "Terminal" });
+            layout.workspace_split_default_chat = split[0];
+            layout.workspace_split_default_terminal = split[1];
+            const new_tab = b.segmentRow(2, "New tab", .{ "Chat", "Terminal" });
+            layout.workspace_new_tab_chat = new_tab[0];
+            layout.workspace_new_tab_terminal = new_tab[1];
+            layout.workspace_unzoom_on_navigation = b.switchRow("Unzoom on navigate");
+            const gap = b.stepperRow("Pane gap");
+            layout.workspace_pane_gap_dec = gap.dec;
+            layout.workspace_pane_gap_inc = gap.inc;
+            const per_view = b.stepperRow("Panes per view");
+            layout.workspace_panes_per_view_dec = per_view.dec;
+            layout.workspace_panes_per_view_inc = per_view.inc;
+
+            b.group("Scrolling");
+            const mode = b.segmentRow(3, "Scrolling", .{ "Auto", "Always", "Off" });
+            layout.workspace_scroll_mode_automatic = mode[0];
+            layout.workspace_scroll_mode_always = mode[1];
+            layout.workspace_scroll_mode_disabled = mode[2];
+            if (draft.workspace_scroll_mode == .automatic) {
+                const threshold = b.stepperRow("Start after");
+                layout.workspace_scroll_threshold_dec = threshold.dec;
+                layout.workspace_scroll_threshold_inc = threshold.inc;
+            }
+            const direction = b.segmentRow(2, "Direction", .{ "Horizontal", "Vertical" });
+            layout.workspace_scroll_horizontal = direction[0];
+            layout.workspace_scroll_vertical = direction[1];
+        },
+        .chat => {
+            b.group("Transcript");
+            const groups = b.segmentRow(3, "Tool groups", .{ "Collapse", "Expand", "Remember" });
+            layout.tool_groups_collapsed = groups[0];
+            layout.tool_groups_expanded = groups[1];
+            layout.tool_groups_remember_last = groups[2];
+            const diff = b.segmentRow(2, "Diff", .{ "Stacked", "Split" });
+            layout.diff_layout_stacked = diff[0];
+            layout.diff_layout_split = diff[1];
+
+            b.group("Chat titles");
+            layout.automatic_chat_titles = b.switchRow("Auto-name chats");
+            if (draft.automatic_chat_titles_enabled) {
+                layout.chat_title_provider_dropdown = b.dropdownRow("Provider", DROPDOWN_W);
+                layout.chat_title_model_dropdown = b.dropdownRow("Model", DROPDOWN_WIDE_W);
+            }
+
+            b.group("New chat");
+            layout.new_chat_provider_dropdown = b.dropdownRow("Provider", DROPDOWN_W);
+            layout.new_chat_model_dropdown = b.dropdownRow("Model", DROPDOWN_WIDE_W);
+            layout.new_chat_reasoning_dropdown = b.dropdownRow("Reasoning", DROPDOWN_W);
+
+            b.group("Links");
+            layout.file_links_neovim_pane = b.switchRow("File links in Neovim");
+        },
+        .terminal => {
+            b.group("Text");
+            const font = b.stepperRow("Font size");
+            layout.terminal_font_dec = font.dec;
+            layout.terminal_font_inc = font.inc;
+        },
+        .browser => {
+            b.group("Links");
+            const web = b.segmentRow(2, "Web links", .{ "Verde", "System" });
+            layout.links_verde_browser = web[0];
+            layout.links_system_browser = web[1];
+            const chat = b.segmentRow(3, "Chat links", .{ "Global", "Verde", "System" });
+            layout.chat_links_global = chat[0];
+            layout.chat_links_verde_browser = chat[1];
+            layout.chat_links_system_browser = chat[2];
+            const terminal = b.segmentRow(3, "Terminal links", .{ "Global", "Verde", "System" });
+            layout.terminal_links_global = terminal[0];
+            layout.terminal_links_verde_browser = terminal[1];
+            layout.terminal_links_system_browser = terminal[2];
+
+            b.group("Scrolling");
+            layout.browser_scroll_speed = b.rowWith("Wheel speed", "", false, .normal, designUi(ROW_H), designUi(SLIDER_W + SLIDER_VALUE_W));
+        },
+        .providers => {
+            const m = metrics();
+            b.group("Model providers");
+            const action_w = providerActionWidth();
+            const badge_w = providerBadgeColumnWidth();
+            for (&layout.provider_rows, &layout.provider_updates) |*row, *update| {
+                row.* = b.customRow(designUi(ROW_H));
+                const badge_x = row.x + row.w - providerSwitchReserve() - badge_w;
+                const update_h = designUi(26.0);
+                update.* = .{
+                    .x = badge_x - providerDotSize() - designUi(6.0 + 10.0) - action_w,
+                    .y = row.y + (row.h - update_h) * 0.5,
+                    .w = action_w,
+                    .h = update_h,
+                };
+            }
+            b.space(designUi(10.0));
+            layout.providers_hint_y = b.y;
+            layout.providers_update_hint_y = b.y + m.label_h;
+            layout.providers_recheck = .{
+                .x = content_x,
+                .y = layout.providers_update_hint_y + m.label_h + m.row_gap,
+                .w = buttonWidth(PROVIDERS_RECHECK_LABEL),
+                .h = m.row_h,
+            };
+            b.space(m.label_h * 2.0 + m.row_gap + m.row_h);
+        },
+        .connections => {
+            layout.runtimes = planRuntimeCard(state, content_x, top, content_w, metrics());
+            b.space(layout.runtimes.height);
+        },
+        .agents => {
+            b.group("Verde MCP");
+            layout.mcp_tools = b.switchRowDescribed("Enable Verde MCP", "");
+
+            b.group("Status hooks");
+            layout.hooks_claude = b.switchRow("Claude");
+            layout.hooks_codex = b.switchRow("Codex");
+            layout.hooks_cursor = b.switchRow("Cursor");
+            layout.hooks_opencode = b.switchRow("OpenCode");
+            layout.hooks_grok = b.switchRow("Grok");
+            layout.hooks_amp = b.switchRow("Amp");
+            layout.hooks_pi = b.switchRow("Pi");
+        },
+        .app => {
+            const m = metrics();
+            b.group("Updates");
+            const check_label = if (state.settings_controller.update.status == .checking) "Checking…" else "Check now";
+            const check_w = buttonWidth(check_label);
+            const download_w = buttonWidth(state.updateInstallerButtonLabel());
+            const buttons_w = check_w + m.inner_gap + download_w;
+            const version_row = b.rowWith("Verde", "", true, .normal, designUi(ROW_H), buttons_w);
+            layout.updates_version_row = version_row;
+            const buttons = rowControl(version_row, buttons_w, designUi(CONTROL_H));
+            layout.updates_check = .{ .x = buttons.x, .y = buttons.y, .w = check_w, .h = buttons.h };
+            layout.updates_download = .{ .x = buttons.x + buttons.w - download_w, .y = buttons.y, .w = download_w, .h = buttons.h };
+            layout.updates_automatic = b.switchRow("Check automatically");
+
+            const notes_w = @max(content_w - m.card_pad * 2.0, designUi(80.0));
+            const notes_h = notesBlockHeight(state, notes_w, m);
+            const package_hint_h = if (state.settings_controller.package_update_command != null)
+                wrappedNotesRows(PACKAGE_UPDATE_HINT, notes_w) * notesLineHeight() + m.label_h + m.inner_gap
+            else
+                0.0;
+            const notes_pad = designUi(14.0);
+            const notes_row = b.customRow(notes_pad * 2.0 + package_hint_h + notes_h + m.inner_gap + m.label_h);
+            layout.updates_notes_row = notes_row;
+            layout.updates_package_hint_y = notes_row.y + notes_pad;
+            layout.updates_notes_y = notes_row.y + notes_pad + package_hint_h;
+            const links_y = layout.updates_notes_y + notes_h + m.inner_gap;
+            const notes_x = notes_row.x + m.card_pad;
+            if (state.settings_controller.update.release != null) {
+                layout.updates_notes_toggle = .{
+                    .x = notes_x,
+                    .y = links_y,
+                    .w = text_measure.textWidth(.ui, designUi(NOTES_LINK_FONT_SIZE), notesToggleLabel(state)),
+                    .h = m.label_h,
+                };
+            }
+            const release_page_x = if (layout.updates_notes_toggle) |toggle| toggle.x + toggle.w + m.row_gap * 2.0 else notes_x;
+            layout.updates_release_page = .{
+                .x = release_page_x,
+                .y = links_y,
+                .w = text_measure.textWidth(.ui, designUi(NOTES_LINK_FONT_SIZE), RELEASE_PAGE_LABEL),
+                .h = m.label_h,
+            };
+
+            b.group("Notifications");
+            layout.notifications_toggle = b.switchRow("Agent status");
+        },
+    }
+    layout.page_h = b.height();
 }
 
 fn isControlHovered(state: *const runtime.AppState, control: Control) bool {
@@ -1095,23 +1017,11 @@ fn themeMenuMaxScroll(state: *const runtime.AppState) usize {
 }
 
 fn themeMenuRect(state: *const runtime.AppState, layout: SettingsLayout) palette.Rect {
-    const row_count = themeMenuVisibleCount(state);
-    return .{
-        .x = layout.theme_dropdown.x,
-        .y = layout.theme_dropdown.y + layout.theme_dropdown.h + theme.scaledUi(4.0),
-        .w = layout.theme_dropdown.w,
-        .h = @as(f32, @floatFromInt(row_count)) * metrics().row_h,
-    };
+    return dropdownMenuRect(layout, layout.theme_dropdown, themeMenuVisibleCount(state));
 }
 
 fn themeOptionRect(state: *const runtime.AppState, layout: SettingsLayout, visible_index: usize) palette.Rect {
-    const menu = themeMenuRect(state, layout);
-    return .{
-        .x = menu.x,
-        .y = menu.y + @as(f32, @floatFromInt(visible_index)) * metrics().row_h,
-        .w = menu.w,
-        .h = metrics().row_h,
-    };
+    return dropdownOptionRect(themeMenuRect(state, layout), visible_index);
 }
 
 fn companionCharacterCount() usize {
@@ -1131,7 +1041,7 @@ fn companionCharacterIndex(character: app_config.CompanionCharacter) usize {
 }
 
 fn companionCharacterMenuRect(layout: SettingsLayout) palette.Rect {
-    return dropdownMenuRect(layout.companion_character_dropdown, companionCharacterCount());
+    return dropdownMenuRect(layout, layout.companion_character_dropdown, companionCharacterCount());
 }
 
 fn companionCharacterOptionRect(layout: SettingsLayout, choice_index: usize) palette.Rect {
@@ -1155,7 +1065,7 @@ fn uiFontFamilyIndex(family: app_config.UiFontFamily) usize {
 }
 
 fn uiFontFamilyMenuRect(layout: SettingsLayout) palette.Rect {
-    return dropdownMenuRect(layout.ui_font_family_dropdown, uiFontFamilyCount());
+    return dropdownMenuRect(layout, layout.ui_font_family_dropdown, uiFontFamilyCount());
 }
 
 fn uiFontFamilyOptionRect(layout: SettingsLayout, choice_index: usize) palette.Rect {
@@ -1204,26 +1114,37 @@ fn registerUiFontFamilyOptionHits(
     }
 }
 
-fn dropdownMenuRect(dropdown: palette.Rect, row_count: usize) palette.Rect {
+/// Popup under (or, when the body has no room below, above) a dropdown,
+/// right-aligned to it and at least `MENU_MIN_W` wide for long model names.
+fn dropdownMenuRect(layout: SettingsLayout, dropdown: palette.Rect, row_count: usize) palette.Rect {
+    const w = @max(dropdown.w, @min(designUi(MENU_MIN_W), layout.body_clip.w - designUi(ROW_PAD_X) * 2.0));
+    const h = @as(f32, @floatFromInt(row_count)) * designUi(MENU_ROW_H) + designUi(MENU_PAD) * 2.0;
+    const gap = designUi(MENU_GAP);
+    const below_y = dropdown.y + dropdown.h + gap;
+    const above_y = dropdown.y - gap - h;
+    const clip_bottom = layout.body_clip.y + layout.body_clip.h;
+    const flip = below_y + h > clip_bottom and above_y >= layout.body_clip.y;
     return .{
-        .x = dropdown.x,
-        .y = dropdown.y + dropdown.h + theme.scaledUi(4.0),
-        .w = dropdown.w,
-        .h = @as(f32, @floatFromInt(row_count)) * metrics().row_h,
+        .x = @max(dropdown.x + dropdown.w - w, layout.body_clip.x + designUi(ROW_PAD_X)),
+        .y = if (flip) above_y else below_y,
+        .w = w,
+        .h = h,
     };
 }
 
 fn dropdownOptionRect(menu: palette.Rect, visible_index: usize) palette.Rect {
+    const pad = designUi(MENU_PAD);
+    const row_h = designUi(MENU_ROW_H);
     return .{
-        .x = menu.x,
-        .y = menu.y + @as(f32, @floatFromInt(visible_index)) * metrics().row_h,
-        .w = menu.w,
-        .h = metrics().row_h,
+        .x = menu.x + pad,
+        .y = menu.y + pad + @as(f32, @floatFromInt(visible_index)) * row_h,
+        .w = menu.w - pad * 2.0,
+        .h = row_h,
     };
 }
 
 fn titleProviderMenuRect(state: *const runtime.AppState, layout: SettingsLayout) palette.Rect {
-    return dropdownMenuRect(layout.chat_title_provider_dropdown, @min(state.settingsChatTitleProviderCount(), TITLE_MENU_MAX_ROWS));
+    return dropdownMenuRect(layout, layout.chat_title_provider_dropdown, state.settingsChatTitleProviderCount());
 }
 
 fn titleModelMenuVisibleCount(state: *const runtime.AppState) usize {
@@ -1235,7 +1156,7 @@ fn titleModelMenuMaxScroll(state: *const runtime.AppState) usize {
 }
 
 fn titleModelMenuRect(state: *const runtime.AppState, layout: SettingsLayout) palette.Rect {
-    return dropdownMenuRect(layout.chat_title_model_dropdown, titleModelMenuVisibleCount(state));
+    return dropdownMenuRect(layout, layout.chat_title_model_dropdown, titleModelMenuVisibleCount(state));
 }
 
 fn registerTitleOptionHits(
@@ -1285,7 +1206,7 @@ fn newChatMenuRect(state: *const runtime.AppState, layout: SettingsLayout, kind:
         .reasoning => layout.new_chat_reasoning_dropdown,
     };
     const count = if (kind == .model) newChatModelMenuVisibleCount(state) else @min(newChatMenuCount(state, kind), TITLE_MENU_MAX_ROWS);
-    return dropdownMenuRect(dropdown, count);
+    return dropdownMenuRect(layout, dropdown, count);
 }
 
 fn registerNewChatOptionHits(
@@ -1318,7 +1239,7 @@ fn registerNewChatOptionHits(
 }
 
 fn openActionMenuRect(layout: SettingsLayout) palette.Rect {
-    return dropdownMenuRect(layout.open_action_dropdown, OPEN_CHOICES.len);
+    return dropdownMenuRect(layout, layout.open_action_dropdown, OPEN_CHOICES.len);
 }
 
 fn registerOpenActionOptionHits(
@@ -1347,7 +1268,7 @@ pub fn registerHits(state: *runtime.AppState, width: f32, height: f32, queue_hit
     if (consumePendingRuntimesScroll(state, layout)) layout = computeLayout(state, width, height);
     state.settings_controller.scroll_y = theme.clampf(state.settings_controller.scroll_y, 0.0, layout.max_scroll_y);
     // Full-window dismiss so a click on the sidebar or workspace closes the
-    // docked column. Panel chrome stays modal_block so empty space there does
+    // dialog. Dialog chrome stays modal_block so empty space there does
     // not dismiss (and still closes open dropdowns).
     queue_hit(state, .{ .x = 0.0, .y = 0.0, .w = width, .h = height }, .modal_dismiss, 0);
     queue_hit(state, layout.modal, .modal_block, 0);
@@ -1488,7 +1409,7 @@ fn openActionDraftLabel(state: *const runtime.AppState) []const u8 {
     return OPEN_CHOICES[openActionSelectedIndex(state)].label;
 }
 
-/// Renders the docked settings column over the workspace.
+/// Renders the centred settings dialog over the workspace.
 pub fn render(state: *runtime.AppState, width: f32, height: f32) void {
     if (!state.settings_controller.modal_visible) return;
     state.tickSettingsModalAnimation();
@@ -1501,299 +1422,94 @@ pub fn render(state: *runtime.AppState, width: f32, height: f32) void {
     var layout = computeLayout(state, width, height);
     if (consumePendingRuntimesScroll(state, layout)) layout = computeLayout(state, width, height);
     state.settings_controller.scroll_y = theme.clampf(state.settings_controller.scroll_y, 0.0, layout.max_scroll_y);
-    drawModalChrome(state, width, height, layout.modal);
-    drawHeaderBar(state, layout);
+    drawModalChrome(state, width, height, layout);
     drawCategoryNav(state, layout);
-    queueRoundedRect(state, .{
-        .x = layout.content.x - theme.scaledUi(1.0),
-        .y = layout.content.y,
-        .w = theme.scaledUi(1.0),
-        .h = layout.content.h,
-    }, paletteColor(controlEdge()), 0.0);
+    drawHeaderBar(state, layout);
+    drawPageChrome(state, layout);
 
-    const category = state.settings_controller.active_category;
-    if (category == .appearance) {
-        drawCard(state, layout.appearance_card, layout.body_clip);
-        drawCardTitle(state, layout.appearance_card, "Appearance", layout.body_clip);
-        drawFieldLabel(state, layout.appearance_card, m, "Theme", layout.body_clip);
-        drawThemeDropdown(state, layout);
-        drawStepperRow(state, layout.appearance_card, m, layout.ui_font_dec.y, "UI font", state.settings_controller.draft.font_size, app_config.MIN_FONT_SIZE, app_config.MAX_FONT_SIZE, .ui_font_dec, .ui_font_inc, layout.ui_font_dec, layout.ui_font_inc, layout.body_clip);
-        queueText(state, .{
-            .x = layout.appearance_card.x + m.card_pad,
-            .y = layout.ui_font_family_label_y,
-            .w = layout.appearance_card.w - m.card_pad * 2.0,
-            .h = m.label_h,
-        }, "Font family", paletteColor(fieldLabel()), theme.scaledUi(FIELD_LABEL_FONT_SIZE), layout.body_clip);
-        drawUiFontFamilyDropdown(state, layout);
-        const motion = state.settings_controller.draft.reduced_motion;
-        drawSwitchRow(state, layout.reduced_motion, "Reduce motion", motion.all(), isControlHovered(state, .reduced_motion), layout.body_clip);
-        for (REDUCED_MOTION_PARTS, layout.reduced_motion_parts) |part, rect| {
-            drawSwitchRow(state, rect, part.label, reducedMotionPart(motion, part.part), isControlHovered(state, part.control), layout.body_clip);
-        }
-        drawCompanionExperimentalRow(state, layout.companion_toggle, state.settings_controller.draft.companion_enabled, isControlHovered(state, .companion_toggle), layout.body_clip);
-        if (state.settings_controller.draft.companion_enabled) {
-            queueText(state, .{
-                .x = layout.appearance_card.x + m.card_pad,
-                .y = layout.companion_character_label_y,
-                .w = layout.appearance_card.w - m.card_pad * 2.0,
-                .h = m.label_h,
-            }, "Character", paletteColor(fieldLabel()), theme.scaledUi(FIELD_LABEL_FONT_SIZE), layout.body_clip);
-            drawCompanionCharacterDropdown(state, layout);
-        }
-    } else if (category == .workspace) {
-        drawCard(state, layout.workspace_card, layout.body_clip);
-        drawCardTitle(state, layout.workspace_card, "Workspace", layout.body_clip);
-        queueText(state, .{
-            .x = layout.workspace_card.x + m.card_pad,
-            .y = layout.workspace_tabs_label_y,
-            .w = layout.workspace_card.w - m.card_pad * 2.0,
-            .h = m.label_h,
-        }, "Tabs", paletteColor(fieldLabel()), theme.scaledUi(FIELD_LABEL_FONT_SIZE), layout.body_clip);
-        drawToggleCell(state, layout.workspace_tabs_automatic, "Auto", state.settings_controller.draft.workspace_tabs == .automatic, isControlHovered(state, .workspace_tabs_automatic), layout.body_clip);
-        drawToggleCell(state, layout.workspace_tabs_always, "Always", state.settings_controller.draft.workspace_tabs == .always, isControlHovered(state, .workspace_tabs_always), layout.body_clip);
-        drawToggleCell(state, layout.workspace_tabs_disabled, "Off", state.settings_controller.draft.workspace_tabs == .disabled, isControlHovered(state, .workspace_tabs_disabled), layout.body_clip);
-        queueText(state, .{
-            .x = layout.open_action_dropdown.x,
-            .y = layout.open_action_dropdown.y - m.inner_gap - m.label_h,
-            .w = layout.open_action_dropdown.w,
-            .h = m.label_h,
-        }, "Open with", paletteColor(fieldLabel()), theme.scaledUi(FIELD_LABEL_FONT_SIZE), layout.body_clip);
-        drawChatTitleDropdown(state, layout.open_action_dropdown, openActionDraftLabel(state), .open_action_dropdown, state.settings_controller.open_action_dropdown_open, layout.body_clip);
-        queueText(state, .{
-            .x = layout.new_chat_new_pane.x,
-            .y = layout.new_chat_new_pane.y - m.inner_gap - m.label_h,
-            .w = layout.new_chat_new_pane.w + layout.new_chat_replace_pane.w,
-            .h = m.label_h,
-        }, "New chat", paletteColor(fieldLabel()), theme.scaledUi(FIELD_LABEL_FONT_SIZE), layout.body_clip);
-        drawSegmentedPair(state, layout.new_chat_new_pane, layout.new_chat_replace_pane, "New pane", "Replace", state.settings_controller.draft.new_chat_pane_behavior == .new_pane, isControlHovered(state, .new_chat_new_pane), isControlHovered(state, .new_chat_replace_pane), layout.body_clip);
-        queueText(state, .{
-            .x = layout.workspace_split_default_chat.x,
-            .y = layout.workspace_split_default_chat.y - m.inner_gap - m.label_h,
-            .w = layout.workspace_split_default_chat.w + layout.workspace_split_default_terminal.w,
-            .h = m.label_h,
-        }, "Split", paletteColor(fieldLabel()), theme.scaledUi(FIELD_LABEL_FONT_SIZE), layout.body_clip);
-        drawSegmentedPair(state, layout.workspace_split_default_chat, layout.workspace_split_default_terminal, "Chat", "Terminal", state.settings_controller.draft.workspace_split_default_pane == .chat, isControlHovered(state, .workspace_split_default_chat), isControlHovered(state, .workspace_split_default_terminal), layout.body_clip);
-        queueText(state, .{
-            .x = layout.workspace_new_tab_chat.x,
-            .y = layout.workspace_new_tab_chat.y - m.inner_gap - m.label_h,
-            .w = layout.workspace_new_tab_chat.w + layout.workspace_new_tab_terminal.w,
-            .h = m.label_h,
-        }, "New tab", paletteColor(fieldLabel()), theme.scaledUi(FIELD_LABEL_FONT_SIZE), layout.body_clip);
-        drawSegmentedPair(state, layout.workspace_new_tab_chat, layout.workspace_new_tab_terminal, "Chat", "Terminal", state.settings_controller.draft.workspace_new_tab_pane == .chat, isControlHovered(state, .workspace_new_tab_chat), isControlHovered(state, .workspace_new_tab_terminal), layout.body_clip);
-        drawSwitchRow(state, layout.workspace_unzoom_on_navigation, "Unzoom on navigate", state.settings_controller.draft.unzoom_on_pane_navigation, isControlHovered(state, .workspace_unzoom_on_navigation), layout.body_clip);
-        drawStepperRow(state, layout.workspace_card, m, layout.workspace_pane_gap_dec.y, "Pane gap", state.settings_controller.draft.workspace_pane_gap, app_config.MIN_WORKSPACE_PANE_GAP, app_config.MAX_WORKSPACE_PANE_GAP, .workspace_pane_gap_dec, .workspace_pane_gap_inc, layout.workspace_pane_gap_dec, layout.workspace_pane_gap_inc, layout.body_clip);
-        drawStepperRow(state, layout.workspace_card, m, layout.workspace_panes_per_view_dec.y, "Panes per view", @floatFromInt(state.settings_controller.draft.workspace_panes_per_view), @floatFromInt(app_config.MIN_WORKSPACE_PANES_PER_VIEW), @floatFromInt(app_config.MAX_WORKSPACE_PANES_PER_VIEW), .workspace_panes_per_view_dec, .workspace_panes_per_view_inc, layout.workspace_panes_per_view_dec, layout.workspace_panes_per_view_inc, layout.body_clip);
-        queueText(state, .{
-            .x = layout.workspace_scroll_mode_automatic.x,
-            .y = layout.workspace_scroll_mode_automatic.y - m.inner_gap - m.label_h,
-            .w = layout.workspace_scroll_mode_automatic.w + layout.workspace_scroll_mode_always.w + layout.workspace_scroll_mode_disabled.w,
-            .h = m.label_h,
-        }, "Scrolling", paletteColor(fieldLabel()), theme.scaledUi(FIELD_LABEL_FONT_SIZE), layout.body_clip);
-        drawSegmentedTriple(
-            state,
-            layout.workspace_scroll_mode_automatic,
-            layout.workspace_scroll_mode_always,
-            layout.workspace_scroll_mode_disabled,
-            .{ "Auto", "Always", "Off" },
-            @intFromEnum(state.settings_controller.draft.workspace_scroll_mode),
-            .{
-                isControlHovered(state, .workspace_scroll_mode_automatic),
-                isControlHovered(state, .workspace_scroll_mode_always),
-                isControlHovered(state, .workspace_scroll_mode_disabled),
-            },
-            layout.body_clip,
-        );
-        if (state.settings_controller.draft.workspace_scroll_mode == .automatic) {
-            drawStepperRow(state, layout.workspace_card, m, layout.workspace_scroll_threshold_dec.y, "Start after", @floatFromInt(state.settings_controller.draft.workspace_scroll_threshold), @floatFromInt(app_config.MIN_WORKSPACE_SCROLL_THRESHOLD), @floatFromInt(app_config.MAX_WORKSPACE_SCROLL_THRESHOLD), .workspace_scroll_threshold_dec, .workspace_scroll_threshold_inc, layout.workspace_scroll_threshold_dec, layout.workspace_scroll_threshold_inc, layout.body_clip);
-        }
-        queueText(state, .{
-            .x = layout.workspace_scroll_horizontal.x,
-            .y = layout.workspace_scroll_horizontal.y - m.inner_gap - m.label_h,
-            .w = layout.workspace_scroll_horizontal.w + layout.workspace_scroll_vertical.w,
-            .h = m.label_h,
-        }, "Direction", paletteColor(fieldLabel()), theme.scaledUi(FIELD_LABEL_FONT_SIZE), layout.body_clip);
-        drawSegmentedPair(state, layout.workspace_scroll_horizontal, layout.workspace_scroll_vertical, "Horizontal", "Vertical", state.settings_controller.draft.workspace_scroll_direction == .horizontal, isControlHovered(state, .workspace_scroll_horizontal), isControlHovered(state, .workspace_scroll_vertical), layout.body_clip);
-    } else if (category == .chat) {
-        drawCard(state, layout.transcript_card, layout.body_clip);
-        drawCardTitle(state, layout.transcript_card, "Transcript", layout.body_clip);
-        drawFieldLabel(state, layout.transcript_card, m, "Tool groups", layout.body_clip);
-        drawToggleCell(state, layout.tool_groups_collapsed, "Collapse", state.settings_controller.draft.tool_call_group_preference == .collapsed, isControlHovered(state, .tool_groups_collapsed), layout.body_clip);
-        drawToggleCell(state, layout.tool_groups_expanded, "Expand", state.settings_controller.draft.tool_call_group_preference == .expanded, isControlHovered(state, .tool_groups_expanded), layout.body_clip);
-        drawToggleCell(state, layout.tool_groups_remember_last, "Remember", state.settings_controller.draft.tool_call_group_preference == .remember_last, isControlHovered(state, .tool_groups_remember_last), layout.body_clip);
-        queueText(state, .{
-            .x = layout.diff_layout_stacked.x,
-            .y = layout.diff_layout_stacked.y - m.inner_gap - m.label_h,
-            .w = layout.diff_layout_stacked.w + layout.diff_layout_split.w,
-            .h = m.label_h,
-        }, "Diff", paletteColor(fieldLabel()), theme.scaledUi(FIELD_LABEL_FONT_SIZE), layout.body_clip);
-        drawSegmentedPair(state, layout.diff_layout_stacked, layout.diff_layout_split, "Stacked", "Split", state.settings_controller.draft.diff_layout_preference == .stacked, isControlHovered(state, .diff_layout_stacked), isControlHovered(state, .diff_layout_split), layout.body_clip);
-
-        drawCard(state, layout.chat_card, layout.body_clip);
-        drawSectionDivider(state, layout.chat_card, layout.body_clip);
-        drawCardTitle(state, layout.chat_card, "Chat", layout.body_clip);
-        drawSwitchRow(state, layout.automatic_chat_titles, "Auto-name chats", state.settings_controller.draft.automatic_chat_titles_enabled, isControlHovered(state, .automatic_chat_titles), layout.body_clip);
-        if (state.settings_controller.draft.automatic_chat_titles_enabled) {
-            const title_generator_label_y = layout.chat_title_provider_dropdown.y - m.inner_gap - m.label_h;
-            queueText(state, .{
-                .x = layout.chat_title_provider_dropdown.x,
-                .y = title_generator_label_y,
-                .w = layout.chat_title_provider_dropdown.w,
-                .h = m.label_h,
-            }, "Provider", paletteColor(fieldLabel()), theme.scaledUi(FIELD_LABEL_FONT_SIZE), layout.body_clip);
-            queueText(state, .{
-                .x = layout.chat_title_model_dropdown.x,
-                .y = title_generator_label_y,
-                .w = layout.chat_title_model_dropdown.w,
-                .h = m.label_h,
-            }, "Model", paletteColor(fieldLabel()), theme.scaledUi(FIELD_LABEL_FONT_SIZE), layout.body_clip);
-            drawChatTitleDropdown(state, layout.chat_title_provider_dropdown, state.settingsChatTitleProviderLabel(state.settingsChatTitleProviderSelectedIndex()), .chat_title_provider_dropdown, state.settings_controller.title_provider_dropdown_open, layout.body_clip);
-            drawChatTitleDropdown(state, layout.chat_title_model_dropdown, state.settingsChatTitleModelSelectedLabel(), .chat_title_model_dropdown, state.settings_controller.title_model_dropdown_open, layout.body_clip);
-        }
-        const new_chat_defaults_label_y = layout.new_chat_provider_dropdown.y - m.inner_gap - m.label_h;
-        queueText(state, .{ .x = layout.new_chat_provider_dropdown.x, .y = new_chat_defaults_label_y, .w = layout.new_chat_provider_dropdown.w, .h = m.label_h }, "New chat", paletteColor(fieldLabel()), theme.scaledUi(FIELD_LABEL_FONT_SIZE), layout.body_clip);
-        queueText(state, .{ .x = layout.new_chat_model_dropdown.x, .y = new_chat_defaults_label_y, .w = layout.new_chat_model_dropdown.w, .h = m.label_h }, "Model", paletteColor(fieldLabel()), theme.scaledUi(FIELD_LABEL_FONT_SIZE), layout.body_clip);
-        queueText(state, .{ .x = layout.new_chat_reasoning_dropdown.x, .y = new_chat_defaults_label_y, .w = layout.new_chat_reasoning_dropdown.w, .h = m.label_h }, "Reasoning", paletteColor(fieldLabel()), theme.scaledUi(FIELD_LABEL_FONT_SIZE), layout.body_clip);
-        drawChatTitleDropdown(state, layout.new_chat_provider_dropdown, state.settingsNewChatProviderLabel(state.settingsNewChatProviderSelectedIndex()), .new_chat_provider_dropdown, state.settings_controller.new_chat_provider_dropdown_open, layout.body_clip);
-        drawChatTitleDropdown(state, layout.new_chat_model_dropdown, state.settingsNewChatModelSelectedLabel(), .new_chat_model_dropdown, state.settings_controller.new_chat_model_dropdown_open, layout.body_clip);
-        drawChatTitleDropdown(state, layout.new_chat_reasoning_dropdown, state.settingsNewChatReasoningSelectedLabel(), .new_chat_reasoning_dropdown, state.settings_controller.new_chat_reasoning_dropdown_open, layout.body_clip);
-        drawSwitchRow(state, layout.file_links_neovim_pane, "File links in Neovim", state.settings_controller.draft.file_links_in_neovim_pane, isControlHovered(state, .file_links_neovim_pane), layout.body_clip);
-    } else if (category == .terminal) {
-        drawCard(state, layout.terminal_card, layout.body_clip);
-        drawCardTitle(state, layout.terminal_card, "Terminal", layout.body_clip);
-        drawStepperRow(state, layout.terminal_card, m, layout.terminal_font_dec.y, "Font size", state.settings_controller.draft.terminal_font_size, app_config.MIN_TERMINAL_FONT_SIZE, app_config.MAX_TERMINAL_FONT_SIZE, .terminal_font_dec, .terminal_font_inc, layout.terminal_font_dec, layout.terminal_font_inc, layout.body_clip);
-    } else if (category == .browser) {
-        drawCard(state, layout.browser_card, layout.body_clip);
-        drawCardTitle(state, layout.browser_card, "Browser", layout.body_clip);
-        queueText(state, .{ .x = layout.links_verde_browser.x, .y = layout.links_verde_browser.y - m.inner_gap - m.label_h, .w = layout.links_verde_browser.w + layout.links_system_browser.w, .h = m.label_h }, "Web links", paletteColor(fieldLabel()), theme.scaledUi(FIELD_LABEL_FONT_SIZE), layout.body_clip);
-        drawSegmentedPair(state, layout.links_verde_browser, layout.links_system_browser, "Verde", "System", state.settings_controller.draft.link_open_target == .verde_browser, isControlHovered(state, .links_verde_browser), isControlHovered(state, .links_system_browser), layout.body_clip);
-        queueText(state, .{ .x = layout.chat_links_global.x, .y = layout.chat_links_global.y - m.inner_gap - m.label_h, .w = layout.chat_links_global.w * 3.0, .h = m.label_h }, "Chat links", paletteColor(fieldLabel()), theme.scaledUi(FIELD_LABEL_FONT_SIZE), layout.body_clip);
-        drawSegmentedTriple(state, layout.chat_links_global, layout.chat_links_verde_browser, layout.chat_links_system_browser, .{ "Global", "Verde", "System" }, @intFromEnum(state.settings_controller.draft.chat_link_open_override), .{ isControlHovered(state, .chat_links_global), isControlHovered(state, .chat_links_verde_browser), isControlHovered(state, .chat_links_system_browser) }, layout.body_clip);
-        queueText(state, .{ .x = layout.terminal_links_global.x, .y = layout.terminal_links_global.y - m.inner_gap - m.label_h, .w = layout.terminal_links_global.w * 3.0, .h = m.label_h }, "Terminal links", paletteColor(fieldLabel()), theme.scaledUi(FIELD_LABEL_FONT_SIZE), layout.body_clip);
-        drawSegmentedTriple(state, layout.terminal_links_global, layout.terminal_links_verde_browser, layout.terminal_links_system_browser, .{ "Global", "Verde", "System" }, @intFromEnum(state.settings_controller.draft.terminal_link_open_override), .{ isControlHovered(state, .terminal_links_global), isControlHovered(state, .terminal_links_verde_browser), isControlHovered(state, .terminal_links_system_browser) }, layout.body_clip);
-        drawBrowserScrollSpeedSlider(state, layout.browser_scroll_speed, state.settings_controller.draft.browser_scroll_speed, isControlHovered(state, .browser_scroll_speed), layout.body_clip);
-    } else if (category == .providers) {
-        drawProvidersCard(state, layout, m);
-    } else if (category == .connections) {
-        drawRuntimeCard(state, layout);
-    } else if (category == .agents) {
-        drawCard(state, layout.integrations_card, layout.body_clip);
-        drawCardTitle(state, layout.integrations_card, "Agents", layout.body_clip);
-        drawFieldLabel(state, layout.integrations_card, m, "Verde MCP", layout.body_clip);
-        const mcp_installed = state.settings_controller.mcp_summary.installedCount() > 0;
-        drawSwitchRow(state, layout.mcp_tools, "Enable Verde MCP", mcp_installed, isControlHovered(state, .mcp_tools), layout.body_clip);
-        var mcp_status_buf: [120]u8 = undefined;
-        const mcp_status = if (state.settings_controller.mcp_summary.detectedCount() == 0)
-            "No supported providers detected"
-        else if (state.settings_controller.mcp_summary.failedCount() > 0)
-            std.fmt.bufPrint(&mcp_status_buf, "Installed for {d} · {d} failed", .{ state.settings_controller.mcp_summary.installedCount(), state.settings_controller.mcp_summary.failedCount() }) catch "Some provider configs could not be updated"
-        else if (state.settings_controller.mcp_summary.conflictCount() > 0)
-            std.fmt.bufPrint(&mcp_status_buf, "Installed for {d} · {d} conflict(s) kept", .{ state.settings_controller.mcp_summary.installedCount(), state.settings_controller.mcp_summary.conflictCount() }) catch "Some existing verde entries were preserved"
-        else
-            std.fmt.bufPrint(&mcp_status_buf, "Installed for {d} of {d} detected", .{ state.settings_controller.mcp_summary.installedCount(), state.settings_controller.mcp_summary.detectedCount() }) catch "Workspace-aware in Verde panes";
-        queueText(state, .{
-            .x = layout.integrations_card.x + m.card_pad,
-            .y = layout.mcp_hint_y,
-            .w = layout.integrations_card.w - m.card_pad * 2.0,
-            .h = m.label_h,
-        }, mcp_status, paletteColor(textHint()), theme.scaledUi(12.0), layout.body_clip);
-        queueText(state, .{
-            .x = layout.integrations_card.x + m.card_pad,
-            .y = layout.hooks_label_y,
-            .w = layout.integrations_card.w - m.card_pad * 2.0,
-            .h = m.label_h,
-        }, "Status hooks", paletteColor(fieldLabel()), theme.scaledUi(FIELD_LABEL_FONT_SIZE), layout.body_clip);
-        drawSwitchRow(state, layout.hooks_claude, "Claude", state.settings_controller.hook_claude_installed, isControlHovered(state, .hooks_claude), layout.body_clip);
-        drawSwitchRow(state, layout.hooks_codex, "Codex", state.settings_controller.hook_codex_installed, isControlHovered(state, .hooks_codex), layout.body_clip);
-        drawSwitchRow(state, layout.hooks_cursor, "Cursor", state.settings_controller.hook_cursor_installed, isControlHovered(state, .hooks_cursor), layout.body_clip);
-        drawSwitchRow(state, layout.hooks_opencode, "OpenCode", state.settings_controller.hook_opencode_installed, isControlHovered(state, .hooks_opencode), layout.body_clip);
-        drawSwitchRow(state, layout.hooks_grok, "Grok", state.settings_controller.hook_grok_installed, isControlHovered(state, .hooks_grok), layout.body_clip);
-        drawSwitchRow(state, layout.hooks_amp, "Amp", state.settings_controller.hook_amp_installed, isControlHovered(state, .hooks_amp), layout.body_clip);
-        drawSwitchRow(state, layout.hooks_pi, "Pi", state.settings_controller.hook_pi_installed, isControlHovered(state, .hooks_pi), layout.body_clip);
-    } else if (category == .app) {
-        drawCard(state, layout.updates_card, layout.body_clip);
-        drawCardTitle(state, layout.updates_card, "Updates", layout.body_clip);
-        var version_buf: [96]u8 = undefined;
-        const update_status = switch (state.settings_controller.update.status) {
-            .idle => std.fmt.bufPrint(&version_buf, "Installed {s}", .{build_options.version}) catch "Installed version unavailable",
-            .checking => std.fmt.bufPrint(&version_buf, "Installed {s} · Checking…", .{build_options.version}) catch "Checking for updates…",
-            .up_to_date => std.fmt.bufPrint(&version_buf, "Installed {s} · Up to date", .{build_options.version}) catch "Verde is up to date",
-            .update_available => if (state.settings_controller.update.release) |release|
-                std.fmt.bufPrint(&version_buf, "Installed {s} · {s} available", .{ build_options.version, release.version }) catch "Update available"
+    const clip = layout.body_clip;
+    const draft = &state.settings_controller.draft;
+    switch (state.settings_controller.active_category) {
+        .appearance => {
+            const selected_theme = @min(draft.theme_choice, state.settingsThemeChoiceCount() - 1);
+            drawDropdown(state, layout.theme_dropdown, state.settingsThemeChoiceLabel(selected_theme), .theme_dropdown, state.settings_controller.theme_dropdown_open, clip);
+            drawDropdown(state, layout.ui_font_family_dropdown, draft.ui_font_family.label(), .ui_font_family_dropdown, state.settings_controller.ui_font_family_dropdown_open, clip);
+            drawStepper(state, draft.font_size, app_config.MIN_FONT_SIZE, app_config.MAX_FONT_SIZE, .ui_font_dec, .ui_font_inc, layout.ui_font_dec, layout.ui_font_inc, clip);
+            const motion = draft.reduced_motion;
+            drawSwitchRow(state, layout.reduced_motion, motion.all(), isControlHovered(state, .reduced_motion), clip);
+            for (REDUCED_MOTION_PARTS, layout.reduced_motion_parts) |part, rect| {
+                drawSwitchRow(state, rect, reducedMotionPart(motion, part.part), isControlHovered(state, part.control), clip);
+            }
+            drawCompanionExperimentalRow(state, layout.companion_toggle, draft.companion_enabled, isControlHovered(state, .companion_toggle), clip);
+            if (draft.companion_enabled) {
+                drawDropdown(state, layout.companion_character_dropdown, companionCharacterLabel(companionCharacterIndex(draft.companion_character)), .companion_character_dropdown, state.settings_controller.companion_character_dropdown_open, clip);
+            }
+        },
+        .workspace => {
+            drawDropdown(state, layout.open_action_dropdown, openActionDraftLabel(state), .open_action_dropdown, state.settings_controller.open_action_dropdown_open, clip);
+            drawSegmented(state, &.{ layout.workspace_tabs_automatic, layout.workspace_tabs_always, layout.workspace_tabs_disabled }, &.{ "Auto", "Always", "Off" }, @intFromEnum(draft.workspace_tabs), &.{ .workspace_tabs_automatic, .workspace_tabs_always, .workspace_tabs_disabled }, clip);
+            drawSegmented(state, &.{ layout.new_chat_new_pane, layout.new_chat_replace_pane }, &.{ "New pane", "Replace" }, if (draft.new_chat_pane_behavior == .new_pane) 0 else 1, &.{ .new_chat_new_pane, .new_chat_replace_pane }, clip);
+            drawSegmented(state, &.{ layout.workspace_split_default_chat, layout.workspace_split_default_terminal }, &.{ "Chat", "Terminal" }, if (draft.workspace_split_default_pane == .chat) 0 else 1, &.{ .workspace_split_default_chat, .workspace_split_default_terminal }, clip);
+            drawSegmented(state, &.{ layout.workspace_new_tab_chat, layout.workspace_new_tab_terminal }, &.{ "Chat", "Terminal" }, if (draft.workspace_new_tab_pane == .chat) 0 else 1, &.{ .workspace_new_tab_chat, .workspace_new_tab_terminal }, clip);
+            drawSwitchRow(state, layout.workspace_unzoom_on_navigation, draft.unzoom_on_pane_navigation, isControlHovered(state, .workspace_unzoom_on_navigation), clip);
+            drawStepper(state, draft.workspace_pane_gap, app_config.MIN_WORKSPACE_PANE_GAP, app_config.MAX_WORKSPACE_PANE_GAP, .workspace_pane_gap_dec, .workspace_pane_gap_inc, layout.workspace_pane_gap_dec, layout.workspace_pane_gap_inc, clip);
+            drawStepper(state, @floatFromInt(draft.workspace_panes_per_view), @floatFromInt(app_config.MIN_WORKSPACE_PANES_PER_VIEW), @floatFromInt(app_config.MAX_WORKSPACE_PANES_PER_VIEW), .workspace_panes_per_view_dec, .workspace_panes_per_view_inc, layout.workspace_panes_per_view_dec, layout.workspace_panes_per_view_inc, clip);
+            drawSegmented(state, &.{ layout.workspace_scroll_mode_automatic, layout.workspace_scroll_mode_always, layout.workspace_scroll_mode_disabled }, &.{ "Auto", "Always", "Off" }, @intFromEnum(draft.workspace_scroll_mode), &.{ .workspace_scroll_mode_automatic, .workspace_scroll_mode_always, .workspace_scroll_mode_disabled }, clip);
+            if (draft.workspace_scroll_mode == .automatic) {
+                drawStepper(state, @floatFromInt(draft.workspace_scroll_threshold), @floatFromInt(app_config.MIN_WORKSPACE_SCROLL_THRESHOLD), @floatFromInt(app_config.MAX_WORKSPACE_SCROLL_THRESHOLD), .workspace_scroll_threshold_dec, .workspace_scroll_threshold_inc, layout.workspace_scroll_threshold_dec, layout.workspace_scroll_threshold_inc, clip);
+            }
+            drawSegmented(state, &.{ layout.workspace_scroll_horizontal, layout.workspace_scroll_vertical }, &.{ "Horizontal", "Vertical" }, if (draft.workspace_scroll_direction == .horizontal) 0 else 1, &.{ .workspace_scroll_horizontal, .workspace_scroll_vertical }, clip);
+        },
+        .chat => {
+            drawSegmented(state, &.{ layout.tool_groups_collapsed, layout.tool_groups_expanded, layout.tool_groups_remember_last }, &.{ "Collapse", "Expand", "Remember" }, switch (draft.tool_call_group_preference) {
+                .collapsed => 0,
+                .expanded => 1,
+                .remember_last => 2,
+            }, &.{ .tool_groups_collapsed, .tool_groups_expanded, .tool_groups_remember_last }, clip);
+            drawSegmented(state, &.{ layout.diff_layout_stacked, layout.diff_layout_split }, &.{ "Stacked", "Split" }, if (draft.diff_layout_preference == .stacked) 0 else 1, &.{ .diff_layout_stacked, .diff_layout_split }, clip);
+            drawSwitchRow(state, layout.automatic_chat_titles, draft.automatic_chat_titles_enabled, isControlHovered(state, .automatic_chat_titles), clip);
+            if (draft.automatic_chat_titles_enabled) {
+                drawDropdown(state, layout.chat_title_provider_dropdown, state.settingsChatTitleProviderLabel(state.settingsChatTitleProviderSelectedIndex()), .chat_title_provider_dropdown, state.settings_controller.title_provider_dropdown_open, clip);
+                drawDropdown(state, layout.chat_title_model_dropdown, state.settingsChatTitleModelSelectedLabel(), .chat_title_model_dropdown, state.settings_controller.title_model_dropdown_open, clip);
+            }
+            drawDropdown(state, layout.new_chat_provider_dropdown, state.settingsNewChatProviderLabel(state.settingsNewChatProviderSelectedIndex()), .new_chat_provider_dropdown, state.settings_controller.new_chat_provider_dropdown_open, clip);
+            drawDropdown(state, layout.new_chat_model_dropdown, state.settingsNewChatModelSelectedLabel(), .new_chat_model_dropdown, state.settings_controller.new_chat_model_dropdown_open, clip);
+            drawDropdown(state, layout.new_chat_reasoning_dropdown, state.settingsNewChatReasoningSelectedLabel(), .new_chat_reasoning_dropdown, state.settings_controller.new_chat_reasoning_dropdown_open, clip);
+            drawSwitchRow(state, layout.file_links_neovim_pane, draft.file_links_in_neovim_pane, isControlHovered(state, .file_links_neovim_pane), clip);
+        },
+        .terminal => {
+            drawStepper(state, draft.terminal_font_size, app_config.MIN_TERMINAL_FONT_SIZE, app_config.MAX_TERMINAL_FONT_SIZE, .terminal_font_dec, .terminal_font_inc, layout.terminal_font_dec, layout.terminal_font_inc, clip);
+        },
+        .browser => {
+            drawSegmented(state, &.{ layout.links_verde_browser, layout.links_system_browser }, &.{ "Verde", "System" }, if (draft.link_open_target == .verde_browser) 0 else 1, &.{ .links_verde_browser, .links_system_browser }, clip);
+            drawSegmented(state, &.{ layout.chat_links_global, layout.chat_links_verde_browser, layout.chat_links_system_browser }, &.{ "Global", "Verde", "System" }, @intFromEnum(draft.chat_link_open_override), &.{ .chat_links_global, .chat_links_verde_browser, .chat_links_system_browser }, clip);
+            drawSegmented(state, &.{ layout.terminal_links_global, layout.terminal_links_verde_browser, layout.terminal_links_system_browser }, &.{ "Global", "Verde", "System" }, @intFromEnum(draft.terminal_link_open_override), &.{ .terminal_links_global, .terminal_links_verde_browser, .terminal_links_system_browser }, clip);
+            drawBrowserScrollSpeedSlider(state, layout.browser_scroll_speed, draft.browser_scroll_speed, isControlHovered(state, .browser_scroll_speed), clip);
+        },
+        .providers => drawProvidersCard(state, layout, m),
+        .connections => drawRuntimeCard(state, layout),
+        .agents => {
+            const mcp_installed = state.settings_controller.mcp_summary.installedCount() > 0;
+            drawSwitchRow(state, layout.mcp_tools, mcp_installed, isControlHovered(state, .mcp_tools), clip);
+            var mcp_status_buf: [120]u8 = undefined;
+            const mcp_status = if (state.settings_controller.mcp_summary.detectedCount() == 0)
+                "No supported providers detected"
+            else if (state.settings_controller.mcp_summary.failedCount() > 0)
+                std.fmt.bufPrint(&mcp_status_buf, "Installed for {d} · {d} failed", .{ state.settings_controller.mcp_summary.installedCount(), state.settings_controller.mcp_summary.failedCount() }) catch "Some provider configs could not be updated"
+            else if (state.settings_controller.mcp_summary.conflictCount() > 0)
+                std.fmt.bufPrint(&mcp_status_buf, "Installed for {d} · {d} conflict(s) kept", .{ state.settings_controller.mcp_summary.installedCount(), state.settings_controller.mcp_summary.conflictCount() }) catch "Some existing verde entries were preserved"
             else
-                "Update available",
-            .failed => std.fmt.bufPrint(&version_buf, "Installed {s} · Check failed", .{build_options.version}) catch "Update check failed",
-        };
-        queueText(state, .{
-            .x = layout.updates_card.x + m.card_pad,
-            .y = layout.updates_status_y,
-            .w = layout.updates_card.w - m.card_pad * 2.0,
-            .h = m.label_h,
-        }, update_status, paletteColor(textLabel()), theme.scaledUi(12.5), layout.body_clip);
-        const check_style: ButtonStyle = if (state.settings_controller.update.status == .checking) .disabled else .secondary;
-        drawActionButton(state, layout.updates_check, if (state.settings_controller.update.status == .checking) "Checking…" else "Check now", check_style, isControlHovered(state, .updates_check), layout.body_clip);
-        const update_button_enabled = state.updateInstallerButtonEnabled();
-        const update_button_style: ButtonStyle = if (!update_button_enabled)
-            .disabled
-        else if (state.settings_controller.update_installer_started)
-            .secondary
-        else
-            .primary;
-        drawActionButton(state, layout.updates_download, state.updateInstallerButtonLabel(), update_button_style, isControlHovered(state, .updates_download), layout.body_clip);
-        drawSwitchRow(state, layout.updates_automatic, "Check automatically", state.settings_controller.draft.check_for_updates_automatically, isControlHovered(state, .updates_automatic), layout.body_clip);
-        if (state.settings_controller.package_update_command) |command| {
-            const hint_y = layout.updates_automatic.y + m.row_h + m.inner_gap;
-            const hint_w = layout.updates_card.w - m.card_pad * 2.0;
-            const hint_h = wrappedNotesRows(PACKAGE_UPDATE_HINT, hint_w) * notesLineHeight();
-            queueWrappedText(state, .{
-                .x = layout.updates_card.x + m.card_pad,
-                .y = hint_y,
-                .w = hint_w,
-                .h = hint_h,
-            }, PACKAGE_UPDATE_HINT, paletteColor(textHint()), theme.scaledUi(NOTES_FONT_SIZE), layout.body_clip);
-            queueText(state, .{
-                .x = layout.updates_card.x + m.card_pad,
-                .y = hint_y + hint_h,
-                .w = hint_w,
-                .h = m.label_h,
-            }, command, paletteColor(textLabel()), theme.scaledUi(12.5), layout.body_clip);
-        }
-        const notes_x = layout.updates_card.x + m.card_pad;
-        const notes_w = layout.updates_card.w - m.card_pad * 2.0;
-        if (state.settings_controller.update_notes_expanded and state.settings_controller.update.release != null) {
-            var iter = NotesLineIterator.init(state.settings_controller.update.release.?.notes);
-            var line_y = layout.updates_notes_y;
-            while (iter.next()) |line| {
-                const line_h = wrappedNotesRows(line.text, notes_w) * notesLineHeight();
-                const line_rect: palette.Rect = .{ .x = notes_x, .y = line_y, .w = notes_w, .h = line_h };
-                if (intersectRect(line_rect, layout.body_clip)) |line_clip| {
-                    const line_color = if (line.heading) textLabel() else textHint();
-                    queueWrappedText(state, line_rect, line.text, paletteColor(line_color), theme.scaledUi(NOTES_FONT_SIZE), line_clip);
-                }
-                line_y += line_h;
-            }
-        } else {
-            const notes = if (state.settings_controller.update.release) |release| releaseNotesPreview(release.notes) else "Release notes appear here when a release is found.";
-            const notes_rect: palette.Rect = .{
-                .x = notes_x,
-                .y = layout.updates_notes_y,
-                .w = notes_w,
-                .h = m.label_h * 2.0,
-            };
-            if (intersectRect(notes_rect, layout.body_clip)) |notes_clip| {
-                queueWrappedText(state, notes_rect, notes, paletteColor(textHint()), theme.scaledUi(NOTES_FONT_SIZE), notes_clip);
-            }
-        }
-        if (layout.updates_notes_toggle) |toggle_rect| {
-            const toggle_color = if (isControlHovered(state, .updates_notes_toggle)) theme.COLOR_WHITE else textLabel();
-            queueText(state, toggle_rect, notesToggleLabel(state), paletteColor(toggle_color), theme.scaledUi(NOTES_LINK_FONT_SIZE), layout.body_clip);
-        }
-        const release_page_color = if (isControlHovered(state, .updates_release_page)) theme.COLOR_WHITE else textLabel();
-        queueText(state, layout.updates_release_page, RELEASE_PAGE_LABEL, paletteColor(release_page_color), theme.scaledUi(NOTES_LINK_FONT_SIZE), layout.body_clip);
-
-        drawCard(state, layout.notifications_card, layout.body_clip);
-        drawSectionDivider(state, layout.notifications_card, layout.body_clip);
-        drawCardTitle(state, layout.notifications_card, "Notifications", layout.body_clip);
-        drawSwitchRow(state, layout.notifications_toggle, "Agent status", state.settings_controller.draft.notifications_enabled, isControlHovered(state, .notifications_toggle), layout.body_clip);
+                std.fmt.bufPrint(&mcp_status_buf, "Installed for {d} of {d} detected", .{ state.settings_controller.mcp_summary.installedCount(), state.settings_controller.mcp_summary.detectedCount() }) catch "Workspace-aware in Verde panes";
+            drawRowDescription(state, layout.mcp_tools, designUi(SWITCH_W), mcp_status, clip);
+            drawSwitchRow(state, layout.hooks_claude, state.settings_controller.hook_claude_installed, isControlHovered(state, .hooks_claude), clip);
+            drawSwitchRow(state, layout.hooks_codex, state.settings_controller.hook_codex_installed, isControlHovered(state, .hooks_codex), clip);
+            drawSwitchRow(state, layout.hooks_cursor, state.settings_controller.hook_cursor_installed, isControlHovered(state, .hooks_cursor), clip);
+            drawSwitchRow(state, layout.hooks_opencode, state.settings_controller.hook_opencode_installed, isControlHovered(state, .hooks_opencode), clip);
+            drawSwitchRow(state, layout.hooks_grok, state.settings_controller.hook_grok_installed, isControlHovered(state, .hooks_grok), clip);
+            drawSwitchRow(state, layout.hooks_amp, state.settings_controller.hook_amp_installed, isControlHovered(state, .hooks_amp), clip);
+            drawSwitchRow(state, layout.hooks_pi, state.settings_controller.hook_pi_installed, isControlHovered(state, .hooks_pi), clip);
+        },
+        .app => drawUpdatesPage(state, layout, m),
     }
 
     drawBodyScrollbar(state, layout);
@@ -1806,6 +1522,71 @@ pub fn render(state: *runtime.AppState, width: f32, height: f32) void {
     drawNewChatDropdownMenu(state, layout, .model);
     drawNewChatDropdownMenu(state, layout, .reasoning);
     drawOpenActionDropdownMenu(state, layout);
+}
+
+// App page controls: version row buttons, auto-check switch, release notes
+// block and the notifications switch. Row labels come from the page chrome.
+fn drawUpdatesPage(state: *runtime.AppState, layout: SettingsLayout, m: Metrics) void {
+    const clip = layout.body_clip;
+    var version_buf: [96]u8 = undefined;
+    const update_status = switch (state.settings_controller.update.status) {
+        .idle => std.fmt.bufPrint(&version_buf, "Installed {s}", .{build_options.version}) catch "Installed version unavailable",
+        .checking => std.fmt.bufPrint(&version_buf, "Installed {s} · Checking…", .{build_options.version}) catch "Checking for updates…",
+        .up_to_date => std.fmt.bufPrint(&version_buf, "Installed {s} · Up to date", .{build_options.version}) catch "Verde is up to date",
+        .update_available => if (state.settings_controller.update.release) |release|
+            std.fmt.bufPrint(&version_buf, "Installed {s} · {s} available", .{ build_options.version, release.version }) catch "Update available"
+        else
+            "Update available",
+        .failed => std.fmt.bufPrint(&version_buf, "Installed {s} · Check failed", .{build_options.version}) catch "Update check failed",
+    };
+    drawRowDescription(state, layout.updates_version_row, layout.updates_download.x + layout.updates_download.w - layout.updates_check.x, update_status, clip);
+    const check_style: ButtonStyle = if (state.settings_controller.update.status == .checking) .disabled else .secondary;
+    drawActionButton(state, layout.updates_check, if (state.settings_controller.update.status == .checking) "Checking…" else "Check now", check_style, isControlHovered(state, .updates_check), clip);
+    const update_button_enabled = state.updateInstallerButtonEnabled();
+    const update_button_style: ButtonStyle = if (!update_button_enabled)
+        .disabled
+    else if (state.settings_controller.update_installer_started)
+        .secondary
+    else
+        .primary;
+    drawActionButton(state, layout.updates_download, state.updateInstallerButtonLabel(), update_button_style, isControlHovered(state, .updates_download), clip);
+    drawSwitchRow(state, layout.updates_automatic, state.settings_controller.draft.check_for_updates_automatically, isControlHovered(state, .updates_automatic), clip);
+
+    const notes_x = layout.updates_notes_row.x + m.card_pad;
+    const notes_w = layout.updates_notes_row.w - m.card_pad * 2.0;
+    if (state.settings_controller.package_update_command) |command| {
+        const hint_y = layout.updates_package_hint_y;
+        const hint_h = wrappedNotesRows(PACKAGE_UPDATE_HINT, notes_w) * notesLineHeight();
+        queueWrappedText(state, .{ .x = notes_x, .y = hint_y, .w = notes_w, .h = hint_h }, PACKAGE_UPDATE_HINT, paletteColor(textHint()), designUi(NOTES_FONT_SIZE), clip);
+        queueText(state, .{ .x = notes_x, .y = hint_y + hint_h, .w = notes_w, .h = m.label_h }, command, paletteColor(textLabel()), designUi(ROW_DESCRIPTION_FONT), clip);
+    }
+    if (state.settings_controller.update_notes_expanded and state.settings_controller.update.release != null) {
+        var iter = NotesLineIterator.init(state.settings_controller.update.release.?.notes);
+        var line_y = layout.updates_notes_y;
+        while (iter.next()) |line| {
+            const line_h = wrappedNotesRows(line.text, notes_w) * notesLineHeight();
+            const line_rect: palette.Rect = .{ .x = notes_x, .y = line_y, .w = notes_w, .h = line_h };
+            if (intersectRect(line_rect, clip)) |line_clip| {
+                const line_color = if (line.heading) textLabel() else textHint();
+                queueWrappedText(state, line_rect, line.text, paletteColor(line_color), designUi(NOTES_FONT_SIZE), line_clip);
+            }
+            line_y += line_h;
+        }
+    } else {
+        const notes = if (state.settings_controller.update.release) |release| releaseNotesPreview(release.notes) else "Release notes appear here when a release is found.";
+        const notes_rect: palette.Rect = .{ .x = notes_x, .y = layout.updates_notes_y, .w = notes_w, .h = m.label_h * 2.0 };
+        if (intersectRect(notes_rect, clip)) |notes_clip| {
+            queueWrappedText(state, notes_rect, notes, paletteColor(textHint()), designUi(NOTES_FONT_SIZE), notes_clip);
+        }
+    }
+    if (layout.updates_notes_toggle) |toggle_rect| {
+        const toggle_color = if (isControlHovered(state, .updates_notes_toggle)) textPrimary() else textLabel();
+        queueRoleText(state, toggle_rect, notesToggleLabel(state), paletteColor(toggle_color), designUi(NOTES_LINK_FONT_SIZE), .ui_medium, clip);
+    }
+    const release_page_color = if (isControlHovered(state, .updates_release_page)) textPrimary() else textLabel();
+    queueRoleText(state, layout.updates_release_page, RELEASE_PAGE_LABEL, paletteColor(release_page_color), designUi(NOTES_LINK_FONT_SIZE), .ui_medium, clip);
+
+    drawSwitchRow(state, layout.notifications_toggle, state.settings_controller.draft.notifications_enabled, isControlHovered(state, .notifications_toggle), clip);
 }
 
 /// Scrolls settings modal content within the fixed header/footer chrome.
@@ -2596,14 +2377,14 @@ const NotesLineIterator = struct {
 };
 
 fn notesLineHeight() f32 {
-    return theme.scaledUi(NOTES_FONT_SIZE * 1.25);
+    return designUi(NOTES_FONT_SIZE * 1.25);
 }
 
 /// Estimated wrapped-row count for one note line. The width bias reserves
 /// slack for ragged word-wrap edges so estimates err toward an extra row
 /// instead of clipping the last one.
 fn wrappedNotesRows(line: []const u8, usable_w: f32) f32 {
-    const width = text_measure.textWidth(.ui, theme.scaledUi(NOTES_FONT_SIZE), line);
+    const width = text_measure.textWidth(.ui, designUi(NOTES_FONT_SIZE), line);
     const rows = @ceil(width / @max(usable_w * 0.94, 1.0));
     return theme.clampf(rows, 1.0, 6.0);
 }
@@ -2638,45 +2419,172 @@ fn releaseNotesPreview(notes: []const u8) []const u8 {
     return "No release notes were provided.";
 }
 
-// Settings shell: soft scrim over the app, then the rounded sheet with a
-// neutral hairline edge.
-fn drawModalChrome(state: *runtime.AppState, width: f32, height: f32, modal: palette.Rect) void {
+// Settings shell: soft scrim over the app, a layered drop shadow, then the
+// rounded dialog with its tinted section-nav column on the left.
+fn drawModalChrome(state: *runtime.AppState, width: f32, height: f32, layout: SettingsLayout) void {
+    const modal = layout.modal;
+    const radius = designUi(DIALOG_RADIUS);
     queueRoundedRect(state, .{ .x = 0.0, .y = 0.0, .w = width, .h = height }, paletteColor(theme.scrim(SHELL_SCRIM_ALPHA)), 0.0);
-    queueRoundedRect(state, modal, paletteColor(theme.COLOR_PANEL), radiusShell());
-    queueBorder(state, modal, paletteColor(controlEdge()), radiusShell(), theme.scaledUi(1.0));
+    // Approximates `0 24px 64px rgba(20,20,18,.22)` with a few soft layers.
+    const ShadowLayer = struct { spread: f32, offset: f32, alpha: f32 };
+    const layers = [_]ShadowLayer{
+        .{ .spread = 28.0, .offset = 22.0, .alpha = 0.035 },
+        .{ .spread = 16.0, .offset = 16.0, .alpha = 0.045 },
+        .{ .spread = 8.0, .offset = 10.0, .alpha = 0.06 },
+        .{ .spread = 2.0, .offset = 3.0, .alpha = 0.06 },
+    };
+    for (layers) |layer| {
+        const spread = designUi(layer.spread);
+        queueRoundedRect(state, .{
+            .x = modal.x - spread,
+            .y = modal.y - spread + designUi(layer.offset),
+            .w = modal.w + spread * 2.0,
+            .h = modal.h + spread * 2.0,
+        }, paletteColor(theme.scrim(layer.alpha)), radius + spread);
+    }
+    queueRoundedRect(state, modal, paletteColor(sheetSurface()), radius);
+    // Nav column: rounded on the dialog's left corners only, so paint a
+    // rounded rect and square off its right edge with a plain strip.
+    const nav = layout.nav_panel;
+    queueRoundedRect(state, nav, paletteColor(navSurface()), radius);
+    queueRoundedRect(state, .{ .x = nav.x + nav.w - radius, .y = nav.y, .w = radius, .h = nav.h }, paletteColor(navSurface()), 0.0);
+    queueRoundedRect(state, .{ .x = nav.x + nav.w - 1.0, .y = nav.y, .w = 1.0, .h = nav.h }, paletteColor(cardEdge()), 0.0);
+    queueBorder(state, modal, paletteColor(controlEdge()), radius, 1.0);
 }
 
-// Header: medium-weight title, a subtle close button and a hairline above the
-// nav/content split. No filled strip, so the sheet reads as one surface.
+// Section header: current section title and a quiet close button. No rule
+// underneath; the grouped cards start just below.
 fn drawHeaderBar(state: *runtime.AppState, layout: SettingsLayout) void {
-    const m = metrics();
-    drawHairline(state, layout.header.x + theme.scaledUi(1.0), layout.header.y + layout.header.h - 1.0, layout.header.w - theme.scaledUi(2.0));
-
-    const title_h = theme.scaledUi(20.0);
+    const header = layout.header;
+    const category = state.settings_controller.active_category;
+    const title_size = designUi(HEADER_TITLE_FONT);
+    // Same inset as the body so the title lines up with the cards.
+    const pad_left = @min(designUi(HEADER_PAD_LEFT), header.w * 0.06);
     queueRoleText(state, .{
-        .x = layout.modal.x + m.modal_pad,
-        .y = layout.header.y + (m.header_h - title_h) * 0.5,
-        .w = theme.scaledUi(160.0),
-        .h = title_h,
-    }, "Settings", paletteColor(theme.COLOR_WHITE), theme.scaledUi(15.0), .ui_medium, layout.modal);
+        .x = header.x + pad_left,
+        .y = header.y + (header.h - title_size * 1.25) * 0.5,
+        .w = @max(layout.close.x - header.x - pad_left - designUi(8.0), 0.0),
+        .h = title_size * 1.25,
+    }, category.label(), paletteColor(textPrimary()), title_size, .ui_medium, layout.modal);
 
-    drawIconButton(state, layout.close, LU_X, state.settings_controller.close_hovered);
+    const hovered = state.settings_controller.close_hovered;
+    if (hovered) queueRoundedRect(state, layout.close, paletteColor(navHoverSurface()), designUi(CONTROL_RADIUS));
+    queueCenteredIcon(state, layout.close, LU_X, paletteColor(if (hovered) textPrimary() else textLabel()), designUi(CLOSE_ICON), layout.close);
+}
+
+// Left nav: "Settings" title, then one rounded row per section with a soft
+// neutral fill for the selected and hovered rows.
+fn drawCategoryNav(state: *runtime.AppState, layout: SettingsLayout) void {
+    const title_size = designUi(NAV_TITLE_FONT);
+    queueRoleText(state, .{
+        .x = layout.nav_panel.x + designUi(NAV_PAD_X + NAV_ROW_PAD_X),
+        .y = layout.nav_panel.y + designUi(NAV_PAD_TOP),
+        .w = layout.nav_panel.w - designUi(NAV_PAD_X + NAV_ROW_PAD_X) * 2.0,
+        .h = title_size * 1.25,
+    }, "Settings", paletteColor(textPrimary()), title_size, .ui_medium, layout.nav_panel);
+
+    const active = @intFromEnum(state.settings_controller.active_category);
+    const font = designUi(NAV_FONT);
+    for (settings_controller.Category.all, 0..) |category, index| {
+        const rect = layout.nav[index];
+        const selected = index == active;
+        const hovered = state.settings_controller.hover_category == @as(u8, @intCast(index));
+        if (selected) {
+            queueRoundedRect(state, rect, paletteColor(navSelectedSurface()), designUi(NAV_ROW_RADIUS));
+        } else if (hovered) {
+            queueRoundedRect(state, rect, paletteColor(navHoverSurface()), designUi(NAV_ROW_RADIUS));
+        }
+        queueRoleText(state, .{
+            .x = rect.x + designUi(NAV_ROW_PAD_X),
+            .y = rect.y + (rect.h - font * 1.25) * 0.5,
+            .w = rect.w - designUi(NAV_ROW_PAD_X) * 2.0,
+            .h = font * 1.25,
+        }, category.label(), paletteColor(if (selected or hovered) textPrimary() else textLabel()), font, if (selected) .ui_medium else .ui, layout.nav_panel);
+    }
+}
+
+// Group captions, card surfaces, inset row hairlines and row labels for the
+// active page. Controls are drawn on top by `render`.
+fn drawPageChrome(state: *runtime.AppState, layout: SettingsLayout) void {
+    const clip = layout.body_clip;
+    const plan = &layout.page;
+    const radius = designUi(CARD_RADIUS);
+    const pad = designUi(ROW_PAD_X);
+    for (plan.groups[0..plan.group_count]) |group| {
+        if (group.caption.len > 0) {
+            queueRoleText(state, .{
+                .x = group.card.x,
+                .y = group.caption_y,
+                .w = group.card.w,
+                .h = designUi(CAPTION_H),
+            }, group.caption, paletteColor(textLabel()), designUi(CAPTION_FONT), .ui_medium, clip);
+        }
+        if (group.card.h <= 0.0) continue;
+        queueRoundedRectClipped(state, group.card, paletteColor(cardSurface()), radius, clip);
+        queueBorderClipped(state, group.card, paletteColor(cardEdge()), radius, 1.0, clip);
+    }
+    for (plan.rows[0..plan.row_count]) |row| {
+        const rect = row.rect;
+        if (row.divider) {
+            queueRoundedRectClipped(state, .{ .x = rect.x + pad, .y = rect.y, .w = rect.w - pad * 2.0, .h = 1.0 }, paletteColor(rowHairline()), 0.0, clip);
+        }
+        if (row.style == .custom or row.label.len == 0) continue;
+        const sub = row.style == .sub;
+        const label_x = rect.x + pad + (if (sub) designUi(SUB_ROW_INDENT) else 0.0);
+        const label_w = @max(rect.x + rect.w - pad - row.control_w - designUi(ROW_CONTROL_GAP) - label_x, 0.0);
+        const label_size = designUi(if (sub) SUB_ROW_LABEL_FONT else ROW_LABEL_FONT);
+        const label_h = label_size * 1.25;
+        const desc_h = designUi(ROW_DESCRIPTION_FONT) * 1.25;
+        const label_y = if (row.two_line)
+            rect.y + (rect.h - label_h - desc_h) * 0.5
+        else
+            rect.y + (rect.h - label_h) * 0.5;
+        queueText(state, .{ .x = label_x, .y = label_y, .w = label_w, .h = label_h }, row.label, paletteColor(if (sub) textLabel() else textPrimary()), label_size, clip);
+        if (row.description.len > 0) drawRowDescription(state, rect, row.control_w, row.description, clip);
+    }
+}
+
+/// Second line under a two-line row's label (static or live status copy).
+fn drawRowDescription(state: *runtime.AppState, row: palette.Rect, control_w: f32, text: []const u8, clip: palette.Rect) void {
+    const pad = designUi(ROW_PAD_X);
+    const label_h = designUi(ROW_LABEL_FONT) * 1.25;
+    const desc_size = designUi(ROW_DESCRIPTION_FONT);
+    const desc_h = desc_size * 1.25;
+    queueText(state, .{
+        .x = row.x + pad,
+        .y = row.y + (row.h - label_h - desc_h) * 0.5 + label_h,
+        .w = @max(row.w - pad * 2.0 - control_w - designUi(ROW_CONTROL_GAP), 0.0),
+        .h = desc_h,
+    }, text, paletteColor(textLabel()), desc_size, clip);
 }
 
 const PROVIDERS_RECHECK_LABEL = "Check again";
 const PROVIDERS_UPDATE_HINT = "Update uses the tool that installed that copy, such as mise.";
-
-fn providerRowHeight() f32 {
-    return theme.scaledUi(46.0);
-}
+const PROVIDER_BADGE_FONT: f32 = 12.0;
 
 fn providerBadgeColumnWidth() f32 {
-    const badge_font = theme.scaledUi(12.0);
+    const badge_font = designUi(PROVIDER_BADGE_FONT);
     var badge_col_w: f32 = 0.0;
     for ([_]runtime.ProviderReadiness{ .checking, .missing, .signed_out, .ready, .unavailable }) |value| {
         badge_col_w = @max(badge_col_w, text_measure.textWidth(.ui, badge_font, providerReadinessBadge(value)));
     }
-    return badge_col_w + theme.scaledUi(4.0);
+    return badge_col_w + designUi(4.0);
+}
+
+/// Right edge reserved for the enable switch and its gap to the badge.
+fn providerSwitchReserve() f32 {
+    return designUi(ROW_PAD_X + SWITCH_W + 18.0);
+}
+
+fn providerDotSize() f32 {
+    return designUi(7.0);
+}
+
+fn providerActionWidth() f32 {
+    return @max(
+        @max(@max(buttonWidth("Install"), buttonWidth("Update")), buttonWidth("Sign in")),
+        @max(buttonWidth("Latest"), buttonWidth("Checking…")),
+    );
 }
 
 const ProviderAction = enum { install, sign_in, update, latest, pending, none };
@@ -2713,20 +2621,17 @@ fn providerReadinessBadge(readiness: runtime.ProviderReadiness) []const u8 {
 }
 
 fn drawProvidersCard(state: *runtime.AppState, layout: SettingsLayout, m: Metrics) void {
-    // Providers page: logo, name, daemon-reported CLI version, installer
-    // button, auth badge, and enable switch.
+    // Providers page: one card row per provider with logo, name,
+    // daemon-reported CLI version, installer button, auth badge and switch.
     const clip = layout.body_clip;
-    drawCard(state, layout.providers_card, clip);
-    drawCardTitle(state, layout.providers_card, "Model providers", clip);
     const snapshot = state.providerReadinessSnapshot();
-    const badge_font = theme.scaledUi(12.0);
-    const name_font = theme.scaledUi(13.0);
-    const version_font = theme.scaledUi(11.0);
-    const dot = theme.scaledUi(7.0);
-    const inset = theme.scaledUi(10.0);
-    const logo = theme.scaledUi(18.0);
-    const logo_gap = theme.scaledUi(10.0);
-    const switch_reserve = theme.scaledUi(10.0 + 40.0 + 20.0);
+    const badge_font = designUi(PROVIDER_BADGE_FONT);
+    const name_font = designUi(ROW_LABEL_FONT);
+    const version_font = designUi(ROW_DESCRIPTION_FONT - 0.5);
+    const dot = providerDotSize();
+    const inset = designUi(ROW_PAD_X);
+    const logo = designUi(20.0);
+    const logo_gap = designUi(12.0);
     const badge_col_w = providerBadgeColumnWidth();
     for (layout.provider_rows, layout.provider_updates, 0..) |row, update, index| {
         const enabled = state.settingsProviderEnabled(index);
@@ -2734,7 +2639,7 @@ fn drawProvidersCard(state: *runtime.AppState, layout: SettingsLayout, m: Metric
         const readiness = snapshot.forProvider(provider);
         const version = snapshot.versionForProvider(provider);
         const action = providerAction(readiness, snapshot.releaseForProvider(provider));
-        drawSwitchRow(state, row, "", enabled, isControlHovered(state, providerRowControl(index)), clip);
+        drawSwitchRow(state, row, enabled, isControlHovered(state, providerRowControl(index)), clip);
 
         const logo_rect: palette.Rect = .{ .x = row.x + inset, .y = row.y + (row.h - logo) * 0.5, .w = logo, .h = logo };
         const label = state.settingsNewChatProviderLabel(index);
@@ -2748,20 +2653,21 @@ fn drawProvidersCard(state: *runtime.AppState, layout: SettingsLayout, m: Metric
                 log.warn("failed to queue provider logo: {s}", .{@errorName(err)});
             };
         } else {
-            queueCenteredText(state, logo_rect, label[0..1], paletteColor(textLabel()), theme.scaledUi(11.0), clip);
+            queueCenteredText(state, logo_rect, label[0..1], paletteColor(textLabel()), designUi(11.0), clip);
         }
 
-        const badge_x = row.x + row.w - switch_reserve - badge_col_w;
-        const dot_x = badge_x - dot - theme.scaledUi(7.0);
+        const badge_x = row.x + row.w - providerSwitchReserve() - badge_col_w;
+        const dot_x = badge_x - dot - designUi(6.0);
         const name_x = logo_rect.x + logo + logo_gap;
-        const name_w = @max(update.x - theme.scaledUi(8.0) - name_x, 0.0);
-        const name_y = row.y + theme.scaledUi(4.0);
+        const name_h = name_font * 1.25;
+        const version_h = version_font * 1.25;
+        const name_y = row.y + (row.h - name_h - version_h) * 0.5;
         queueText(state, .{
             .x = name_x,
             .y = name_y,
-            .w = name_w,
-            .h = theme.scaledUi(16.0),
-        }, label, paletteColor(if (enabled) theme.COLOR_WHITE else textLabel()), name_font, clip);
+            .w = @max(update.x - designUi(8.0) - name_x, 0.0),
+            .h = name_h,
+        }, label, paletteColor(if (enabled) textPrimary() else textLabel()), name_font, clip);
         const version_label = if (version.len > 0)
             provider_cli_version.shortVersion(version)
         else if (readiness == .checking)
@@ -2770,61 +2676,43 @@ fn drawProvidersCard(state: *runtime.AppState, layout: SettingsLayout, m: Metric
             "—";
         queueText(state, .{
             .x = name_x,
-            .y = name_y + theme.scaledUi(16.0),
-            .w = @max(dot_x - theme.scaledUi(8.0) - name_x, 0.0),
-            .h = theme.scaledUi(14.0),
+            .y = name_y + name_h,
+            .w = @max(update.x - designUi(8.0) - name_x, 0.0),
+            .h = version_h,
         }, version_label, paletteColor(textHint()), version_font, clip);
 
         const color = if (enabled) providerReadinessColor(readiness) else theme.COLOR_TEXT_SUBTLE;
         queueRoundedRectClipped(state, .{ .x = dot_x, .y = row.y + (row.h - dot) * 0.5, .w = dot, .h = dot }, paletteColor(color), dot * 0.5, clip);
         queueText(state, .{
             .x = badge_x,
-            .y = row.y + (row.h - m.label_h) * 0.5,
+            .y = row.y + (row.h - badge_font * 1.25) * 0.5,
             .w = badge_col_w,
-            .h = m.label_h,
+            .h = badge_font * 1.25,
         }, providerReadinessBadge(readiness), paletteColor(if (enabled) textLabel() else textHint()), badge_font, clip);
         switch (action) {
             .install => drawActionButton(state, update, "Install", .secondary, isControlHovered(state, providerUpdateControl(index)), clip),
             .update => drawActionButton(state, update, "Update", .secondary, isControlHovered(state, providerUpdateControl(index)), clip),
             .sign_in => drawActionButton(state, update, "Sign in", .primary, isControlHovered(state, providerUpdateControl(index)), clip),
             .pending => drawActionButton(state, update, "Checking…", .disabled, false, clip),
-            .latest => queueCenteredText(state, update, "Latest", paletteColor(textHint()), theme.scaledUi(12.0), clip),
+            .latest => queueCenteredText(state, update, "Latest", paletteColor(textHint()), badge_font, clip),
             .none => {},
         }
     }
+    const content_x = layout.provider_rows[0].x;
+    const content_w = layout.provider_rows[0].w;
     queueText(state, .{
-        .x = layout.providers_card.x + m.card_pad,
+        .x = content_x,
         .y = layout.providers_hint_y,
-        .w = layout.providers_card.w - m.card_pad * 2.0,
+        .w = content_w,
         .h = m.label_h,
-    }, "Disabled providers are hidden from the model picker and new chats.", paletteColor(textHint()), theme.scaledUi(12.0), clip);
+    }, "Disabled providers are hidden from the model picker and new chats.", paletteColor(textHint()), designUi(CAPTION_FONT), clip);
     queueText(state, .{
-        .x = layout.providers_card.x + m.card_pad,
+        .x = content_x,
         .y = layout.providers_update_hint_y,
-        .w = layout.providers_card.w - m.card_pad * 2.0,
+        .w = content_w,
         .h = m.label_h,
-    }, PROVIDERS_UPDATE_HINT, paletteColor(textHint()), theme.scaledUi(12.0), clip);
+    }, PROVIDERS_UPDATE_HINT, paletteColor(textHint()), designUi(CAPTION_FONT), clip);
     drawActionButton(state, layout.providers_recheck, PROVIDERS_RECHECK_LABEL, .secondary, isControlHovered(state, .providers_recheck), clip);
-}
-
-fn drawCategoryNav(state: *runtime.AppState, layout: SettingsLayout) void {
-    const active = @intFromEnum(state.settings_controller.active_category);
-    for (settings_controller.Category.all, 0..) |category, index| {
-        const rect = layout.nav[index];
-        const selected = index == active;
-        const hovered = state.settings_controller.hover_category == @as(u8, @intCast(index));
-        if (selected) {
-            queueRoundedRect(state, rect, paletteColor(selectedSurface()), radiusSm());
-        } else if (hovered) {
-            queueRoundedRect(state, rect, paletteColor(controlHoverSurface()), radiusSm());
-        }
-        queueText(state, .{
-            .x = rect.x + theme.scaledUi(10.0),
-            .y = rect.y + (rect.h - theme.scaledUi(16.0)) * 0.5,
-            .w = rect.w - theme.scaledUi(14.0),
-            .h = theme.scaledUi(16.0),
-        }, category.label(), paletteColor(if (selected or hovered) theme.COLOR_WHITE else textLabel()), theme.scaledUi(13.0), layout.modal);
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -2858,12 +2746,16 @@ const RuntimeRowPlan = struct {
 };
 
 const RuntimeCardPlan = struct {
-    rows: [MAX_RUNTIME_ROWS]RuntimeRowPlan,
-    row_count: usize,
-    add_button: palette.Rect,
-    notice_y: f32,
-    hint_y: f32,
-    height: f32,
+    rows: [MAX_RUNTIME_ROWS]RuntimeRowPlan = undefined,
+    row_count: usize = 0,
+    caption_y: f32 = OFFSCREEN_Y,
+    /// Card holding the connection rows, below the caption.
+    card: palette.Rect = OFFSCREEN,
+    add_button: palette.Rect = OFFSCREEN,
+    notice_y: f32 = OFFSCREEN_Y,
+    explainer_y: f32 = OFFSCREEN_Y,
+    hint_y: f32 = OFFSCREEN_Y,
+    height: f32 = 0.0,
 };
 
 const DetailLine = struct {
@@ -2905,7 +2797,7 @@ fn runtimeRowIsWorkspaceDefault(state: *const runtime.AppState, profile_id: ?[]c
 fn buttonWidth(label: []const u8) f32 {
     // Measured label plus a fixed horizontal pad so short verbs keep a
     // comfortable click target and long ones never clip.
-    return text_measure.textWidth(.ui, theme.scaledUi(13.0), label) + theme.scaledUi(28.0);
+    return text_measure.textWidth(.ui, designUi(CONTROL_FONT), label) + designUi(BUTTON_PAD_X) * 2.0;
 }
 
 /// Lays out one row's buttons left-to-right, wrapping to a new line when the
@@ -3144,35 +3036,48 @@ fn runtimeDetailLineCount(state: *const runtime.AppState, profile_id: ?[]const u
     return buffer.count;
 }
 
+/// Connection row headers are inset from the card edge so their hover fill
+/// reads as a soft pill; header text still lines up with `ROW_PAD_X`.
+const RUNTIME_ROW_INSET: f32 = 6.0;
+const RUNTIME_CARD_PAD_Y: f32 = 6.0;
+/// Space between connection rows; the separating hairline sits mid-gap.
+const RUNTIME_ROW_GAP: f32 = 14.0;
+
 fn planRuntimeCard(state: *const runtime.AppState, x: f32, y: f32, w: f32, m: Metrics) RuntimeCardPlan {
-    var plan: RuntimeCardPlan = undefined;
-    plan.row_count = 0;
+    var plan: RuntimeCardPlan = .{};
+    plan.caption_y = y;
+    const card_y = y + designUi(CAPTION_H + CAPTION_GAP);
+    const row_inset = designUi(RUNTIME_ROW_INSET);
     const inner_x = x + m.card_pad;
     const inner_w = w - m.card_pad * 2.0;
-    // Title, then a one-line explainer before the rows.
-    var cursor_y = y + m.card_pad + m.title_h + m.inner_gap + m.label_h + m.row_gap;
+    const row_gap = designUi(RUNTIME_ROW_GAP);
+    var cursor_y = card_y + designUi(RUNTIME_CARD_PAD_Y);
+    var last_bottom = cursor_y;
     const total_rows = @min(1 + state.runtime_picker_profiles.items.len, MAX_RUNTIME_ROWS);
     for (0..total_rows) |row| {
         const profile_id = runtimeRowProfileId(state, row);
         var row_plan: RuntimeRowPlan = undefined;
         row_plan.expanded = state.runtime_connections.isExpanded(profile_id);
         // Title line plus description line.
-        row_plan.header = .{ .x = inner_x, .y = cursor_y, .w = inner_w, .h = m.row_h + m.label_h };
+        row_plan.header = .{ .x = x + row_inset, .y = cursor_y, .w = w - row_inset * 2.0, .h = m.row_h + m.label_h };
         var next_y = row_plan.header.y + row_plan.header.h + m.inner_gap;
         planRuntimeRowButtons(state, &row_plan, profile_id);
         next_y = packRowButtons(&row_plan, inner_x, next_y, inner_w, m);
         row_plan.detail_y = next_y + m.inner_gap;
         row_plan.detail_line_count = if (row_plan.expanded) runtimeDetailLineCount(state, profile_id) else 0;
         if (row_plan.expanded) next_y = row_plan.detail_y + @as(f32, @floatFromInt(row_plan.detail_line_count)) * m.label_h;
-        row_plan.bottom = next_y;
+        row_plan.bottom = next_y + m.inner_gap;
         plan.rows[plan.row_count] = row_plan;
         plan.row_count += 1;
-        cursor_y = next_y + m.row_gap;
+        last_bottom = row_plan.bottom;
+        cursor_y = row_plan.bottom + row_gap;
     }
-    plan.add_button = .{ .x = inner_x, .y = cursor_y, .w = @min(buttonWidth("Add connection…"), inner_w), .h = m.row_h };
+    plan.card = .{ .x = x, .y = card_y, .w = w, .h = last_bottom + designUi(RUNTIME_CARD_PAD_Y) - card_y };
+    plan.add_button = .{ .x = x, .y = plan.card.y + plan.card.h + m.row_gap, .w = @min(buttonWidth("Add connection…"), w), .h = m.row_h };
     plan.notice_y = plan.add_button.y + m.row_h + m.inner_gap;
-    plan.hint_y = plan.notice_y + m.label_h + m.inner_gap;
-    plan.height = (plan.hint_y + m.label_h + m.card_pad) - y;
+    plan.explainer_y = plan.notice_y + m.label_h;
+    plan.hint_y = plan.explainer_y + m.label_h;
+    plan.height = (plan.hint_y + m.label_h) - y;
     return plan;
 }
 
@@ -3208,26 +3113,26 @@ fn runtimeStatusColor(status: runtime.RuntimePickerStatus) [4]f32 {
 // actions, and readiness details for the expanded row.
 fn drawRuntimeCard(state: *runtime.AppState, layout: SettingsLayout) void {
     const m = metrics();
-    const card = layout.runtimes_card;
-    const clip = layout.body_clip;
     const plan = &layout.runtimes;
-    drawCardTitle(state, card, "Runtimes & connections", clip);
-    queueText(state, .{
-        .x = card.x + m.card_pad,
-        .y = card.y + m.card_pad + m.title_h + m.inner_gap,
-        .w = card.w - m.card_pad * 2.0,
-        .h = m.label_h,
-    }, "Where chats run. Select a row for repository and provider readiness · Local, SSH, Direct / Tailnet, or Connect", paletteColor(textHint()), theme.scaledUi(12.0), clip);
+    const card = plan.card;
+    const clip = layout.body_clip;
+    queueRoleText(state, .{ .x = card.x, .y = plan.caption_y, .w = card.w, .h = designUi(CAPTION_H) }, "Runtimes & connections", paletteColor(textLabel()), designUi(CAPTION_FONT), .ui_medium, clip);
+    queueRoundedRectClipped(state, card, paletteColor(cardSurface()), designUi(CARD_RADIUS), clip);
+    queueBorderClipped(state, card, paletteColor(cardEdge()), designUi(CARD_RADIUS), 1.0, clip);
 
     for (0..plan.row_count) |row| {
         const row_plan = &plan.rows[row];
         const profile_id = runtimeRowProfileId(state, row);
         const header = row_plan.header;
         const header_hovered = isRuntimeActionHovered(state, runtime_connections.encodeRowAction(row, .expand));
+        if (row > 0) {
+            const line_y = header.y - designUi(RUNTIME_ROW_GAP) * 0.5;
+            queueRoundedRectClipped(state, .{ .x = card.x + m.card_pad, .y = line_y, .w = card.w - m.card_pad * 2.0, .h = 1.0 }, paletteColor(rowHairline()), 0.0, clip);
+        }
         if (row_plan.expanded) {
-            queueRoundedRectClipped(state, .{ .x = header.x, .y = header.y, .w = header.w, .h = row_plan.bottom - header.y }, paletteColor(controlHoverSurface()), radiusSm(), clip);
+            queueRoundedRectClipped(state, .{ .x = header.x, .y = header.y, .w = header.w, .h = row_plan.bottom - header.y }, paletteColor(controlHoverSurface()), designUi(CONTROL_RADIUS), clip);
         } else if (header_hovered) {
-            queueRoundedRectClipped(state, header, paletteColor(controlHoverSurface()), radiusSm(), clip);
+            queueRoundedRectClipped(state, header, paletteColor(controlHoverSurface()), designUi(CONTROL_RADIUS), clip);
         }
 
         var title: []const u8 = "Local";
@@ -3276,23 +3181,23 @@ fn drawRuntimeCard(state: *runtime.AppState, layout: SettingsLayout) void {
             }
         }
         const is_default = runtimeRowIsWorkspaceDefault(state, profile_id);
-        const pad_x = theme.scaledUi(10.0);
-        const badge_w = if (badge.len > 0) text_measure.textWidth(.ui, theme.scaledUi(11.5), badge) + theme.scaledUi(16.0) else 0.0;
+        const pad_x = designUi(10.0);
+        const badge_w = if (badge.len > 0) text_measure.textWidth(.ui, designUi(11.5), badge) + designUi(16.0) else 0.0;
         queueText(state, .{
             .x = header.x + pad_x,
-            .y = header.y + (m.row_h - theme.scaledUi(16.0)) * 0.5,
+            .y = header.y + (m.row_h - designUi(16.0)) * 0.5,
             .w = header.w - pad_x * 2.0 - badge_w - m.inner_gap,
-            .h = theme.scaledUi(16.0),
-        }, title, paletteColor(theme.COLOR_WHITE), theme.scaledUi(14.0), clip);
+            .h = designUi(16.0),
+        }, title, paletteColor(theme.COLOR_WHITE), designUi(14.0), clip);
         if (badge.len > 0) {
             const badge_rect: palette.Rect = .{
                 .x = header.x + header.w - pad_x - badge_w,
-                .y = header.y + (m.row_h - theme.scaledUi(22.0)) * 0.5,
+                .y = header.y + (m.row_h - designUi(22.0)) * 0.5,
                 .w = badge_w,
-                .h = theme.scaledUi(22.0),
+                .h = designUi(22.0),
             };
-            queueRoundedRectClipped(state, badge_rect, paletteColor(theme.withAlpha(badge_color, 40)), radiusSm(), clip);
-            queueCenteredText(state, badge_rect, badge, paletteColor(badge_color), theme.scaledUi(11.5), clip);
+            queueRoundedRectClipped(state, badge_rect, paletteColor(theme.withAlpha(badge_color, 40)), designUi(CONTROL_RADIUS), clip);
+            queueCenteredText(state, badge_rect, badge, paletteColor(badge_color), designUi(11.5), clip);
         }
         var desc_buf: [360]u8 = undefined;
         const description_text = if (is_default)
@@ -3304,7 +3209,7 @@ fn drawRuntimeCard(state: *runtime.AppState, layout: SettingsLayout) void {
             .y = header.y + m.row_h,
             .w = header.w - pad_x * 2.0,
             .h = m.label_h,
-        }, description_text, paletteColor(textHint()), theme.scaledUi(12.0), clip);
+        }, description_text, paletteColor(textHint()), designUi(12.0), clip);
 
         for (0..row_plan.button_count) |index| {
             const action_index = runtime_connections.encodeRowAction(row, row_plan.button_actions[index]);
@@ -3326,7 +3231,7 @@ fn drawRuntimeCard(state: *runtime.AppState, layout: SettingsLayout) void {
                     .y = row_plan.detail_y + @as(f32, @floatFromInt(line_index)) * m.label_h,
                     .w = header.w - pad_x * 2.0,
                     .h = m.label_h,
-                }, line.text, paletteColor(color), theme.scaledUi(12.0), clip);
+                }, line.text, paletteColor(color), designUi(12.0), clip);
             }
         }
     }
@@ -3334,258 +3239,14 @@ fn drawRuntimeCard(state: *runtime.AppState, layout: SettingsLayout) void {
     drawActionButton(state, plan.add_button, "Add connection…", .secondary, isRuntimeActionHovered(state, runtime_connections.encodeRowAction(0, .add_connection)), clip);
     const notice = state.runtime_connections.cardNotice();
     if (notice.len > 0) {
-        queueText(state, .{ .x = card.x + m.card_pad, .y = plan.notice_y, .w = card.w - m.card_pad * 2.0, .h = m.label_h }, notice, paletteColor(theme.COLOR_YELLOW), theme.scaledUi(12.0), clip);
+        queueText(state, .{ .x = card.x, .y = plan.notice_y, .w = card.w, .h = m.label_h }, notice, paletteColor(theme.COLOR_YELLOW), designUi(CAPTION_FONT), clip);
     }
-    queueText(state, .{ .x = card.x + m.card_pad, .y = plan.hint_y, .w = card.w - m.card_pad * 2.0, .h = m.label_h }, "Tokens stay in memory only · started chats keep their pinned runtime · defaults apply to new chats in the selected workspace", paletteColor(textHint()), theme.scaledUi(12.0), clip);
+    queueText(state, .{ .x = card.x, .y = plan.explainer_y, .w = card.w, .h = m.label_h }, "Where chats run. Select a row for repository and provider readiness · Local, SSH, Direct / Tailnet, or Connect", paletteColor(textHint()), designUi(CAPTION_FONT), clip);
+    queueText(state, .{ .x = card.x, .y = plan.hint_y, .w = card.w, .h = m.label_h }, "Tokens stay in memory only · started chats keep their pinned runtime · defaults apply to new chats in the selected workspace", paletteColor(textHint()), designUi(CAPTION_FONT), clip);
 }
 
-// Settings groups are unboxed: the section title carries the structure and
-// `drawSectionDivider` separates stacked groups on one page.
-fn drawCard(state: *runtime.AppState, rect: palette.Rect, clip: palette.Rect) void {
-    _ = state;
-    _ = rect;
-    _ = clip;
-}
-
-// Hairline between two stacked groups, centred in the card gap above `card`.
-fn drawSectionDivider(state: *runtime.AppState, card: palette.Rect, clip: palette.Rect) void {
-    const m = metrics();
-    const line: palette.Rect = .{
-        .x = card.x + m.card_pad,
-        .y = card.y - m.card_gap * 0.5,
-        .w = card.w - m.card_pad * 2.0,
-        .h = 1.0,
-    };
-    queueRoundedRectClipped(state, line, paletteColor(controlEdge()), 0.0, clip);
-}
-
-fn drawCardTitle(state: *runtime.AppState, card: palette.Rect, title: []const u8, clip: palette.Rect) void {
-    const m = metrics();
-    queueRoleText(state, .{
-        .x = card.x + m.card_pad,
-        .y = card.y + m.card_pad,
-        .w = card.w - m.card_pad * 2.0,
-        .h = m.title_h,
-    }, title, paletteColor(theme.COLOR_WHITE), theme.scaledUi(14.0), .ui_medium, clip);
-}
-
-fn drawFieldLabel(state: *runtime.AppState, card: palette.Rect, m: Metrics, label: []const u8, clip: palette.Rect) void {
-    queueText(state, .{
-        .x = card.x + m.card_pad,
-        .y = card.y + m.card_pad + m.title_h + m.row_gap,
-        .w = card.w - m.card_pad * 2.0,
-        .h = m.label_h,
-    }, label, paletteColor(fieldLabel()), theme.scaledUi(FIELD_LABEL_FONT_SIZE), clip);
-}
-
-// Appearance theme selector control.
-fn drawThemeDropdown(state: *runtime.AppState, layout: SettingsLayout) void {
-    const rect = layout.theme_dropdown;
-    const hovered = isControlHovered(state, .theme_dropdown);
-    const background = if (state.settings_controller.theme_dropdown_open)
-        controlHoverSurface()
-    else if (hovered)
-        controlHoverSurface()
-    else
-        controlSurface();
-    queueRoundedRectClipped(state, rect, paletteColor(background), radiusSm(), layout.body_clip);
-    queueBorderClipped(state, rect, paletteColor(if (state.settings_controller.theme_dropdown_open) controlOpenEdge() else controlEdge()), radiusSm(), theme.scaledUi(1.0), layout.body_clip);
-
-    const selected = @min(state.settings_controller.draft.theme_choice, state.settingsThemeChoiceCount() - 1);
-    queueText(state, .{
-        .x = rect.x + theme.scaledUi(10.0),
-        .y = rect.y + (rect.h - theme.scaledUi(15.0)) * 0.5,
-        .w = rect.w - theme.scaledUi(38.0),
-        .h = theme.scaledUi(15.0),
-    }, state.settingsThemeChoiceLabel(selected), paletteColor(theme.COLOR_WHITE), theme.scaledUi(13.0), layout.body_clip);
-    const chevron_size = theme.scaledUi(14.0);
-    queueIconText(state, .{
-        .x = rect.x + rect.w - theme.scaledUi(18.0),
-        .y = rect.y + (rect.h - chevron_size) * 0.5,
-        .w = chevron_size,
-        .h = chevron_size,
-    }, if (state.settings_controller.theme_dropdown_open) LU_CHEVRON_UP else LU_CHEVRON_DOWN, paletteColor(textLabel()), chevron_size, layout.body_clip);
-}
-
-// Appearance Default companion selector control.
-fn drawCompanionCharacterDropdown(state: *runtime.AppState, layout: SettingsLayout) void {
-    const rect = layout.companion_character_dropdown;
-    const hovered = isControlHovered(state, .companion_character_dropdown);
-    const background = if (state.settings_controller.companion_character_dropdown_open)
-        controlHoverSurface()
-    else if (hovered)
-        controlHoverSurface()
-    else
-        controlSurface();
-    queueRoundedRectClipped(state, rect, paletteColor(background), radiusSm(), layout.body_clip);
-    queueBorderClipped(state, rect, paletteColor(if (state.settings_controller.companion_character_dropdown_open) controlOpenEdge() else controlEdge()), radiusSm(), theme.scaledUi(1.0), layout.body_clip);
-
-    const selected = companionCharacterIndex(state.settings_controller.draft.companion_character);
-    queueText(state, .{
-        .x = rect.x + theme.scaledUi(10.0),
-        .y = rect.y + (rect.h - theme.scaledUi(15.0)) * 0.5,
-        .w = rect.w - theme.scaledUi(38.0),
-        .h = theme.scaledUi(15.0),
-    }, companionCharacterLabel(selected), paletteColor(theme.COLOR_WHITE), theme.scaledUi(13.0), layout.body_clip);
-    const chevron_size = theme.scaledUi(14.0);
-    queueIconText(state, .{
-        .x = rect.x + rect.w - theme.scaledUi(18.0),
-        .y = rect.y + (rect.h - chevron_size) * 0.5,
-        .w = chevron_size,
-        .h = chevron_size,
-    }, if (state.settings_controller.companion_character_dropdown_open) LU_CHEVRON_UP else LU_CHEVRON_DOWN, paletteColor(textLabel()), chevron_size, layout.body_clip);
-}
-
-// Appearance Default companion selector popup rows.
-fn drawCompanionCharacterDropdownMenu(state: *runtime.AppState, layout: SettingsLayout) void {
-    if (!state.settings_controller.companion_character_dropdown_open) return;
-    const menu = companionCharacterMenuRect(layout);
-    queueRoundedRectClipped(state, menu, paletteColor(menuSurface()), radiusSm(), layout.body_clip);
-    queueBorderClipped(state, menu, paletteColor(controlEdge()), radiusSm(), theme.scaledUi(1.0), layout.body_clip);
-
-    const selected = companionCharacterIndex(state.settings_controller.draft.companion_character);
-    for (0..companionCharacterCount()) |choice_index| {
-        const row = companionCharacterOptionRect(layout, choice_index);
-        const is_selected = choice_index == selected;
-        const hovered = state.settings_controller.companion_character_hover_index == choice_index;
-        if (is_selected or hovered) {
-            const fill = if (is_selected) selectedSurface() else controlHoverSurface();
-            queueRoundedRectClipped(state, row, paletteColor(fill), theme.scaledUi(4.0), layout.body_clip);
-        }
-
-        const dot_size = theme.scaledUi(6.0);
-        const dot_color = if (is_selected) theme.COLOR_WHITE else theme.withAlpha(theme.COLOR_TEXT_MUTED, 60);
-        queueRoundedRectClipped(state, .{
-            .x = row.x + theme.scaledUi(10.0),
-            .y = row.y + (row.h - dot_size) * 0.5,
-            .w = dot_size,
-            .h = dot_size,
-        }, paletteColor(dot_color), dot_size * 0.5, layout.body_clip);
-        queueText(state, .{
-            .x = row.x + theme.scaledUi(25.0),
-            .y = row.y + (row.h - theme.scaledUi(15.0)) * 0.5,
-            .w = row.w - theme.scaledUi(42.0),
-            .h = theme.scaledUi(15.0),
-        }, companionCharacterLabel(choice_index), paletteColor(if (is_selected or hovered) theme.COLOR_WHITE else textLabel()), theme.scaledUi(13.0), layout.body_clip);
-    }
-}
-
-// Appearance UI font family selector control.
-fn drawUiFontFamilyDropdown(state: *runtime.AppState, layout: SettingsLayout) void {
-    const rect = layout.ui_font_family_dropdown;
-    const open = state.settings_controller.ui_font_family_dropdown_open;
-    const hovered = isControlHovered(state, .ui_font_family_dropdown);
-    const background = if (open)
-        controlHoverSurface()
-    else if (hovered)
-        controlHoverSurface()
-    else
-        controlSurface();
-    queueRoundedRectClipped(state, rect, paletteColor(background), radiusSm(), layout.body_clip);
-    queueBorderClipped(state, rect, paletteColor(if (open) controlOpenEdge() else controlEdge()), radiusSm(), theme.scaledUi(1.0), layout.body_clip);
-
-    queueText(state, .{
-        .x = rect.x + theme.scaledUi(10.0),
-        .y = rect.y + (rect.h - theme.scaledUi(15.0)) * 0.5,
-        .w = rect.w - theme.scaledUi(38.0),
-        .h = theme.scaledUi(15.0),
-    }, state.settings_controller.draft.ui_font_family.label(), paletteColor(theme.COLOR_WHITE), theme.scaledUi(13.0), layout.body_clip);
-    const chevron_size = theme.scaledUi(14.0);
-    queueIconText(state, .{
-        .x = rect.x + rect.w - theme.scaledUi(18.0),
-        .y = rect.y + (rect.h - chevron_size) * 0.5,
-        .w = chevron_size,
-        .h = chevron_size,
-    }, if (open) LU_CHEVRON_UP else LU_CHEVRON_DOWN, paletteColor(textLabel()), chevron_size, layout.body_clip);
-}
-
-// Appearance UI font family selector popup rows.
-fn drawUiFontFamilyDropdownMenu(state: *runtime.AppState, layout: SettingsLayout) void {
-    if (!state.settings_controller.ui_font_family_dropdown_open) return;
-    const menu = uiFontFamilyMenuRect(layout);
-    queueRoundedRectClipped(state, menu, paletteColor(menuSurface()), radiusSm(), layout.body_clip);
-    queueBorderClipped(state, menu, paletteColor(controlEdge()), radiusSm(), theme.scaledUi(1.0), layout.body_clip);
-
-    const selected = uiFontFamilyIndex(state.settings_controller.draft.ui_font_family);
-    for (0..uiFontFamilyCount()) |choice_index| {
-        const row = uiFontFamilyOptionRect(layout, choice_index);
-        const is_selected = choice_index == selected;
-        const hovered = state.settings_controller.ui_font_family_hover_index == choice_index;
-        if (is_selected or hovered) {
-            const fill = if (is_selected) selectedSurface() else controlHoverSurface();
-            queueRoundedRectClipped(state, row, paletteColor(fill), theme.scaledUi(4.0), layout.body_clip);
-        }
-
-        const dot_size = theme.scaledUi(6.0);
-        const dot_color = if (is_selected) theme.COLOR_WHITE else theme.withAlpha(theme.COLOR_TEXT_MUTED, 60);
-        queueRoundedRectClipped(state, .{
-            .x = row.x + theme.scaledUi(10.0),
-            .y = row.y + (row.h - dot_size) * 0.5,
-            .w = dot_size,
-            .h = dot_size,
-        }, paletteColor(dot_color), dot_size * 0.5, layout.body_clip);
-        queueText(state, .{
-            .x = row.x + theme.scaledUi(25.0),
-            .y = row.y + (row.h - theme.scaledUi(15.0)) * 0.5,
-            .w = row.w - theme.scaledUi(42.0),
-            .h = theme.scaledUi(15.0),
-        }, uiFontFamilyLabel(choice_index), paletteColor(if (is_selected or hovered) theme.COLOR_WHITE else textLabel()), theme.scaledUi(13.0), layout.body_clip);
-    }
-}
-
-// Appearance theme selector popup rows.
-fn drawThemeDropdownMenu(state: *runtime.AppState, layout: SettingsLayout) void {
-    if (!state.settings_controller.theme_dropdown_open) return;
-    const menu = themeMenuRect(state, layout);
-    queueRoundedRectClipped(state, menu, paletteColor(menuSurface()), radiusSm(), layout.body_clip);
-    queueBorderClipped(state, menu, paletteColor(controlEdge()), radiusSm(), theme.scaledUi(1.0), layout.body_clip);
-
-    for (0..themeMenuVisibleCount(state)) |visible_index| {
-        const choice_index = state.settings_controller.theme_menu_scroll + visible_index;
-        const row = themeOptionRect(state, layout, visible_index);
-        const selected = choice_index == state.settings_controller.draft.theme_choice;
-        const hovered = state.settings_controller.theme_hover_index == choice_index;
-        if (selected or hovered) {
-            const color = if (selected) selectedSurface() else controlHoverSurface();
-            queueRoundedRectClipped(state, row, paletteColor(color), theme.scaledUi(4.0), layout.body_clip);
-        }
-
-        const dot_size = theme.scaledUi(6.0);
-        const dot_color = if (selected) theme.COLOR_WHITE else theme.withAlpha(theme.COLOR_TEXT_MUTED, 60);
-        queueRoundedRectClipped(state, .{
-            .x = row.x + theme.scaledUi(10.0),
-            .y = row.y + (row.h - dot_size) * 0.5,
-            .w = dot_size,
-            .h = dot_size,
-        }, paletteColor(dot_color), dot_size * 0.5, layout.body_clip);
-        queueText(state, .{
-            .x = row.x + theme.scaledUi(25.0),
-            .y = row.y + (row.h - theme.scaledUi(15.0)) * 0.5,
-            .w = row.w - theme.scaledUi(42.0),
-            .h = theme.scaledUi(15.0),
-        }, state.settingsThemeChoiceLabel(choice_index), paletteColor(if (selected or hovered) theme.COLOR_WHITE else textLabel()), theme.scaledUi(13.0), layout.body_clip);
-    }
-
-    const count = state.settingsThemeChoiceCount();
-    const visible_count = themeMenuVisibleCount(state);
-    if (count > visible_count) {
-        const track: palette.Rect = .{
-            .x = menu.x + menu.w - theme.scaledUi(5.0),
-            .y = menu.y + theme.scaledUi(4.0),
-            .w = theme.scaledUi(2.0),
-            .h = menu.h - theme.scaledUi(8.0),
-        };
-        const thumb_h = track.h * @as(f32, @floatFromInt(visible_count)) / @as(f32, @floatFromInt(count));
-        const travel = track.h - thumb_h;
-        const max_scroll = themeMenuMaxScroll(state);
-        const progress = @as(f32, @floatFromInt(state.settings_controller.theme_menu_scroll)) / @as(f32, @floatFromInt(max_scroll));
-        queueRoundedRectClipped(state, track, paletteColor(theme.withAlpha(theme.COLOR_WHITE, 20)), theme.scaledUi(1.0), layout.body_clip);
-        queueRoundedRectClipped(state, .{ .x = track.x, .y = track.y + travel * progress, .w = track.w, .h = thumb_h }, paletteColor(theme.withAlpha(theme.COLOR_WHITE, 100)), theme.scaledUi(1.0), layout.body_clip);
-    }
-}
-
-// Chat title provider/model selector control.
-fn drawChatTitleDropdown(
+// Dropdown button: value on the left, chevron on the right, 1px edge.
+fn drawDropdown(
     state: *runtime.AppState,
     rect: palette.Rect,
     label: []const u8,
@@ -3593,27 +3254,106 @@ fn drawChatTitleDropdown(
     open: bool,
     clip: palette.Rect,
 ) void {
-    const background = if (open)
-        controlHoverSurface()
-    else if (isControlHovered(state, control))
-        controlHoverSurface()
-    else
-        controlSurface();
-    queueRoundedRectClipped(state, rect, paletteColor(background), radiusSm(), clip);
-    queueBorderClipped(state, rect, paletteColor(if (open) controlOpenEdge() else controlEdge()), radiusSm(), theme.scaledUi(1.0), clip);
+    const radius = designUi(CONTROL_RADIUS);
+    const background = if (open or isControlHovered(state, control)) controlHoverSurface() else controlSurface();
+    queueRoundedRectClipped(state, rect, paletteColor(background), radius, clip);
+    queueBorderClipped(state, rect, paletteColor(if (open) controlOpenEdge() else controlEdge()), radius, 1.0, clip);
+    const pad = designUi(CONTROL_PAD_X);
+    const chevron = designUi(CHEVRON_SIZE);
+    const font = designUi(CONTROL_FONT);
     queueText(state, .{
-        .x = rect.x + theme.scaledUi(10.0),
-        .y = rect.y + (rect.h - theme.scaledUi(15.0)) * 0.5,
-        .w = rect.w - theme.scaledUi(38.0),
-        .h = theme.scaledUi(15.0),
-    }, label, paletteColor(theme.COLOR_WHITE), theme.scaledUi(13.0), clip);
-    const chevron_size = theme.scaledUi(14.0);
+        .x = rect.x + pad,
+        .y = rect.y + (rect.h - font * 1.25) * 0.5,
+        .w = @max(rect.w - pad * 2.0 - chevron - designUi(8.0), 0.0),
+        .h = font * 1.25,
+    }, label, paletteColor(textPrimary()), font, clip);
     queueIconText(state, .{
-        .x = rect.x + rect.w - theme.scaledUi(18.0),
-        .y = rect.y + (rect.h - chevron_size) * 0.5,
-        .w = chevron_size,
-        .h = chevron_size,
-    }, if (open) LU_CHEVRON_UP else LU_CHEVRON_DOWN, paletteColor(textLabel()), chevron_size, clip);
+        .x = rect.x + rect.w - pad - chevron,
+        .y = rect.y + (rect.h - chevron) * 0.5,
+        .w = chevron,
+        .h = chevron,
+    }, if (open) LU_CHEVRON_UP else LU_CHEVRON_DOWN, paletteColor(textHint()), chevron, clip);
+}
+
+// Popup surface shared by every settings dropdown menu.
+fn drawMenuFrame(state: *runtime.AppState, menu: palette.Rect, clip: palette.Rect) void {
+    const radius = designUi(CONTROL_RADIUS);
+    // One soft layer lifts the popup off the card beneath it.
+    queueRoundedRectClipped(state, .{ .x = menu.x - 1.0, .y = menu.y + designUi(2.0), .w = menu.w + 2.0, .h = menu.h + designUi(2.0) }, paletteColor(theme.scrim(0.06)), radius + 1.0, clip);
+    queueRoundedRectClipped(state, menu, paletteColor(menuSurface()), radius, clip);
+    queueBorderClipped(state, menu, paletteColor(controlEdge()), radius, 1.0, clip);
+}
+
+// One menu option: soft fill on hover/selection, check mark on the selection.
+fn drawMenuOption(state: *runtime.AppState, row: palette.Rect, label: []const u8, selected: bool, hovered: bool, clip: palette.Rect) void {
+    if (selected or hovered) {
+        queueRoundedRectClipped(state, row, paletteColor(if (hovered) selectedSurface() else controlHoverSurface()), designUi(6.0), clip);
+    }
+    const pad = designUi(8.0);
+    const check = designUi(CHEVRON_SIZE);
+    const font = designUi(CONTROL_FONT);
+    queueText(state, .{
+        .x = row.x + pad,
+        .y = row.y + (row.h - font * 1.25) * 0.5,
+        .w = @max(row.w - pad * 2.0 - check - designUi(6.0), 0.0),
+        .h = font * 1.25,
+    }, label, paletteColor(if (selected or hovered) textPrimary() else textLabel()), font, clip);
+    if (selected) {
+        queueIconText(state, .{
+            .x = row.x + row.w - pad - check,
+            .y = row.y + (row.h - check) * 0.5,
+            .w = check,
+            .h = check,
+        }, LU_CHECK, paletteColor(textPrimary()), check, clip);
+    }
+}
+
+// Thin scroll thumb for menus that show a window of a longer list.
+fn drawMenuScrollThumb(state: *runtime.AppState, menu: palette.Rect, count: usize, visible_count: usize, scroll: usize, clip: palette.Rect) void {
+    if (count <= visible_count) return;
+    const track: palette.Rect = .{
+        .x = menu.x + menu.w - designUi(4.0),
+        .y = menu.y + designUi(6.0),
+        .w = designUi(2.0),
+        .h = menu.h - designUi(12.0),
+    };
+    const thumb_h = track.h * @as(f32, @floatFromInt(visible_count)) / @as(f32, @floatFromInt(count));
+    const travel = track.h - thumb_h;
+    const progress = @as(f32, @floatFromInt(scroll)) / @as(f32, @floatFromInt(count - visible_count));
+    queueRoundedRectClipped(state, .{ .x = track.x, .y = track.y + travel * progress, .w = track.w, .h = thumb_h }, paletteColor(theme.withAlpha(theme.COLOR_TEXT_SUBTLE, 150)), track.w * 0.5, clip);
+}
+
+// Appearance Default companion selector popup rows.
+fn drawCompanionCharacterDropdownMenu(state: *runtime.AppState, layout: SettingsLayout) void {
+    if (!state.settings_controller.companion_character_dropdown_open) return;
+    drawMenuFrame(state, companionCharacterMenuRect(layout), layout.body_clip);
+    const selected = companionCharacterIndex(state.settings_controller.draft.companion_character);
+    for (0..companionCharacterCount()) |choice_index| {
+        drawMenuOption(state, companionCharacterOptionRect(layout, choice_index), companionCharacterLabel(choice_index), choice_index == selected, state.settings_controller.companion_character_hover_index == choice_index, layout.body_clip);
+    }
+}
+
+// Appearance UI font family selector popup rows.
+fn drawUiFontFamilyDropdownMenu(state: *runtime.AppState, layout: SettingsLayout) void {
+    if (!state.settings_controller.ui_font_family_dropdown_open) return;
+    drawMenuFrame(state, uiFontFamilyMenuRect(layout), layout.body_clip);
+    const selected = uiFontFamilyIndex(state.settings_controller.draft.ui_font_family);
+    for (0..uiFontFamilyCount()) |choice_index| {
+        drawMenuOption(state, uiFontFamilyOptionRect(layout, choice_index), uiFontFamilyLabel(choice_index), choice_index == selected, state.settings_controller.ui_font_family_hover_index == choice_index, layout.body_clip);
+    }
+}
+
+// Appearance theme selector popup rows.
+fn drawThemeDropdownMenu(state: *runtime.AppState, layout: SettingsLayout) void {
+    if (!state.settings_controller.theme_dropdown_open) return;
+    const menu = themeMenuRect(state, layout);
+    drawMenuFrame(state, menu, layout.body_clip);
+    const scroll = state.settings_controller.theme_menu_scroll;
+    for (0..themeMenuVisibleCount(state)) |visible_index| {
+        const choice_index = scroll + visible_index;
+        drawMenuOption(state, themeOptionRect(state, layout, visible_index), state.settingsThemeChoiceLabel(choice_index), choice_index == state.settings_controller.draft.theme_choice, state.settings_controller.theme_hover_index == choice_index, layout.body_clip);
+    }
+    drawMenuScrollThumb(state, menu, state.settingsThemeChoiceCount(), themeMenuVisibleCount(state), scroll, layout.body_clip);
 }
 
 // Chat title provider/model popup rows.
@@ -3624,50 +3364,14 @@ fn drawChatTitleDropdownMenu(state: *runtime.AppState, layout: SettingsLayout, p
     const visible_count = if (provider_menu) count else titleModelMenuVisibleCount(state);
     const scroll = if (provider_menu) 0 else state.settings_controller.title_model_menu_scroll;
     const menu = if (provider_menu) titleProviderMenuRect(state, layout) else titleModelMenuRect(state, layout);
-    queueRoundedRectClipped(state, menu, paletteColor(menuSurface()), radiusSm(), layout.body_clip);
-    queueBorderClipped(state, menu, paletteColor(controlEdge()), radiusSm(), theme.scaledUi(1.0), layout.body_clip);
-
+    drawMenuFrame(state, menu, layout.body_clip);
     const selected_index = if (provider_menu) state.settingsChatTitleProviderSelectedIndex() else state.settingsChatTitleModelSelectedIndex() orelse std.math.maxInt(usize);
     for (0..visible_count) |visible_index| {
         const option_index = scroll + visible_index;
-        const row = dropdownOptionRect(menu, visible_index);
-        const selected = option_index == selected_index;
-        const hovered = state.settings_controller.title_menu_hover_index == option_index;
-        if (selected or hovered) {
-            const color = if (selected) selectedSurface() else controlHoverSurface();
-            queueRoundedRectClipped(state, row, paletteColor(color), theme.scaledUi(4.0), layout.body_clip);
-        }
-
-        const dot_size = theme.scaledUi(6.0);
-        const dot_color = if (selected) theme.COLOR_WHITE else theme.withAlpha(theme.COLOR_TEXT_MUTED, 60);
-        queueRoundedRectClipped(state, .{
-            .x = row.x + theme.scaledUi(10.0),
-            .y = row.y + (row.h - dot_size) * 0.5,
-            .w = dot_size,
-            .h = dot_size,
-        }, paletteColor(dot_color), dot_size * 0.5, layout.body_clip);
         const label = if (provider_menu) state.settingsChatTitleProviderLabel(option_index) else state.settingsChatTitleModelLabel(option_index);
-        queueText(state, .{
-            .x = row.x + theme.scaledUi(25.0),
-            .y = row.y + (row.h - theme.scaledUi(15.0)) * 0.5,
-            .w = row.w - theme.scaledUi(42.0),
-            .h = theme.scaledUi(15.0),
-        }, label, paletteColor(if (selected or hovered) theme.COLOR_WHITE else textLabel()), theme.scaledUi(13.0), layout.body_clip);
+        drawMenuOption(state, dropdownOptionRect(menu, visible_index), label, option_index == selected_index, state.settings_controller.title_menu_hover_index == option_index, layout.body_clip);
     }
-
-    if (!provider_menu and count > visible_count) {
-        const track: palette.Rect = .{
-            .x = menu.x + menu.w - theme.scaledUi(5.0),
-            .y = menu.y + theme.scaledUi(4.0),
-            .w = theme.scaledUi(2.0),
-            .h = menu.h - theme.scaledUi(8.0),
-        };
-        const thumb_h = track.h * @as(f32, @floatFromInt(visible_count)) / @as(f32, @floatFromInt(count));
-        const travel = track.h - thumb_h;
-        const progress = @as(f32, @floatFromInt(scroll)) / @as(f32, @floatFromInt(titleModelMenuMaxScroll(state)));
-        queueRoundedRectClipped(state, track, paletteColor(theme.withAlpha(theme.COLOR_WHITE, 20)), theme.scaledUi(1.0), layout.body_clip);
-        queueRoundedRectClipped(state, .{ .x = track.x, .y = track.y + travel * progress, .w = track.w, .h = thumb_h }, paletteColor(theme.withAlpha(theme.COLOR_WHITE, 100)), theme.scaledUi(1.0), layout.body_clip);
-    }
+    if (!provider_menu) drawMenuScrollThumb(state, menu, count, visible_count, scroll, layout.body_clip);
 }
 
 // Renders one new-chat default dropdown menu over the Chat settings card.
@@ -3682,9 +3386,7 @@ fn drawNewChatDropdownMenu(state: *runtime.AppState, layout: SettingsLayout, kin
     const visible_count = if (kind == .model) newChatModelMenuVisibleCount(state) else @min(count, TITLE_MENU_MAX_ROWS);
     const scroll = if (kind == .model) state.settings_controller.new_chat_model_menu_scroll else 0;
     const menu = newChatMenuRect(state, layout, kind);
-    queueRoundedRectClipped(state, menu, paletteColor(menuSurface()), radiusSm(), layout.body_clip);
-    queueBorderClipped(state, menu, paletteColor(controlEdge()), radiusSm(), theme.scaledUi(1.0), layout.body_clip);
-
+    drawMenuFrame(state, menu, layout.body_clip);
     const selected_index = switch (kind) {
         .provider => state.settingsNewChatProviderSelectedIndex(),
         .model => state.settingsNewChatModelSelectedIndex() orelse std.math.maxInt(usize),
@@ -3692,74 +3394,26 @@ fn drawNewChatDropdownMenu(state: *runtime.AppState, layout: SettingsLayout, kin
     };
     for (0..visible_count) |visible_index| {
         const option_index = scroll + visible_index;
-        const row = dropdownOptionRect(menu, visible_index);
-        const selected = option_index == selected_index;
-        const hovered = state.settings_controller.new_chat_menu_hover_index == option_index;
-        if (selected or hovered) queueRoundedRectClipped(state, row, paletteColor(if (selected) selectedSurface() else controlHoverSurface()), theme.scaledUi(4.0), layout.body_clip);
         const label = switch (kind) {
             .provider => state.settingsNewChatProviderLabel(option_index),
             .model => state.settingsNewChatModelLabel(option_index),
             .reasoning => state.settingsNewChatReasoningLabel(option_index),
         };
-        queueText(state, .{
-            .x = row.x + theme.scaledUi(10.0),
-            .y = row.y + (row.h - theme.scaledUi(15.0)) * 0.5,
-            .w = row.w - theme.scaledUi(20.0),
-            .h = theme.scaledUi(15.0),
-        }, label, paletteColor(if (selected or hovered) theme.COLOR_WHITE else textLabel()), theme.scaledUi(13.0), layout.body_clip);
+        drawMenuOption(state, dropdownOptionRect(menu, visible_index), label, option_index == selected_index, state.settings_controller.new_chat_menu_hover_index == option_index, layout.body_clip);
     }
+    if (kind == .model) drawMenuScrollThumb(state, menu, count, visible_count, scroll, layout.body_clip);
 }
 
 fn drawOpenActionDropdownMenu(state: *runtime.AppState, layout: SettingsLayout) void {
     if (!state.settings_controller.open_action_dropdown_open) return;
     const menu = openActionMenuRect(layout);
-    queueRoundedRectClipped(state, menu, paletteColor(menuSurface()), radiusSm(), layout.body_clip);
-    queueBorderClipped(state, menu, paletteColor(controlEdge()), radiusSm(), theme.scaledUi(1.0), layout.body_clip);
+    drawMenuFrame(state, menu, layout.body_clip);
     const selected_index = openActionSelectedIndex(state);
     for (OPEN_CHOICES, 0..) |choice, option_index| {
-        const row = dropdownOptionRect(menu, option_index);
-        const selected = option_index == selected_index;
-        const hovered = state.settings_controller.open_action_hover_index == option_index;
-        if (selected or hovered) {
-            queueRoundedRectClipped(state, row, paletteColor(if (selected) selectedSurface() else controlHoverSurface()), theme.scaledUi(4.0), layout.body_clip);
-        }
-        queueText(state, .{
-            .x = row.x + theme.scaledUi(10.0),
-            .y = row.y + (row.h - theme.scaledUi(15.0)) * 0.5,
-            .w = row.w - theme.scaledUi(20.0),
-            .h = theme.scaledUi(15.0),
-        }, choice.label, paletteColor(if (selected or hovered) theme.COLOR_WHITE else textLabel()), theme.scaledUi(13.0), layout.body_clip);
+        drawMenuOption(state, dropdownOptionRect(menu, option_index), choice.label, option_index == selected_index, state.settings_controller.open_action_hover_index == option_index, layout.body_clip);
     }
 }
 
-fn drawToggleCell(state: *runtime.AppState, rect: palette.Rect, label: []const u8, selected: bool, hovered: bool, clip: palette.Rect) void {
-    const bg = if (selected)
-        selectedSurface()
-    else if (hovered)
-        controlHoverSurface()
-    else
-        controlSurface();
-    queueRoundedRectClipped(state, rect, paletteColor(bg), radiusSm(), clip);
-    // Unselected cells need a visible edge or they read as disabled.
-    const border = if (selected) controlOpenEdge() else controlEdge();
-    queueBorderClipped(state, rect, paletteColor(border), radiusSm(), theme.scaledUi(1.0), clip);
-
-    const dot_size = theme.scaledUi(7.0);
-    const dot_x = rect.x + theme.scaledUi(10.0);
-    const dot_y = rect.y + (rect.h - dot_size) * 0.5;
-    const dot_color = if (selected) theme.COLOR_WHITE else theme.withAlpha(theme.COLOR_TEXT_MUTED, 120);
-    queueRoundedRectClipped(state, .{ .x = dot_x, .y = dot_y, .w = dot_size, .h = dot_size }, paletteColor(dot_color), theme.scaledUi(3.5), clip);
-
-    const text_color = if (selected or hovered) theme.COLOR_WHITE else textLabel();
-    queueText(state, .{
-        .x = rect.x + theme.scaledUi(24.0),
-        .y = rect.y + (rect.h - theme.scaledUi(16.0)) * 0.5,
-        .w = rect.w - theme.scaledUi(28.0),
-        .h = theme.scaledUi(16.0),
-    }, label, paletteColor(text_color), theme.scaledUi(13.0), clip);
-}
-
-// Boolean setting row: label on the left, switch track on the right.
 const ReducedMotionRow = struct {
     part: app_config.ReducedMotion.Part,
     control: Control,
@@ -3787,45 +3441,52 @@ fn toggleReducedMotionPart(motion: *app_config.ReducedMotion, part: app_config.R
     }
 }
 
-fn drawSwitchRow(state: *runtime.AppState, rect: palette.Rect, label: []const u8, on: bool, hovered: bool, clip: palette.Rect) void {
+// Switch row: the row (label drawn by the page chrome) is the hit target;
+// hover lays a soft inset fill, and the pill switch sits at the right edge.
+fn drawSwitchRow(state: *runtime.AppState, rect: palette.Rect, on: bool, hovered: bool, clip: palette.Rect) void {
     if (hovered) {
-        queueRoundedRectClipped(state, rect, paletteColor(controlHoverSurface()), radiusSm(), clip);
+        const inset = designUi(4.0);
+        queueRoundedRectClipped(state, .{ .x = rect.x + inset, .y = rect.y + inset, .w = rect.w - inset * 2.0, .h = rect.h - inset * 2.0 }, paletteColor(controlHoverSurface()), designUi(CONTROL_RADIUS), clip);
     }
-    queueText(state, .{
-        .x = rect.x + theme.scaledUi(10.0),
-        .y = rect.y + (rect.h - theme.scaledUi(16.0)) * 0.5,
-        .w = rect.w - theme.scaledUi(70.0),
-        .h = theme.scaledUi(16.0),
-    }, label, paletteColor(theme.COLOR_WHITE), theme.scaledUi(13.0), clip);
-
-    const track_w = theme.scaledUi(40.0);
-    const track_h = theme.scaledUi(22.0);
+    const track_w = designUi(SWITCH_W);
+    const track_h = designUi(SWITCH_H);
     const track: palette.Rect = .{
-        .x = rect.x + rect.w - theme.scaledUi(10.0) - track_w,
+        .x = rect.x + rect.w - designUi(ROW_PAD_X) - track_w,
         .y = rect.y + (rect.h - track_h) * 0.5,
         .w = track_w,
         .h = track_h,
     };
-    const track_color = if (on) theme.accent() else panelTint(0.10);
-    queueRoundedRectClipped(state, track, paletteColor(track_color), track_h * 0.5, clip);
-    if (!on) {
-        queueBorderClipped(state, track, paletteColor(controlEdge()), track_h * 0.5, theme.scaledUi(1.0), clip);
-    }
+    drawSwitch(state, track, on, hovered, clip);
+}
 
-    const knob_pad = theme.scaledUi(3.0);
-    const knob = track_h - knob_pad * 2.0;
+// Pill switch: dark (text-coloured) track when on, soft neutral when off.
+fn drawSwitch(state: *runtime.AppState, track: palette.Rect, on: bool, hovered: bool, clip: palette.Rect) void {
+    const off_track = inkTint(if (hovered) 0.2 else 0.16);
+    const on_track = if (hovered) theme.mix(strongFill(), cardSurface(), 0.12) else strongFill();
+    queueRoundedRectClipped(state, track, paletteColor(if (on) on_track else off_track), track.h * 0.5, clip);
+    const knob_pad = designUi(SWITCH_KNOB_PAD);
+    const knob = track.h - knob_pad * 2.0;
     const knob_x = if (on) track.x + track.w - knob_pad - knob else track.x + knob_pad;
-    const knob_color = if (on) theme.foregroundOn(theme.accent()) else theme.withAlpha(theme.COLOR_WHITE, 170);
-    queueRoundedRectClipped(state, .{ .x = knob_x, .y = track.y + knob_pad, .w = knob, .h = knob }, paletteColor(knob_color), knob * 0.5, clip);
+    const knob_rect: palette.Rect = .{ .x = knob_x, .y = track.y + knob_pad, .w = knob, .h = knob };
+    // Light palettes keep a white knob either way; on dark ones the knob
+    // contrasts with its track (dark on the light "on" track).
+    const knob_color = if (theme.isLightPalette())
+        theme.COLOR_PANEL
+    else if (on)
+        cardSurface()
+    else
+        inkTint(0.6);
+    queueRoundedRectClipped(state, .{ .x = knob_rect.x, .y = knob_rect.y + designUi(0.8), .w = knob, .h = knob }, paletteColor(theme.scrim(0.12)), knob * 0.5, clip);
+    queueRoundedRectClipped(state, knob_rect, paletteColor(knob_color), knob * 0.5, clip);
 }
 
 fn browserScrollSliderHitRect(row: palette.Rect) palette.Rect {
-    const label_w = @min(theme.scaledUi(142.0), row.w * 0.38);
-    const value_w = @min(theme.scaledUi(58.0), row.w * 0.22);
+    const value_w = designUi(SLIDER_VALUE_W);
+    const track_w = @min(designUi(SLIDER_W), row.w * 0.45);
     return .{
-        .x = row.x + label_w,
+        .x = row.x + row.w - designUi(ROW_PAD_X) - value_w - track_w,
         .y = row.y,
-        .w = @max(row.w - label_w - value_w, 1.0),
+        .w = @max(track_w, 1.0),
         .h = row.h,
     };
 }
@@ -3838,170 +3499,124 @@ fn browserScrollSpeedFromPoint(track: palette.Rect, x: f32) f32 {
     return app_config.MIN_BROWSER_SCROLL_SPEED + steps * app_config.BROWSER_SCROLL_SPEED_STEP;
 }
 
-// Browser settings row: wheel-speed slider with its current multiplier.
+// Browser settings row: right-aligned wheel-speed slider and its multiplier.
 fn drawBrowserScrollSpeedSlider(state: *runtime.AppState, row: palette.Rect, value: f32, hovered: bool, clip: palette.Rect) void {
     const hit = browserScrollSliderHitRect(row);
-    queueText(state, .{
-        .x = row.x + theme.scaledUi(10.0),
-        .y = row.y + (row.h - theme.scaledUi(16.0)) * 0.5,
-        .w = @max(hit.x - row.x - theme.scaledUi(16.0), 1.0),
-        .h = theme.scaledUi(16.0),
-    }, "Wheel speed", paletteColor(theme.COLOR_WHITE), theme.scaledUi(13.0), clip);
-
-    const track_h = theme.scaledUi(6.0);
-    const track: palette.Rect = .{ .x = hit.x, .y = row.y + (row.h - track_h) * 0.5, .w = hit.w, .h = track_h };
+    const knob_size = designUi(16.0);
+    // Inset the track by the knob radius so the knob stays inside the hit.
+    const track_h = designUi(4.0);
+    const track: palette.Rect = .{ .x = hit.x + knob_size * 0.5, .y = row.y + (row.h - track_h) * 0.5, .w = @max(hit.w - knob_size, 1.0), .h = track_h };
     const progress = (theme.clampf(value, app_config.MIN_BROWSER_SCROLL_SPEED, app_config.MAX_BROWSER_SCROLL_SPEED) - app_config.MIN_BROWSER_SCROLL_SPEED) /
         (app_config.MAX_BROWSER_SCROLL_SPEED - app_config.MIN_BROWSER_SCROLL_SPEED);
-    queueRoundedRectClipped(state, track, paletteColor(if (hovered) controlHoverSurface() else controlSurface()), track_h * 0.5, clip);
-    queueRoundedRectClipped(state, .{ .x = track.x, .y = track.y, .w = track.w * progress, .h = track.h }, paletteColor(theme.focusRing()), track_h * 0.5, clip);
+    queueRoundedRectClipped(state, track, paletteColor(inkTint(if (hovered) 0.2 else 0.16)), track_h * 0.5, clip);
+    queueRoundedRectClipped(state, .{ .x = track.x, .y = track.y, .w = track.w * progress, .h = track.h }, paletteColor(strongFill()), track_h * 0.5, clip);
 
-    const knob_size = theme.scaledUi(16.0);
-    const knob_x = track.x + track.w * progress - knob_size * 0.5;
-    queueRoundedRectClipped(state, .{ .x = knob_x, .y = row.y + (row.h - knob_size) * 0.5, .w = knob_size, .h = knob_size }, paletteColor(theme.COLOR_WHITE), knob_size * 0.5, clip);
+    const knob: palette.Rect = .{ .x = track.x + track.w * progress - knob_size * 0.5, .y = row.y + (row.h - knob_size) * 0.5, .w = knob_size, .h = knob_size };
+    queueRoundedRectClipped(state, knob, paletteColor(controlSurface()), knob_size * 0.5, clip);
+    queueBorderClipped(state, knob, paletteColor(if (hovered) controlOpenEdge() else controlEdge()), knob_size * 0.5, 1.0, clip);
 
     var value_buf: [16]u8 = undefined;
     const value_text = std.fmt.bufPrint(&value_buf, "{d:.2}×", .{value}) catch "?×";
-    queueCenteredText(state, .{ .x = hit.x + hit.w + theme.scaledUi(8.0), .y = row.y, .w = theme.scaledUi(50.0), .h = row.h }, value_text, paletteColor(theme.COLOR_WHITE), theme.scaledUi(13.0), clip);
+    const font = designUi(CONTROL_FONT);
+    const value_w = text_measure.textWidth(.ui, font, value_text);
+    const value_right = row.x + row.w - designUi(ROW_PAD_X);
+    queueText(state, .{ .x = value_right - value_w, .y = row.y + (row.h - font * 1.25) * 0.5, .w = value_w + designUi(2.0), .h = font * 1.25 }, value_text, paletteColor(textPrimary()), font, clip);
 }
 
-// Experimental Companion row with semantic active-theme badge copy.
+// Companion row: "Experimental" tag after the chrome-drawn label, switch.
 fn drawCompanionExperimentalRow(state: *runtime.AppState, rect: palette.Rect, on: bool, hovered: bool, clip: palette.Rect) void {
-    drawSwitchRow(state, rect, "Companion", on, hovered, clip);
-    const label_font_size = theme.scaledUi(13.0);
-    const badge_font_size = theme.scaledUi(10.5);
-    const badge_h = theme.scaledUi(19.0);
-    const badge_pad_x = theme.scaledUi(7.0);
-    const label_w = text_measure.textWidth(.ui, label_font_size, "Companion");
+    drawSwitchRow(state, rect, on, hovered, clip);
+    const label_w = text_measure.textWidth(.ui, designUi(ROW_LABEL_FONT), "Companion");
+    const badge_font_size = designUi(11.0);
+    const badge_h = designUi(18.0);
+    const badge_pad_x = designUi(6.0);
     const badge_text_w = text_measure.textWidth(.ui, badge_font_size, "Experimental");
     const badge: palette.Rect = .{
-        .x = rect.x + theme.scaledUi(10.0) + label_w + theme.scaledUi(9.0),
+        .x = rect.x + designUi(ROW_PAD_X) + label_w + designUi(10.0),
         .y = rect.y + (rect.h - badge_h) * 0.5,
         .w = badge_text_w + badge_pad_x * 2.0,
         .h = badge_h,
     };
-    queueRoundedRectClipped(state, badge, paletteColor(controlHoverSurface()), badge_h * 0.5, clip);
-    queueBorderClipped(state, badge, paletteColor(controlEdge()), badge_h * 0.5, theme.scaledUi(1.0), clip);
+    queueBorderClipped(state, badge, paletteColor(controlEdge()), designUi(5.0), 1.0, clip);
     queueCenteredText(state, badge, "Experimental", paletteColor(textLabel()), badge_font_size, clip);
 }
 
-// Two-option exclusive choice rendered as one segmented control.
-fn drawSegmentedPair(
+// Exclusive choice as a segmented control: soft track, raised selection.
+fn drawSegmented(
     state: *runtime.AppState,
-    left: palette.Rect,
-    right: palette.Rect,
-    left_label: []const u8,
-    right_label: []const u8,
-    left_selected: bool,
-    left_hovered: bool,
-    right_hovered: bool,
-    clip: palette.Rect,
-) void {
-    const container: palette.Rect = .{ .x = left.x, .y = left.y, .w = left.w + right.w, .h = left.h };
-    queueRoundedRectClipped(state, container, paletteColor(controlSurface()), radiusSm(), clip);
-    queueBorderClipped(state, container, paletteColor(controlEdge()), radiusSm(), theme.scaledUi(1.0), clip);
-
-    if (left_hovered and !left_selected) {
-        queueRoundedRectClipped(state, left, paletteColor(controlHoverSurface()), radiusSm(), clip);
-    }
-    if (right_hovered and left_selected) {
-        queueRoundedRectClipped(state, right, paletteColor(controlHoverSurface()), radiusSm(), clip);
-    }
-    const selected_rect = if (left_selected) left else right;
-    queueRoundedRectClipped(state, selected_rect, paletteColor(selectedSurface()), radiusSm(), clip);
-    queueBorderClipped(state, selected_rect, paletteColor(controlOpenEdge()), radiusSm(), theme.scaledUi(1.0), clip);
-
-    const left_color = if (left_selected or left_hovered) theme.COLOR_WHITE else textLabel();
-    const right_color = if (!left_selected or right_hovered) theme.COLOR_WHITE else textLabel();
-    queueCenteredText(state, left, left_label, paletteColor(left_color), theme.scaledUi(13.0), clip);
-    queueCenteredText(state, right, right_label, paletteColor(right_color), theme.scaledUi(13.0), clip);
-}
-
-// Three-option exclusive choice rendered as one segmented control.
-fn drawSegmentedTriple(
-    state: *runtime.AppState,
-    first: palette.Rect,
-    second: palette.Rect,
-    third: palette.Rect,
-    labels: [3][]const u8,
+    segments: []const palette.Rect,
+    labels: []const []const u8,
     selected_index: usize,
-    hovered: [3]bool,
+    controls: []const Control,
     clip: palette.Rect,
 ) void {
-    const segments = [3]palette.Rect{ first, second, third };
-    const container: palette.Rect = .{ .x = first.x, .y = first.y, .w = first.w + second.w + third.w, .h = first.h };
-    queueRoundedRectClipped(state, container, paletteColor(controlSurface()), radiusSm(), clip);
-    queueBorderClipped(state, container, paletteColor(controlEdge()), radiusSm(), theme.scaledUi(1.0), clip);
-
-    for (segments, 0..) |segment, index| {
-        if (hovered[index] and index != selected_index) {
-            queueRoundedRectClipped(state, segment, paletteColor(controlHoverSurface()), radiusSm(), clip);
-        }
-    }
-    const selected = segments[@min(selected_index, segments.len - 1)];
-    queueRoundedRectClipped(state, selected, paletteColor(selectedSurface()), radiusSm(), clip);
-    queueBorderClipped(state, selected, paletteColor(controlOpenEdge()), radiusSm(), theme.scaledUi(1.0), clip);
-
-    for (segments, labels, 0..) |segment, label, index| {
-        const color = if (index == selected_index or hovered[index]) theme.COLOR_WHITE else textLabel();
-        queueCenteredText(state, segment, label, paletteColor(color), theme.scaledUi(13.0), clip);
+    if (segments.len == 0) return;
+    const inset = designUi(SEGMENT_INSET);
+    const first = segments[0];
+    const last = segments[segments.len - 1];
+    const track: palette.Rect = .{ .x = first.x - inset, .y = first.y - inset, .w = last.x + last.w - first.x + inset * 2.0, .h = first.h + inset * 2.0 };
+    const radius = designUi(CONTROL_RADIUS);
+    queueRoundedRectClipped(state, track, paletteColor(segmentTrack()), radius, clip);
+    const selected = @min(selected_index, segments.len - 1);
+    const seg_radius = radius - inset;
+    queueRoundedRectClipped(state, segments[selected], paletteColor(segmentRaised()), seg_radius, clip);
+    queueBorderClipped(state, segments[selected], paletteColor(controlEdge()), seg_radius, 1.0, clip);
+    const font = designUi(CONTROL_FONT);
+    for (segments, labels, controls, 0..) |segment, label, control, index| {
+        const is_selected = index == selected;
+        const hovered = isControlHovered(state, control);
+        const color = if (is_selected or hovered) textPrimary() else textLabel();
+        const text_w = @min(text_measure.textWidth(.ui, font, label), segment.w);
+        const rect: palette.Rect = .{ .x = segment.x + (segment.w - text_w) * 0.5, .y = segment.y + (segment.h - font * 1.25) * 0.5, .w = text_w + designUi(2.0), .h = font * 1.25 };
+        queueRoleText(state, rect, label, paletteColor(color), font, if (is_selected) .ui_medium else .ui, clip);
     }
 }
 
 const ButtonStyle = enum { primary, secondary, disabled };
 
 // Push button for immediate actions (update check/install), with a real
-// disabled look so inert states don't read as clickable pills.
+// disabled look so inert states don't read as clickable.
 fn drawActionButton(state: *runtime.AppState, rect: palette.Rect, label: []const u8, style: ButtonStyle, hovered: bool, clip: palette.Rect) void {
-    var button_fill: ?[4]f32 = null;
+    const radius = designUi(CONTROL_RADIUS);
+    var text_color = textPrimary();
     switch (style) {
         .primary => {
-            const accent = theme.accent();
-            const bg = if (hovered) theme.mix(accent, theme.foregroundOn(accent), 0.10) else accent;
-            button_fill = bg;
-            queueRoundedRectClipped(state, rect, paletteColor(bg), radiusSm(), clip);
+            const fill = if (hovered) theme.mix(strongFill(), cardSurface(), 0.14) else strongFill();
+            queueRoundedRectClipped(state, rect, paletteColor(fill), radius, clip);
+            text_color = theme.foregroundOn(fill);
         },
-        // Ghost: hairline only, with the shared soft fill on hover.
         .secondary => {
-            if (hovered) queueRoundedRectClipped(state, rect, paletteColor(controlHoverSurface()), radiusSm(), clip);
-            queueBorderClipped(state, rect, paletteColor(controlEdge()), radiusSm(), theme.scaledUi(1.0), clip);
+            queueRoundedRectClipped(state, rect, paletteColor(if (hovered) controlHoverSurface() else controlSurface()), radius, clip);
+            queueBorderClipped(state, rect, paletteColor(controlEdge()), radius, 1.0, clip);
         },
         .disabled => {
-            queueBorderClipped(state, rect, paletteColor(theme.mix(theme.COLOR_PANEL, controlEdge(), 0.6)), radiusSm(), theme.scaledUi(1.0), clip);
+            queueBorderClipped(state, rect, paletteColor(inkTint(0.08)), radius, 1.0, clip);
+            text_color = textHint();
         },
     }
-    const text_color = if (style == .disabled)
-        textHint()
-    else if (button_fill) |fill|
-        theme.foregroundOn(fill)
-    else
-        theme.COLOR_WHITE;
-    queueCenteredText(state, rect, label, paletteColor(text_color), theme.scaledUi(13.0), clip);
+    queueCenteredText(state, rect, label, paletteColor(text_color), designUi(CONTROL_FONT), clip);
 }
 
 // Thin overlay scrollbar so overflow in the modal body is discoverable.
 fn drawBodyScrollbar(state: *runtime.AppState, layout: SettingsLayout) void {
     if (layout.max_scroll_y <= 0.0) return;
     const track: palette.Rect = .{
-        .x = layout.modal.x + layout.modal.w - theme.scaledUi(7.0),
-        .y = layout.body_clip.y + theme.scaledUi(6.0),
-        .w = theme.scaledUi(3.0),
-        .h = layout.body_clip.h - theme.scaledUi(12.0),
+        .x = layout.body_clip.x + layout.body_clip.w - designUi(8.0),
+        .y = layout.body_clip.y + designUi(4.0),
+        .w = designUi(3.0),
+        .h = layout.body_clip.h - designUi(16.0),
     };
     if (track.h <= 0.0) return;
     const view_ratio = layout.body_clip.h / (layout.body_clip.h + layout.max_scroll_y);
-    const thumb_h = @max(track.h * view_ratio, theme.scaledUi(24.0));
+    const thumb_h = @max(track.h * view_ratio, designUi(24.0));
     const travel = @max(track.h - thumb_h, 0.0);
     const progress = state.settings_controller.scroll_y / layout.max_scroll_y;
-    queueRoundedRect(state, track, paletteColor(theme.withAlpha(theme.COLOR_WHITE, 16)), track.w * 0.5);
-    queueRoundedRect(state, .{ .x = track.x, .y = track.y + travel * progress, .w = track.w, .h = thumb_h }, paletteColor(theme.withAlpha(theme.COLOR_WHITE, 90)), track.w * 0.5);
+    queueRoundedRect(state, .{ .x = track.x, .y = track.y + travel * progress, .w = track.w, .h = thumb_h }, paletteColor(theme.withAlpha(theme.COLOR_TEXT_SUBTLE, 110)), track.w * 0.5);
 }
 
-fn drawStepperRow(
+// Stepper: [−] value [+] in one bordered pill.
+fn drawStepper(
     state: *runtime.AppState,
-    card: palette.Rect,
-    m: Metrics,
-    row_y: f32,
-    label: []const u8,
     value: f32,
     min_value: f32,
     max_value: f32,
@@ -4011,44 +3626,28 @@ fn drawStepperRow(
     inc_rect: palette.Rect,
     clip: palette.Rect,
 ) void {
-    queueText(state, .{
-        .x = card.x + m.card_pad,
-        .y = row_y + (m.row_h - theme.scaledUi(15.0)) * 0.5,
-        .w = card.w * 0.5,
-        .h = theme.scaledUi(15.0),
-    }, label, paletteColor(theme.COLOR_WHITE), theme.scaledUi(13.0), clip);
-
-    const pill_x = dec_rect.x;
-    const pill: palette.Rect = .{ .x = pill_x, .y = row_y, .w = m.stepperW(), .h = m.row_h };
-    queueRoundedRectClipped(state, pill, paletteColor(controlSurface()), radiusSm(), clip);
-    queueBorderClipped(state, pill, paletteColor(controlEdge()), radiusSm(), theme.scaledUi(1.0), clip);
-
-    var value_buf: [8]u8 = undefined;
-    const value_text = std.fmt.bufPrint(&value_buf, "{d:.0}", .{value}) catch "?";
-    const value_rect: palette.Rect = .{ .x = dec_rect.x + m.step_w, .y = row_y, .w = m.value_w, .h = m.row_h };
-    queueRoundedRectClipped(state, .{ .x = dec_rect.x + m.step_w - 0.5, .y = row_y + theme.scaledUi(6.0), .w = 1.0, .h = m.row_h - theme.scaledUi(12.0) }, paletteColor(controlEdge()), 0.0, clip);
-    queueRoundedRectClipped(state, .{ .x = inc_rect.x - 0.5, .y = row_y + theme.scaledUi(6.0), .w = 1.0, .h = m.row_h - theme.scaledUi(12.0) }, paletteColor(controlEdge()), 0.0, clip);
-    queueCenteredText(state, value_rect, value_text, paletteColor(theme.COLOR_WHITE), theme.scaledUi(13.0), clip);
-
+    const pill: palette.Rect = .{ .x = dec_rect.x, .y = dec_rect.y, .w = inc_rect.x + inc_rect.w - dec_rect.x, .h = dec_rect.h };
+    const radius = designUi(CONTROL_RADIUS);
+    queueRoundedRectClipped(state, pill, paletteColor(controlSurface()), radius, clip);
     const at_min = value <= min_value;
     const at_max = value >= max_value;
     drawStepButton(state, dec_rect, LU_MINUS, !at_min, isControlHovered(state, dec_control), clip);
     drawStepButton(state, inc_rect, LU_PLUS, !at_max, isControlHovered(state, inc_control), clip);
+    queueBorderClipped(state, pill, paletteColor(controlEdge()), radius, 1.0, clip);
+
+    var value_buf: [8]u8 = undefined;
+    const value_text = std.fmt.bufPrint(&value_buf, "{d:.0}", .{value}) catch "?";
+    const value_rect: palette.Rect = .{ .x = dec_rect.x + dec_rect.w, .y = pill.y, .w = inc_rect.x - (dec_rect.x + dec_rect.w), .h = pill.h };
+    queueCenteredText(state, value_rect, value_text, paletteColor(textPrimary()), designUi(CONTROL_FONT), clip);
 }
 
 fn drawStepButton(state: *runtime.AppState, rect: palette.Rect, glyph: []const u8, enabled: bool, hovered: bool, clip: palette.Rect) void {
     if (hovered and enabled) {
-        queueRoundedRectClipped(state, rect, paletteColor(controlHoverSurface()), theme.scaledUi(5.0), clip);
+        const inset = designUi(3.0);
+        queueRoundedRectClipped(state, .{ .x = rect.x + inset, .y = rect.y + inset, .w = rect.w - inset * 2.0, .h = rect.h - inset * 2.0 }, paletteColor(controlHoverSurface()), designUi(5.0), clip);
     }
-    const text_color = if (enabled) theme.COLOR_WHITE else textHint();
-    queueCenteredIcon(state, rect, glyph, paletteColor(text_color), theme.scaledUi(13.0), clip);
-}
-
-fn drawIconButton(state: *runtime.AppState, rect: palette.Rect, glyph: []const u8, hovered: bool) void {
-    if (hovered) {
-        queueRoundedRect(state, rect, paletteColor(controlHoverSurface()), radiusSm());
-    }
-    queueCenteredIcon(state, rect, glyph, paletteColor(if (hovered) theme.COLOR_WHITE else textHint()), theme.scaledUi(15.0), rect);
+    const text_color = if (enabled) textLabel() else theme.withAlpha(theme.COLOR_TEXT_SUBTLE, 110);
+    queueCenteredIcon(state, rect, glyph, paletteColor(text_color), designUi(13.0), clip);
 }
 
 /// Lucide glyph centred in `rect` (sizes are pre-optical-bump).
@@ -4061,17 +3660,12 @@ fn queueCenteredIcon(state: *runtime.AppState, rect: palette.Rect, glyph: []cons
     }, glyph, color, size, clip);
 }
 
-fn drawHairline(state: *runtime.AppState, x: f32, y: f32, w: f32) void {
-    if (w <= 0.0) return;
-    queueRoundedRect(state, .{ .x = x, .y = y, .w = w, .h = 1.0 }, paletteColor(controlEdge()), 0.0);
-}
-
 fn queueCenteredText(state: *runtime.AppState, rect: palette.Rect, value: []const u8, color: palette.Color, font_size: f32, clip: ?palette.Rect) void {
-    const estimated_w = @as(f32, @floatFromInt(value.len)) * font_size * 0.52;
+    const text_w = @min(text_measure.textWidth(.ui, font_size, value), rect.w);
     queueText(state, .{
-        .x = rect.x + @max((rect.w - estimated_w) * 0.5, theme.scaledUi(2.0)),
+        .x = rect.x + (rect.w - text_w) * 0.5,
         .y = rect.y + (rect.h - font_size * 1.25) * 0.5,
-        .w = @min(estimated_w + theme.scaledUi(4.0), rect.w),
+        .w = text_w + theme.scaledUi(2.0),
         .h = font_size * 1.25,
     }, value, color, font_size, clip);
 }
@@ -4107,12 +3701,14 @@ fn queueText(state: *runtime.AppState, rect: palette.Rect, value: []const u8, co
         log.warn("failed to retain settings text: {s}", .{@errorName(err)});
         return;
     };
-    state.palette_overlay_batch.fixedText(
+    state.palette_overlay_batch.fixedRoleText(
         state.allocator,
         rect,
         stable_value,
         color,
         font_size,
+        .ui,
+        null,
         clip,
         .{},
         font_size * 0.55,
@@ -4153,12 +3749,14 @@ fn queueWrappedText(state: *runtime.AppState, rect: palette.Rect, value: []const
         log.warn("failed to retain settings text: {s}", .{@errorName(err)});
         return;
     };
-    state.palette_overlay_batch.fixedText(
+    state.palette_overlay_batch.fixedRoleText(
         state.allocator,
         rect,
         stable_value,
         color,
         font_size,
+        .ui,
+        null,
         clip,
         .{},
         font_size * 0.55,
@@ -4352,7 +3950,7 @@ test "default companion dropdown render hits keyboard and live-applies" {
     try std.testing.expect(!state.settings_controller.theme_dropdown_open);
 }
 
-test "UI font family dropdown sits under the font size and live-applies" {
+test "UI font family dropdown sits between theme and font size and live-applies" {
     const allocator = std.testing.allocator;
     defer theme.applyTheme(1.0);
     theme.applyTheme(1.0);
@@ -4363,9 +3961,11 @@ test "UI font family dropdown sits under the font size and live-applies" {
     const width: f32 = 1200.0;
     const height: f32 = 900.0;
     const layout = computeLayout(&state, width, height);
-    try std.testing.expect(layout.ui_font_family_dropdown.y > layout.ui_font_dec.y);
-    try std.testing.expect(layout.reduced_motion.y > layout.ui_font_family_dropdown.y + layout.ui_font_family_dropdown.h);
-    try std.testing.expect(layout.appearance_card.y + layout.appearance_card.h >= layout.companion_toggle.y + layout.companion_toggle.h);
+    try std.testing.expect(layout.ui_font_family_dropdown.y > layout.theme_dropdown.y);
+    try std.testing.expect(layout.ui_font_dec.y > layout.ui_font_family_dropdown.y);
+    try std.testing.expect(layout.reduced_motion.y > layout.ui_font_dec.y + layout.ui_font_dec.h);
+    const last_card = layout.page.groups[layout.page.group_count - 1].card;
+    try std.testing.expect(last_card.y + last_card.h >= layout.companion_toggle.y + layout.companion_toggle.h);
 
     state.palette_modal_hits.clearRetainingCapacity();
     registerHits(&state, width, height, captureSettingsHit);
@@ -4564,7 +4164,7 @@ test "runtimes card registers local row and add-connection hits through settings
     const height: f32 = 900.0;
     state.settings_controller.active_category = .connections;
     const layout = computeLayout(&state, width, height);
-    try std.testing.expect(layout.runtimes_card.h > 0.0);
+    try std.testing.expect(layout.runtimes.card.h > 0.0);
     try std.testing.expect(rectContains(layout.body_clip, layout.runtimes.add_button.x + 1.0, layout.runtimes.add_button.y + 1.0));
     try std.testing.expectEqual(@as(usize, 1), layout.runtimes.row_count);
 
@@ -4587,7 +4187,7 @@ test "runtimes card registers local row and add-connection hits through settings
     try std.testing.expect(saw_add);
 }
 
-test "clicking outside the docked settings column dismisses it" {
+test "clicking outside the settings dialog dismisses it" {
     const allocator = std.testing.allocator;
     defer theme.applyTheme(1.0);
     theme.applyTheme(1.0);
