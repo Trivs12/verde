@@ -2410,10 +2410,10 @@ fn renderApprovalCard(state: *app_state.AppState, rect: palette.Rect, approval: 
     const button_h = theme.scaledUi(36.0);
     const button_w = theme.scaledUi(96.0);
     const gap = theme.scaledUi(12.0);
-    queueRounded(state, rect, paletteColor(theme.COLOR_PANEL_ALT), theme.scaledUi(12.0));
-    queueBorder(state, rect, paletteColor(theme.COLOR_GREEN), theme.scaledUi(12.0), theme.scaledUi(1.0));
-    queueText(state, .{ .x = rect.x + pad, .y = rect.y + theme.scaledUi(12.0), .w = rect.w - pad * 2.0, .h = theme.scaledUi(20.0) }, approval.title, paletteColor(theme.COLOR_WHITE), theme.scaledUi(14.0), rect);
-    queueText(state, .{ .x = rect.x + pad, .y = rect.y + theme.scaledUi(38.0), .w = rect.w - pad * 2.0, .h = @max(rect.h - button_h - pad * 2.0 - theme.scaledUi(42.0), theme.scaledUi(44.0)) }, approval.body, paletteColor(theme.COLOR_TEXT_MUTED), theme.scaledUi(13.0), rect);
+    queueRounded(state, rect, paletteColor(theme.COLOR_PANEL_ALT), transcriptCardRadius());
+    queueBorder(state, rect, paletteColor(theme.borderMuted()), transcriptCardRadius(), theme.scaledUi(1.0));
+    queueRoleLabel(state, .{ .x = rect.x + pad, .y = rect.y + theme.scaledUi(12.0), .w = rect.w - pad * 2.0, .h = theme.scaledUi(20.0) }, approval.title, paletteColor(theme.COLOR_WHITE), theme.scaledUi(14.0), .ui_medium, rect);
+    queueRoleLabel(state, .{ .x = rect.x + pad, .y = rect.y + theme.scaledUi(38.0), .w = rect.w - pad * 2.0, .h = @max(rect.h - button_h - pad * 2.0 - theme.scaledUi(42.0), theme.scaledUi(44.0)) }, approval.body, paletteColor(theme.COLOR_TEXT_MUTED), theme.scaledUi(13.0), .ui, rect);
 
     const deny_rect = palette.Rect{ .x = rect.x + rect.w - pad - button_w * 2.0 - gap, .y = rect.y + rect.h - pad - button_h, .w = button_w, .h = button_h };
     const approve_rect = palette.Rect{ .x = deny_rect.x + button_w + gap, .y = deny_rect.y, .w = button_w, .h = button_h };
@@ -6095,6 +6095,24 @@ fn transcriptBubbleCornerRadius() f32 {
     return theme.scaledUi(14.0);
 }
 
+/// Transcript cards (usage, provider failure, slash-command result, plan,
+/// approval) share the diff card's quiet shell: panel fill, 1px light
+/// border, 12 design px radius.
+const TRANSCRIPT_CARD_RADIUS_CSS: f32 = 12.0;
+
+fn transcriptCardRadius() f32 {
+    return designUi(TRANSCRIPT_CARD_RADIUS_CSS);
+}
+
+fn queueTranscriptCardSurface(state: *app_state.AppState, bubble: palette.Rect, clip: palette.Rect) void {
+    queueRoundedShellClipped(state, bubble, paletteColor(theme.COLOR_PANEL_ALT), paletteColor(theme.COLOR_PANEL_MUTED), transcriptCardRadius(), clip);
+}
+
+/// Neutral disc behind a card's header glyph.
+fn queueTranscriptCardIconDisc(state: *app_state.AppState, rect: palette.Rect, clip: palette.Rect) void {
+    queueRoundedClipped(state, rect, paletteColor(theme.COLOR_PANEL_MUTED), rect.w * 0.5, clip);
+}
+
 /// Rounded fill with a rounded border ring (avoids `rectBorder`, which draws a sharp axis-aligned outline).
 fn queueRoundedShellClipped(
     state: *app_state.AppState,
@@ -6186,14 +6204,7 @@ fn renderProviderFailureActionCard(
     message_index: usize,
 ) void {
     const bubble = snapRect(palette.Rect{ .x = column.x, .y = y, .w = column.w, .h = height });
-    queueRoundedShellClipped(
-        state,
-        bubble,
-        paletteColor(theme.withAlpha(theme.COLOR_YELLOW, 42)),
-        paletteColor(theme.withAlpha(theme.COLOR_YELLOW, 210)),
-        transcriptBubbleCornerRadius(),
-        clip,
-    );
+    queueTranscriptCardSurface(state, bubble, clip);
 
     const pad = theme.scaledUi(16.0);
     var title_buf: [80]u8 = undefined;
@@ -6202,12 +6213,23 @@ fn renderProviderFailureActionCard(
         std.fmt.bufPrint(&title_buf, "{s} usage limit reached", .{utils.providerLabel(provider)}) catch "Usage limit reached"
     else
         std.fmt.bufPrint(&title_buf, "{s} request failed", .{utils.providerLabel(provider)}) catch "Provider request failed";
-    queueChromeLabel(state, .{
+    // A small alert glyph carries the severity; the title stays neutral.
+    const title_row_y = bubble.y + theme.scaledUi(11.0);
+    const title_row_h = theme.scaledUi(20.0);
+    const icon_size = designUi(SYSTEM_NOTICE_ICON_CSS);
+    queueLucideIcon(state, .{
         .x = bubble.x + pad,
-        .y = bubble.y + theme.scaledUi(11.0),
-        .w = bubble.w - pad * 2.0,
-        .h = theme.scaledUi(20.0),
-    }, title, paletteColor(theme.COLOR_YELLOW), theme.scaledUi(13.0), clip);
+        .y = title_row_y + (title_row_h - icon_size) * 0.5,
+        .w = icon_size,
+        .h = icon_size,
+    }, LU_ALERT_CIRCLE, paletteColor(if (is_usage_limit) theme.warning() else theme.danger()), icon_size, clip);
+    const title_x = bubble.x + pad + icon_size + designUi(8.0);
+    queueRoleLabel(state, .{
+        .x = title_x,
+        .y = title_row_y,
+        .w = @max(bubble.x + bubble.w - pad - title_x, theme.scaledUi(20.0)),
+        .h = title_row_h,
+    }, title, paletteColor(theme.COLOR_WHITE), designUi(SYSTEM_NOTICE_TITLE_FONT_CSS), .ui_medium, clip);
 
     const font_size = theme.scaledUi(TRANSCRIPT_MARKDOWN_FONT_SIZE);
     const inner_width = @max(bubble.w - pad * 2.0, theme.scaledUi(80.0));
@@ -6215,12 +6237,12 @@ fn renderProviderFailureActionCard(
     const body = std.mem.trim(u8, utils.providerFailureActionBody(body_raw), "\n\r\t ");
     const line_count = wrappedLineCount(body, chars_per_line);
     const body_height = @as(f32, @floatFromInt(line_count)) * font_size * 1.38;
-    renderWrappedBody(state, .{
+    renderWrappedBodyRole(state, .{
         .x = bubble.x + pad,
         .y = bubble.y + theme.scaledUi(38.0),
         .w = inner_width,
         .h = body_height,
-    }, body, paletteColor(theme.COLOR_WHITE), font_size, clip);
+    }, body, paletteColor(theme.COLOR_TEXT_MUTED), font_size, .prose, clip);
 
     const button = snapRect(palette.Rect{
         .x = bubble.x + pad,
@@ -6237,16 +6259,16 @@ fn renderProviderFailureActionCard(
         state,
         button,
         paletteColor(button_fill),
-        paletteColor(theme.withAlpha(theme.COLOR_GREEN, if (hovered) 230 else 165)),
+        paletteColor(if (hovered) theme.COLOR_TEXT_MUTED else theme.borderMuted()),
         theme.scaledUi(8.0),
         clip,
     );
-    queueFixedTextLine(state, .{
+    queueRoleLabel(state, .{
         .x = button.x + theme.scaledUi(13.0),
         .y = button.y + theme.scaledUi(8.0),
         .w = button.w - theme.scaledUi(26.0),
         .h = theme.scaledUi(18.0),
-    }, "View usage", paletteColor(if (hovered) theme.COLOR_WHITE else theme.COLOR_TEXT_MUTED), theme.scaledUi(13.0), clip);
+    }, "View usage", paletteColor(if (hovered) theme.COLOR_WHITE else theme.COLOR_TEXT_MUTED), theme.scaledUi(13.0), .ui_medium, clip);
     if (intersectClipRect(clip, button)) |visible_button| recordUsageActionHit(visible_button);
 
     const copy_button = snapRect(.{
@@ -6458,8 +6480,7 @@ fn usageSummaryTitle(body_raw: []const u8) []const u8 {
 fn renderUsageSummaryCard(state: *app_state.AppState, column: palette.Rect, y: f32, height: f32, body_raw: []const u8, clip: palette.Rect, message_index: usize) void {
     const data = parseUsageSummary(body_raw);
     const bubble = snapRect(palette.Rect{ .x = column.x, .y = y, .w = column.w, .h = height });
-    const rr = transcriptBubbleCornerRadius();
-    queueRoundedShellClipped(state, bubble, paletteColor(theme.withAlpha(theme.COLOR_PANEL_ALT, 248)), paletteColor(theme.withAlpha(theme.COLOR_GREEN, 150)), rr, clip);
+    queueTranscriptCardSurface(state, bubble, clip);
 
     const pad = theme.scaledUi(16.0);
     const gap = theme.scaledUi(12.0);
@@ -6533,26 +6554,26 @@ fn renderUsageHeader(state: *app_state.AppState, bubble: palette.Rect, y: f32, h
     const icon = theme.scaledUi(30.0);
     const icon_rect = palette.Rect{ .x = bubble.x + pad, .y = y + theme.scaledUi(5.0), .w = icon, .h = icon };
     renderUsageHeaderIcon(state, icon_rect, clip);
-    queueChromeLabel(state, .{ .x = icon_rect.x + icon + theme.scaledUi(11.0), .y = y + theme.scaledUi(3.0), .w = bubble.w - pad * 2.0 - icon - theme.scaledUi(11.0), .h = theme.scaledUi(22.0) }, title, paletteColor(theme.COLOR_WHITE), theme.scaledUi(16.0), clip);
-    queueText(state, .{ .x = icon_rect.x + icon + theme.scaledUi(11.0), .y = y + theme.scaledUi(27.0), .w = bubble.w - pad * 2.0 - icon - theme.scaledUi(11.0), .h = theme.scaledUi(18.0) }, "Rate limits, reset windows, and recent token activity", paletteColor(theme.COLOR_TEXT_MUTED), theme.scaledUi(12.5), clip);
+    queueRoleLabel(state, .{ .x = icon_rect.x + icon + theme.scaledUi(11.0), .y = y + theme.scaledUi(3.0), .w = bubble.w - pad * 2.0 - icon - theme.scaledUi(11.0), .h = theme.scaledUi(22.0) }, title, paletteColor(theme.COLOR_WHITE), theme.scaledUi(16.0), .ui_medium, clip);
+    queueRoleLabel(state, .{ .x = icon_rect.x + icon + theme.scaledUi(11.0), .y = y + theme.scaledUi(27.0), .w = bubble.w - pad * 2.0 - icon - theme.scaledUi(11.0), .h = theme.scaledUi(18.0) }, "Rate limits, reset windows, and recent token activity", paletteColor(theme.COLOR_TEXT_MUTED), theme.scaledUi(12.5), .ui, clip);
     queueRectClipped(state, .{ .x = bubble.x + pad, .y = y + height - 1.0, .w = bubble.w - pad * 2.0, .h = 1.0 }, paletteColor(theme.withAlpha(theme.COLOR_PANEL_MUTED, 190)), clip);
 }
 
-/// Usage card header mark: a Lucide bar chart on a soft green disc.
+/// Usage card header mark: a Lucide bar chart on a neutral disc.
 fn renderUsageHeaderIcon(state: *app_state.AppState, rect: palette.Rect, clip: palette.Rect) void {
-    queueRoundedClipped(state, rect, paletteColor(theme.withAlpha(theme.COLOR_GREEN, 42)), rect.w * 0.5, clip);
+    queueTranscriptCardIconDisc(state, rect, clip);
     const size = theme.scaledUi(17.0);
     queueLucideIcon(state, .{
         .x = rect.x + (rect.w - size) * 0.5,
         .y = rect.y + (rect.h - size) * 0.5,
         .w = size,
         .h = size,
-    }, LU_CHART_BARS, paletteColor(theme.COLOR_GREEN), size, clip);
+    }, LU_CHART_BARS, paletteColor(theme.COLOR_TEXT_MUTED), size, clip);
 }
 
 /// Renders a compact all-caps-style section label inside the usage card.
 fn renderUsageSectionTitle(state: *app_state.AppState, bubble: palette.Rect, y: f32, title: []const u8, clip: palette.Rect) void {
-    queueChromeLabel(state, .{ .x = bubble.x + theme.scaledUi(16.0), .y = y, .w = bubble.w - theme.scaledUi(32.0), .h = theme.scaledUi(18.0) }, title, paletteColor(theme.COLOR_TEXT_MUTED), theme.scaledUi(12.0), clip);
+    queueRoleLabel(state, .{ .x = bubble.x + theme.scaledUi(16.0), .y = y, .w = bubble.w - theme.scaledUi(32.0), .h = theme.scaledUi(18.0) }, title, paletteColor(theme.COLOR_TEXT_MUTED), theme.scaledUi(12.0), .ui_medium, clip);
 }
 
 /// Renders one remaining-limit row with text and a percent-left progress bar.
@@ -6562,10 +6583,10 @@ fn renderUsageLimitRow(state: *app_state.AppState, rect: palette.Rect, row: Usag
     const label_h = theme.scaledUi(19.0);
     const percent_text = std.fmt.allocPrint(state.allocator, "{d}% left", .{percent}) catch "";
     defer if (percent_text.len > 0) state.allocator.free(percent_text);
-    queueFixedTextLine(state, .{ .x = rect.x, .y = rect.y, .w = rect.w * 0.54, .h = label_h }, row.label, paletteColor(theme.COLOR_WHITE), theme.scaledUi(13.0), clip);
-    queueFixedTextLine(state, .{ .x = rect.x + rect.w * 0.56, .y = rect.y, .w = rect.w * 0.18, .h = label_h }, percent_text, paletteColor(usagePercentColor(percent)), theme.scaledUi(13.0), clip);
+    queueRoleLabel(state, .{ .x = rect.x, .y = rect.y, .w = rect.w * 0.54, .h = label_h }, row.label, paletteColor(theme.COLOR_WHITE), theme.scaledUi(13.0), .ui, clip);
+    queueRoleLabel(state, .{ .x = rect.x + rect.w * 0.56, .y = rect.y, .w = rect.w * 0.18, .h = label_h }, percent_text, paletteColor(usagePercentColor(percent)), theme.scaledUi(13.0), .ui, clip);
     if (row.reset.len > 0) {
-        queueFixedTextLine(state, .{ .x = rect.x + rect.w * 0.73, .y = rect.y, .w = rect.w * 0.27, .h = label_h }, row.reset, paletteColor(theme.COLOR_TEXT_MUTED), theme.scaledUi(12.0), clip);
+        queueRoleLabel(state, .{ .x = rect.x + rect.w * 0.73, .y = rect.y, .w = rect.w * 0.27, .h = label_h }, row.reset, paletteColor(theme.COLOR_TEXT_MUTED), theme.scaledUi(12.0), .ui, clip);
     }
     const bar = palette.Rect{ .x = rect.x, .y = rect.y + theme.scaledUi(25.0), .w = rect.w, .h = bar_h };
     queueRoundedClipped(state, bar, paletteColor(theme.withAlpha(theme.COLOR_PANEL_MUTED, 210)), bar_h * 0.5, clip);
@@ -6575,14 +6596,14 @@ fn renderUsageLimitRow(state: *app_state.AppState, rect: palette.Rect, row: Usag
 /// Renders one account-activity metric tile in the usage card.
 fn renderUsageStatTile(state: *app_state.AppState, rect: palette.Rect, row: UsageTextRow, clip: palette.Rect) void {
     queueRoundedClipped(state, rect, paletteColor(theme.withAlpha(theme.COLOR_PANEL_MUTED, 135)), theme.scaledUi(9.0), clip);
-    queueText(state, .{ .x = rect.x + theme.scaledUi(11.0), .y = rect.y + theme.scaledUi(8.0), .w = rect.w - theme.scaledUi(22.0), .h = theme.scaledUi(16.0) }, row.label, paletteColor(theme.COLOR_TEXT_MUTED), theme.scaledUi(11.5), clip);
-    queueFixedTextLine(state, .{ .x = rect.x + theme.scaledUi(11.0), .y = rect.y + theme.scaledUi(28.0), .w = rect.w - theme.scaledUi(22.0), .h = theme.scaledUi(19.0) }, row.value, paletteColor(theme.COLOR_WHITE), theme.scaledUi(13.5), clip);
+    queueRoleLabel(state, .{ .x = rect.x + theme.scaledUi(11.0), .y = rect.y + theme.scaledUi(8.0), .w = rect.w - theme.scaledUi(22.0), .h = theme.scaledUi(16.0) }, row.label, paletteColor(theme.COLOR_TEXT_MUTED), theme.scaledUi(11.5), .ui, clip);
+    queueRoleLabel(state, .{ .x = rect.x + theme.scaledUi(11.0), .y = rect.y + theme.scaledUi(28.0), .w = rect.w - theme.scaledUi(22.0), .h = theme.scaledUi(19.0) }, row.value, paletteColor(theme.COLOR_WHITE), theme.scaledUi(13.5), .ui, clip);
 }
 
 /// Renders one recent daily usage row in the usage card.
 fn renderUsageRecentRow(state: *app_state.AppState, rect: palette.Rect, row: UsageTextRow, clip: palette.Rect) void {
-    queueFixedTextLine(state, .{ .x = rect.x, .y = rect.y, .w = rect.w * 0.42, .h = rect.h }, row.label, paletteColor(theme.COLOR_TEXT_MUTED), theme.scaledUi(12.0), clip);
-    queueFixedTextLine(state, .{ .x = rect.x + rect.w * 0.44, .y = rect.y, .w = rect.w * 0.56, .h = rect.h }, row.value, paletteColor(theme.COLOR_WHITE), theme.scaledUi(12.0), clip);
+    queueRoleLabel(state, .{ .x = rect.x, .y = rect.y, .w = rect.w * 0.42, .h = rect.h }, row.label, paletteColor(theme.COLOR_TEXT_MUTED), theme.scaledUi(12.0), .ui, clip);
+    queueRoleLabel(state, .{ .x = rect.x + rect.w * 0.44, .y = rect.y, .w = rect.w * 0.56, .h = rect.h }, row.value, paletteColor(theme.COLOR_WHITE), theme.scaledUi(12.0), .ui, clip);
 }
 
 fn usagePercentColor(percent_left: i64) [4]f32 {
@@ -6633,14 +6654,7 @@ fn renderSlashCommandResultCard(
     message_index: usize,
 ) void {
     const bubble = snapRect(palette.Rect{ .x = column.x, .y = y, .w = column.w, .h = height });
-    queueRoundedShellClipped(
-        state,
-        bubble,
-        paletteColor(theme.withAlpha(theme.COLOR_PANEL_ALT, 248)),
-        paletteColor(theme.withAlpha(theme.COLOR_GREEN, 135)),
-        transcriptBubbleCornerRadius(),
-        clip,
-    );
+    queueTranscriptCardSurface(state, bubble, clip);
 
     const pad = theme.scaledUi(16.0);
     const header_h = theme.scaledUi(46.0);
@@ -6651,18 +6665,18 @@ fn renderSlashCommandResultCard(
     const pill_w = theme.scaledUi(84.0);
     const title_x = icon_rect.x + icon + theme.scaledUi(11.0);
     const title_w = @max(bubble.w - pad * 2.0 - icon - theme.scaledUi(11.0) - pill_w - theme.scaledUi(10.0), theme.scaledUi(40.0));
-    queueChromeLabel(state, .{
+    queueRoleLabel(state, .{
         .x = title_x,
         .y = bubble.y + pad + theme.scaledUi(1.0),
         .w = title_w,
         .h = theme.scaledUi(22.0),
-    }, author, paletteColor(theme.COLOR_WHITE), theme.scaledUi(15.5), clip);
-    queueText(state, .{
+    }, author, paletteColor(theme.COLOR_WHITE), theme.scaledUi(15.5), .ui_medium, clip);
+    queueRoleLabel(state, .{
         .x = title_x,
         .y = bubble.y + pad + theme.scaledUi(25.0),
         .w = title_w,
         .h = theme.scaledUi(18.0),
-    }, "Slash command output", paletteColor(theme.COLOR_TEXT_MUTED), theme.scaledUi(12.5), clip);
+    }, "Slash command output", paletteColor(theme.COLOR_TEXT_MUTED), theme.scaledUi(12.5), .ui, clip);
 
     const pill = palette.Rect{ .x = bubble.x + bubble.w - pad - pill_w, .y = bubble.y + pad + theme.scaledUi(8.0), .w = pill_w, .h = theme.scaledUi(24.0) };
     queueRoundedClipped(state, pill, paletteColor(theme.withAlpha(theme.COLOR_GREEN, 48)), pill.h * 0.5, clip);
@@ -6687,13 +6701,13 @@ fn renderSlashCommandResultCard(
 
 /// Renders the slash glyph used in completed provider-command result cards.
 fn renderSlashCommandResultIcon(state: *app_state.AppState, rect: palette.Rect, clip: palette.Rect) void {
-    queueRoundedClipped(state, rect, paletteColor(theme.withAlpha(theme.COLOR_GREEN, 42)), rect.w * 0.5, clip);
+    queueTranscriptCardIconDisc(state, rect, clip);
     queueChromeLabel(state, .{
         .x = rect.x,
         .y = rect.y + theme.scaledUi(2.0),
         .w = rect.w,
         .h = rect.h,
-    }, "/", paletteColor(theme.COLOR_GREEN), theme.scaledUi(18.0), clip);
+    }, "/", paletteColor(theme.COLOR_TEXT_MUTED), theme.scaledUi(18.0), clip);
 }
 
 // ----- Diff summary card -----
@@ -6908,8 +6922,8 @@ fn renderTodoCard(
     const border = if (active)
         theme.withAlpha(accent, @intFromFloat(70.0 + pulse * 60.0))
     else
-        theme.borderMuted();
-    queueRoundedShellClipped(state, bubble, paletteColor(theme.withAlpha(theme.COLOR_PANEL_ALT, 235)), paletteColor(border), transcriptBubbleCornerRadius(), clip);
+        theme.COLOR_PANEL_MUTED;
+    queueRoundedShellClipped(state, bubble, paletteColor(theme.COLOR_PANEL_ALT), paletteColor(border), transcriptCardRadius(), clip);
 
     const inner_x = bubble.x + metrics.pad_x;
     const inner_w = bubble.w - metrics.pad_x * 2.0;
@@ -6924,7 +6938,7 @@ fn renderTodoCard(
     else
         std.fmt.bufPrint(&count_buf, "{d} of {d} done", .{ summary.completed, summary.total }) catch "";
     const count_w = chromeLabelWidth(label_font, count_label);
-    queueChromeLabel(state, .{ .x = inner_x, .y = header_y, .w = @max(inner_w - count_w - theme.scaledUi(12.0), theme.scaledUi(40.0)), .h = label_h }, "Plan", paletteColor(theme.COLOR_TEXT_MUTED), label_font, clip);
+    queueRoleLabel(state, .{ .x = inner_x, .y = header_y, .w = @max(inner_w - count_w - theme.scaledUi(12.0), theme.scaledUi(40.0)), .h = label_h }, "Plan", paletteColor(theme.COLOR_TEXT_MUTED), label_font, .ui_medium, clip);
     queueChromeLabel(state, .{ .x = inner_x + inner_w - count_w, .y = header_y, .w = count_w, .h = label_h }, count_label, paletteColor(if (all_done) accent else theme.COLOR_TEXT_MUTED), label_font, clip);
 
     const bar_h = theme.scaledUi(3.0);
@@ -9465,6 +9479,12 @@ fn wrappedLineCount(body: []const u8, chars_per_line: usize) usize {
 }
 
 fn renderWrappedBody(state: *app_state.AppState, rect: palette.Rect, body: []const u8, color: palette.Color, font_size: f32, clip: palette.Rect) void {
+    renderWrappedBodyRole(state, rect, body, color, font_size, null, clip);
+}
+
+/// `renderWrappedBody` in an explicit font role; a null role keeps the
+/// legacy fixed-line path.
+fn renderWrappedBodyRole(state: *app_state.AppState, rect: palette.Rect, body: []const u8, color: palette.Color, font_size: f32, role: ?palette.FontRole, clip: palette.Rect) void {
     if (body.len == 0) return;
     const char_w = font_size * 0.52;
     const line_h = font_size * 1.28;
@@ -9478,7 +9498,7 @@ fn renderWrappedBody(state: *app_state.AppState, rect: palette.Rect, body: []con
         const line_end = i;
         if (line_end == chunk_start) {
             if (y + line_h >= clip.y and y <= clip.y + clip.h) {
-                queueFixedTextLine(state, .{ .x = rect.x, .y = y, .w = rect.w, .h = line_h }, " ", color, font_size, clip);
+                queueWrappedBodyLine(state, role, .{ .x = rect.x, .y = y, .w = rect.w, .h = line_h }, " ", color, font_size, clip);
             }
             y += line_h;
         } else {
@@ -9487,13 +9507,21 @@ fn renderWrappedBody(state: *app_state.AppState, rect: palette.Rect, body: []con
                 const chunk_len = @min(remaining, chars_per_line);
                 const chunk = body[chunk_start .. chunk_start + chunk_len];
                 if (y + line_h >= clip.y and y <= clip.y + clip.h) {
-                    queueFixedTextLine(state, .{ .x = rect.x, .y = y, .w = rect.w, .h = line_h }, chunk, color, font_size, clip);
+                    queueWrappedBodyLine(state, role, .{ .x = rect.x, .y = y, .w = rect.w, .h = line_h }, chunk, color, font_size, clip);
                 }
                 y += line_h;
                 chunk_start += chunk_len;
             }
         }
         line_start = i + 1;
+    }
+}
+
+fn queueWrappedBodyLine(state: *app_state.AppState, role: ?palette.FontRole, rect: palette.Rect, value: []const u8, color: palette.Color, font_size: f32, clip: ?palette.Rect) void {
+    if (role) |font_role| {
+        queueRoleLabel(state, rect, value, color, font_size, font_role, clip);
+    } else {
+        queueFixedTextLine(state, rect, value, color, font_size, clip);
     }
 }
 
@@ -10231,13 +10259,12 @@ fn renderPendingFollowupPin(
     const previous_z = state.palette_overlay_batch.setZIndex(COMPOSER_FOLLOWUP_PIN_Z);
     defer state.palette_overlay_batch.restoreZIndex(previous_z);
 
-    const radius = theme.scaledUi(11.0);
     queuePanel(
         state,
         rect,
-        paletteColor(theme.withAlpha(theme.COLOR_YELLOW, 54)),
-        paletteColor(theme.withAlpha(theme.COLOR_YELLOW, 150)),
-        radius,
+        paletteColor(theme.COLOR_PANEL_ALT),
+        paletteColor(theme.COLOR_PANEL_MUTED),
+        transcriptCardRadius(),
         @max(theme.scaledUi(1.0), 1.0),
     );
 
@@ -10254,20 +10281,20 @@ fn renderPendingFollowupPin(
     const note_w = @as(f32, @floatFromInt(note.len)) * note_font * 0.52;
     const label_room = if (rect.w >= theme.scaledUi(360.0)) inner_w - note_w - theme.scaledUi(10.0) else inner_w;
 
-    queueText(state, .{
+    queueRoleLabel(state, .{
         .x = rect.x + pad_x,
         .y = rect.y + theme.scaledUi(8.0),
         .w = @max(label_room, theme.scaledUi(1.0)),
         .h = label_font + theme.scaledUi(2.0),
-    }, label, paletteColor(theme.raise(theme.COLOR_YELLOW, 0.18)), label_font, rect);
+    }, label, paletteColor(theme.COLOR_TEXT_MUTED), label_font, .ui_medium, rect);
 
     if (rect.w >= theme.scaledUi(360.0)) {
-        queueText(state, .{
+        queueRoleLabel(state, .{
             .x = rect.x + rect.w - pad_x - note_w,
             .y = rect.y + theme.scaledUi(9.0),
             .w = note_w,
             .h = note_font + theme.scaledUi(2.0),
-        }, note, paletteColor(theme.withAlpha(theme.COLOR_TEXT_MUTED, 220)), note_font, rect);
+        }, note, paletteColor(theme.COLOR_TEXT_SUBTLE), note_font, .ui, rect);
     }
 
     // Preview only the first line so the pinned card stays compact; the renderer
@@ -10277,12 +10304,12 @@ fn renderPendingFollowupPin(
     else
         followup.prompt;
     const body_font = theme.scaledUi(14.0);
-    queueText(state, .{
+    queueRoleLabel(state, .{
         .x = rect.x + pad_x,
         .y = rect.y + theme.scaledUi(26.0),
         .w = inner_w,
         .h = @max(rect.h - theme.scaledUi(30.0), body_font),
-    }, prompt, paletteColor(theme.COLOR_WHITE), body_font, rect);
+    }, prompt, paletteColor(theme.COLOR_WHITE), body_font, .ui, rect);
 }
 
 // Vertical nudge from the pill's geometric center to the label text's optical
