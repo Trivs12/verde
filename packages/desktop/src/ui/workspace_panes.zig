@@ -67,6 +67,10 @@ const SCROLLING_EDGE_CONTROL_Z: i32 = 170;
 
 // Font Awesome glyphs bundled in SymbolsNerdFontMono and rendered with Palette's icon role.
 const NF_FA_EXPAND = "\u{F065}";
+// Lucide (ISC) glyphs drawn through the `icon_alt` role.
+const LU_MAXIMIZE = "\u{E113}";
+const LU_MINIMIZE = "\u{E11B}";
+const LU_COLUMNS = "\u{E098}";
 const NF_FA_COMPRESS = "\u{F066}";
 const NF_COD_CHEVRON_DOWN = "\u{EAB4}";
 const NF_COD_CHEVRON_LEFT = "\u{EAB5}";
@@ -3176,14 +3180,7 @@ fn renderZoomControl(
         .w = icon_size,
         .h = icon_size,
     };
-    queueIcon(
-        state,
-        icon_rect,
-        if (maximized) NF_FA_COMPRESS else NF_FA_EXPAND,
-        paletteColor(icon_color),
-        icon_size,
-        pane_rect,
-    );
+    queueLucideIcon(state, icon_rect, if (maximized) LU_MINIMIZE else LU_MAXIMIZE, paletteColor(icon_color), icon_size, pane_rect);
     appendHit(.{ .pane_id = pane_id, .action = .maximize, .rect = control_rect });
 
     if (state.alt_shortcut_hints_visible and state.isCurrentProjectWorkspacePaneFocused(pane_id)) {
@@ -3275,24 +3272,13 @@ fn renderSplitTriggerButton(state: *runtime.AppState, rect: palette.Rect, active
     else
         theme.COLOR_TEXT_SUBTLE;
 
-    const cell = theme.scaledUi(4.0);
-    const gap = theme.scaledUi(2.0);
-    const grid_w = cell * 2.0 + gap;
-    const grid_h = grid_w;
-    const start_x = rect.x + (rect.w - grid_w) * 0.5;
-    const start_y = rect.y + (rect.h - grid_h) * 0.5;
-    var row: usize = 0;
-    while (row < 2) : (row += 1) {
-        var col: usize = 0;
-        while (col < 2) : (col += 1) {
-            queueRect(state, .{
-                .x = start_x + @as(f32, @floatFromInt(col)) * (cell + gap),
-                .y = start_y + @as(f32, @floatFromInt(row)) * (cell + gap),
-                .w = cell,
-                .h = cell,
-            }, paletteColor(icon_color));
-        }
-    }
+    const icon_size = theme.scaledUi(ZOOM_ICON_SIZE_CSS);
+    queueLucideIcon(state, .{
+        .x = rect.x + (rect.w - icon_size) * 0.5,
+        .y = rect.y + (rect.h - icon_size) * 0.5,
+        .w = icon_size,
+        .h = icon_size,
+    }, LU_COLUMNS, paletteColor(icon_color), icon_size, rect);
 }
 
 fn renderSplitMenuOverlay(state: *runtime.AppState, workspace_rect: palette.Rect) void {
@@ -3489,6 +3475,11 @@ fn queueBorder(state: *runtime.AppState, rect: palette.Rect, color: palette.Colo
 
 fn queueText(state: *runtime.AppState, rect: palette.Rect, value: []const u8, color: palette.Color, font_size: f32, clip: palette.Rect) void {
     state.palette_overlay_batch.text(state.allocator, rect, stableText(state, value), color, font_size, clip) catch {};
+}
+
+/// Lucide stroke icon (the `icon_alt` face).
+fn queueLucideIcon(state: *runtime.AppState, rect: palette.Rect, glyph: []const u8, color: palette.Color, font_size: f32, clip: palette.Rect) void {
+    state.palette_overlay_batch.roleText(state.allocator, rect, stableText(state, glyph), color, font_size, .icon_alt, null, clip) catch {};
 }
 
 fn queueIcon(state: *runtime.AppState, rect: palette.Rect, glyph: []const u8, color: palette.Color, font_size: f32, clip: palette.Rect) void {

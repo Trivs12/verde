@@ -1276,7 +1276,11 @@ fn renderPaletteExpandedSidebar(state: *runtime.AppState, rect: palette.Rect) vo
         // No disclosure chevron: the folder row itself toggles, and its
         // indented pane rows show whether it is open.
         tx = x + designUi(SIDEBAR_THREAD_ICON_LEADING_PAD_CSS);
-        if (project_visible) queuePaletteFolderIcon(state, tx, cy, designUi(16.0), designUi(12.0), if (selected or project_hovered) theme.COLOR_WHITE else theme.COLOR_TEXT_SUBTLE, selected);
+        if (project_visible) {
+            const folder_size = designUi(16.0);
+            const folder_color = paletteColor(if (selected or project_hovered) theme.COLOR_WHITE else theme.COLOR_TEXT_SUBTLE);
+            queuePaletteLucideIcon(state, .{ .x = tx, .y = cy - folder_size * 0.5, .w = folder_size, .h = folder_size }, if (effective_collapsed) LU_FOLDER else LU_FOLDER_OPEN, folder_size, folder_color, row_rect);
+        }
         // Folder (16) + 8 gap puts the label on the column the indented pane
         // rows' provider logos share.
         tx += designUi(24.0);
@@ -1317,9 +1321,9 @@ fn renderPaletteExpandedSidebar(state: *runtime.AppState, rect: palette.Rect) vo
             const action_y = y + (row_h - action_w) * 0.5;
             const new_rect: palette.Rect = .{ .x = action_x, .y = action_y, .w = action_w, .h = action_w };
             const more_rect: palette.Rect = .{ .x = action_x + action_w + action_gap, .y = action_y, .w = action_w, .h = action_w };
-            renderPaletteSidebarRowAction(state, new_rect, NF_COD_ADD, state.sidebar_new_thread_hover == project_index, workspace_clip);
+            renderPaletteSidebarRowAction(state, new_rect, LU_PLUS, state.sidebar_new_thread_hover == project_index, workspace_clip);
             addClippedPaletteHit(new_rect, workspace_clip, .new_thread, project_index, 0);
-            renderPaletteSidebarRowAction(state, more_rect, NF_COD_ELLIPSIS, workspace_more_hovered == project_index, workspace_clip);
+            renderPaletteSidebarRowAction(state, more_rect, LU_ELLIPSIS, workspace_more_hovered == project_index, workspace_clip);
             addClippedPaletteHit(more_rect, workspace_clip, .workspace_more, project_index, 0);
         }
         y += row_h + designUi(SIDEBAR_PROJECT_ROW_GAP_CSS);
@@ -1402,8 +1406,8 @@ fn renderPaletteExpandedSidebar(state: *runtime.AppState, rect: palette.Rect) vo
         if (config.new_thread.len > 0) keybinds.formatKeybind(&new_chat_hint_buf, config.new_thread[0]) else ""
     else
         "";
-    renderPaletteRailActionRow(state, .{ .x = x, .y = new_chat_top, .w = rail_w, .h = action_row_h }, NF_COD_EDIT, "New chat", new_chat_hint, new_chat_trigger_hovered, .new_chat_trigger, true);
-    renderPaletteRailActionRow(state, .{ .x = x, .y = search_top, .w = rail_w, .h = action_row_h }, NF_COD_SEARCH, "Search", command_palette.commandPaletteShortcutHint(state), search_trigger_hovered, .command_palette, false);
+    renderPaletteRailActionRow(state, .{ .x = x, .y = new_chat_top, .w = rail_w, .h = action_row_h }, LU_SQUARE_PEN, "New chat", new_chat_hint, new_chat_trigger_hovered, .new_chat_trigger, true);
+    renderPaletteRailActionRow(state, .{ .x = x, .y = search_top, .w = rail_w, .h = action_row_h }, LU_SEARCH, "Search", command_palette.commandPaletteShortcutHint(state), search_trigger_hovered, .command_palette, false);
 }
 
 const SidebarPaneRowsMeasurement = struct {
@@ -1490,9 +1494,9 @@ fn renderPaletteRailActionRow(
     const cy = rect.y + rect.h * 0.5;
     const fg = if (hovered or primary) theme.COLOR_WHITE else theme.COLOR_TEXT_MUTED;
     const icon_font = designUi(16.0);
-    queuePaletteIcon(state, .{
+    queuePaletteLucideIcon(state, .{
         .x = rect.x + designUi(SIDEBAR_THREAD_ICON_LEADING_PAD_CSS),
-        .y = cy - icon_font * 0.55,
+        .y = cy - icon_font * 0.5,
         .w = icon_font,
         .h = icon_font,
     }, icon, icon_font, paletteColor(fg), null);
@@ -1510,15 +1514,48 @@ fn renderPaletteRailActionRow(
         queuePaletteText(state, label_rect, label, paletteColor(fg), label_font, rect);
 
     if (hint.len == 0) return;
-    const hint_font = designUi(12.0);
-    // Measured, not estimated: macOS hints are multi-byte modifier symbols.
-    const hint_w = runtime.paletteUiTextPrefixWidth(hint, hint_font, hint.len);
-    queuePaletteText(state, .{
-        .x = rect.x + rect.w - hint_w - designUi(10.0),
-        .y = @round(cy - hint_font * 0.65),
-        .w = hint_w + theme.scaledUi(6.0),
-        .h = hint_font * 1.3,
-    }, hint, paletteColor(theme.COLOR_TEXT_SUBTLE), hint_font, rect);
+    renderShortcutHint(state, rect.x + rect.w - designUi(10.0), cy, hint, paletteColor(theme.COLOR_TEXT_SUBTLE), rect);
+}
+
+/// Right-aligned shortcut hint ending at `right`. macOS modifier symbols
+/// (⌃⌥⇧⌘, from `keybinds.formatKeybind`) draw as Lucide glyphs so they share
+/// one stroke weight; the key itself stays UI text.
+fn renderShortcutHint(state: *runtime.AppState, right: f32, cy: f32, hint: []const u8, color: palette.Color, clip: palette.Rect) void {
+    const font = designUi(12.0);
+    const glyph = designUi(11.5);
+    const glyph_gap = designUi(1.0);
+    var mods: [4][]const u8 = undefined;
+    var mod_count: usize = 0;
+    var rest = hint;
+    while (rest.len >= 3 and mod_count < mods.len) {
+        const lucide: ?[]const u8 = if (std.mem.startsWith(u8, rest, "\u{2303}"))
+            LU_CONTROL
+        else if (std.mem.startsWith(u8, rest, "\u{2325}"))
+            LU_OPTION
+        else if (std.mem.startsWith(u8, rest, "\u{21E7}"))
+            LU_SHIFT
+        else if (std.mem.startsWith(u8, rest, "\u{2318}"))
+            LU_COMMAND
+        else
+            null;
+        const g = lucide orelse break;
+        mods[mod_count] = g;
+        mod_count += 1;
+        rest = rest[3..];
+    }
+    const key_w = runtime.paletteUiTextPrefixWidth(rest, font, rest.len);
+    const mods_w = @as(f32, @floatFromInt(mod_count)) * (glyph + glyph_gap);
+    var x = right - key_w - mods_w;
+    for (mods[0..mod_count]) |g| {
+        queuePaletteLucideIcon(state, .{ .x = x, .y = cy - glyph * 0.5, .w = glyph, .h = glyph }, g, glyph, color, clip);
+        x += glyph + glyph_gap;
+    }
+    if (rest.len > 0) queuePaletteText(state, .{
+        .x = x,
+        .y = @round(cy - font * 0.65),
+        .w = key_w + theme.scaledUi(4.0),
+        .h = font * 1.3,
+    }, rest, color, font, clip);
 }
 
 /// Pinned "Projects" caption above the workspace tree, with the
@@ -1539,13 +1576,7 @@ fn renderProjectsCaption(state: *runtime.AppState, x: f32, rail_w: f32, band: pa
     const add_rect: palette.Rect = .{ .x = x + rail_w - btn - designUi(4.0), .y = cy - btn * 0.5, .w = btn, .h = btn };
     const hovered = state.transcript_controller.palette_mouse_in_workspace and rectContainsPoint(add_rect, state.transcript_controller.palette_mouse_x, state.transcript_controller.palette_mouse_y);
     if (hovered) queuePaletteRoundedRect(state, add_rect, paletteColor(sidebarTint(SIDEBAR_ICON_HOVER_TINT)), theme.scaledUi(6.0));
-    const icon_font = designUi(13.0);
-    queuePaletteIcon(state, .{
-        .x = add_rect.x + (add_rect.w - icon_font) * 0.5,
-        .y = add_rect.y + (add_rect.h - icon_font) * 0.5,
-        .w = icon_font,
-        .h = icon_font,
-    }, NF_COD_ADD, icon_font, paletteColor(if (hovered) theme.COLOR_WHITE else theme.COLOR_TEXT_SUBTLE), band);
+    queuePaletteLucideIcon(state, add_rect, LU_PLUS, designUi(14.0), paletteColor(if (hovered) theme.COLOR_WHITE else theme.COLOR_TEXT_SUBTLE), band);
     addPaletteHit(add_rect, .add_workspace, 0, 0);
 }
 
@@ -1987,14 +2018,8 @@ fn renderPaletteSidebarToggle(state: *runtime.AppState, rect: palette.Rect, expa
         queuePaletteRoundedRect(state, rect, paletteColor(sidebarTint(SIDEBAR_ICON_HOVER_TINT)), theme.scaledUi(8.0));
     }
     const fg = if (hovered) theme.COLOR_WHITE else theme.COLOR_TEXT_MUTED;
-    const icon_font = theme.scaledUi(17.0);
-    const glyph = if (expanded) NF_COD_LAYOUT_SIDEBAR_LEFT else NF_COD_LAYOUT_SIDEBAR_LEFT_OFF;
-    queuePaletteIcon(state, .{
-        .x = rect.x + (rect.w - icon_font) * 0.5,
-        .y = rect.y + (rect.h - icon_font) * 0.5,
-        .w = icon_font,
-        .h = icon_font,
-    }, glyph, icon_font, paletteColor(fg), null);
+    const glyph = if (expanded) LU_PANEL_LEFT_CLOSE else LU_PANEL_LEFT_OPEN;
+    queuePaletteLucideIcon(state, rect, glyph, designUi(17.0), paletteColor(fg), null);
     addPaletteHit(rect, if (expanded) .collapse else .expand, 0, 0);
 }
 
@@ -2018,13 +2043,7 @@ fn renderPaletteSidebarActionIcon(state: *runtime.AppState, rect: palette.Rect, 
 /// small rounded hit box, quieter than the header's 17px controls.
 fn renderPaletteSidebarRowAction(state: *runtime.AppState, rect: palette.Rect, glyph: []const u8, hovered: bool, clip: ?palette.Rect) void {
     if (hovered) queuePaletteRoundedRect(state, rect, paletteColor(sidebarTint(SIDEBAR_ICON_HOVER_TINT)), theme.scaledUi(6.0));
-    const icon_font = designUi(14.0);
-    queuePaletteIcon(state, .{
-        .x = rect.x + (rect.w - icon_font) * 0.5,
-        .y = rect.y + (rect.h - icon_font) * 0.5,
-        .w = icon_font,
-        .h = icon_font,
-    }, glyph, icon_font, paletteColor(if (hovered) theme.COLOR_WHITE else theme.COLOR_TEXT_SUBTLE), clip);
+    queuePaletteLucideIcon(state, rect, glyph, designUi(15.0), paletteColor(if (hovered) theme.COLOR_WHITE else theme.COLOR_TEXT_SUBTLE), clip);
 }
 
 /// Renders the sidebar settings gear button used by both expanded and collapsed rails.
@@ -2034,13 +2053,7 @@ fn renderPaletteSettingsButton(state: *runtime.AppState, rect: palette.Rect, cli
         queuePaletteRoundedRect(state, rect, paletteColor(sidebarTint(SIDEBAR_ICON_HOVER_TINT)), theme.scaledUi(8.0));
     }
     const fg = if (settings_hover) theme.COLOR_WHITE else theme.COLOR_TEXT_MUTED;
-    const icon_font = theme.scaledUi(17.0);
-    queuePaletteIcon(state, .{
-        .x = rect.x + (rect.w - icon_font) * 0.5,
-        .y = rect.y + (rect.h - icon_font) * 0.5,
-        .w = icon_font,
-        .h = icon_font,
-    }, NF_COD_GEAR, icon_font, paletteColor(fg), clip);
+    queuePaletteLucideIcon(state, rect, LU_SETTINGS, designUi(17.0), paletteColor(fg), clip);
     addPaletteHit(rect, .settings, 0, 0);
 }
 
@@ -2867,6 +2880,21 @@ const NF_COD_CHEVRON_DOWN = "\u{EAB4}";
 const NF_COD_ADD = "\u{EA60}";
 const NF_COD_EDIT = "\u{EA73}";
 const NF_COD_ELLIPSIS = "\u{EA7C}";
+// Lucide (ISC) glyphs drawn through the `icon_alt` role; see
+// `queuePaletteLucideIcon`.
+const LU_SQUARE_PEN = "\u{E172}";
+const LU_SEARCH = "\u{E151}";
+const LU_PLUS = "\u{E13D}";
+const LU_ELLIPSIS = "\u{E0B6}";
+const LU_FOLDER = "\u{E0D7}";
+const LU_FOLDER_OPEN = "\u{E247}";
+const LU_SETTINGS = "\u{E154}";
+const LU_PANEL_LEFT_CLOSE = "\u{E21C}";
+const LU_PANEL_LEFT_OPEN = "\u{E21D}";
+const LU_COMMAND = "\u{E09A}";
+const LU_SHIFT = "\u{E1E4}";
+const LU_OPTION = "\u{E1F8}";
+const LU_CONTROL = "\u{E070}";
 const NF_COD_GEAR = "\u{EB51}";
 const NF_COD_TERMINAL = "\u{EA85}";
 const NF_COD_HISTORY = "\u{EA82}";
@@ -2881,6 +2909,23 @@ const NF_COD_LAYOUT_SIDEBAR_LEFT_OFF = "\u{EC02}";
 
 /// Renders a centered codicon glyph through the icon font. Replaces the
 /// hand-drawn shapes / PNGs we used before.
+/// Lucide stroke icon (the `icon_alt` face), centred in `rect`.
+fn queuePaletteLucideIcon(state: *runtime.AppState, rect: palette.Rect, glyph: []const u8, size: f32, color: palette.Color, clip: ?palette.Rect) void {
+    const stable_value = stablePaletteText(state, glyph) catch return;
+    state.palette_overlay_batch.roleText(
+        state.allocator,
+        snapRect(.{ .x = rect.x + (rect.w - size) * 0.5, .y = rect.y + (rect.h - size) * 0.5, .w = size, .h = size }),
+        stable_value,
+        color,
+        size,
+        .icon_alt,
+        null,
+        clip,
+    ) catch |err| {
+        log.warn("failed to queue sidebar lucide icon: {s}", .{@errorName(err)});
+    };
+}
+
 fn queuePaletteIcon(state: *runtime.AppState, rect: palette.Rect, glyph: []const u8, font_size: f32, color: palette.Color, clip: ?palette.Rect) void {
     const stable_value = stablePaletteText(state, glyph) catch |err| {
         log.warn("failed to retain sidebar icon: {s}", .{@errorName(err)});

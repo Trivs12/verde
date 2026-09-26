@@ -92,6 +92,11 @@ const COMPOSER_TOOLBAR_PILL_PAD_X: f32 = 13.0;
 /// codicon-layers: the directory pill's glyph when the chat runs in an
 /// open workspace root.
 const NF_COD_LAYERS = "\u{EBD2}";
+// Lucide (ISC) glyphs drawn through the `icon_alt` role (pane header).
+const LU_CHEVRON_DOWN = "\u{E06D}";
+const LU_GLOBE = "\u{E0E8}";
+const LU_FOLDER = "\u{E0D7}";
+const LU_EXTERNAL_LINK = "\u{E0B9}";
 /// codicon-device-desktop: the composer runtime-route pill's glyph.
 const NF_COD_DEVICE_DESKTOP = "\u{EA7A}";
 /// Shared max width for the chat content column. The composer card and the
@@ -2901,8 +2906,7 @@ fn renderHeader(state: *app_state.AppState, rect: palette.Rect, right_reserve: f
     const icon_cy = open_main_rect.y + button_h * 0.5;
     const text_color_open = workspaceHeaderIconColor(open_main_hover);
     if (open_folder) {
-        const folder_w = theme.scaledUi(13.0);
-        queueWorkspaceHeaderFolderIcon(state, icon_x + (icon_slot - folder_w) * 0.5, icon_cy, text_color_open);
+        queueLucideIcon(state, .{ .x = icon_x, .y = icon_cy - icon_slot * 0.5, .w = icon_slot, .h = icon_slot }, LU_FOLDER, text_color_open, icon_slot, rect);
     } else if (open_tex) |cached| {
         const scaled = runtime.scaledImageSize(cached.width, cached.height, icon_slot, icon_slot);
         queueTintedImage(state, .{
@@ -2912,12 +2916,12 @@ fn renderHeader(state: *app_state.AppState, rect: palette.Rect, right_reserve: f
             .h = scaled[1],
         }, cached, text_color_open, rect);
     } else {
-        queueIconText(state, .{
+        queueLucideIcon(state, .{
             .x = icon_x,
             .y = open_main_rect.y + (open_main_rect.h - icon_slot) * 0.5,
             .w = icon_slot,
             .h = icon_slot,
-        }, NF_COD_LINK_EXTERNAL, text_color_open, icon_slot, rect);
+        }, LU_EXTERNAL_LINK, text_color_open, icon_slot, rect);
     }
     queueChromeLabel(state, .{
         .x = icon_x + icon_slot + open_icon_gap,
@@ -2926,23 +2930,21 @@ fn renderHeader(state: *app_state.AppState, rect: palette.Rect, right_reserve: f
         .h = open_label_font * 1.36,
     }, open_label, if (can_open) paletteColor(theme.COLOR_WHITE) else text_color_open, open_label_font, rect);
 
-    const chevron_size = theme.scaledUi(12.0);
-    queueIconText(state, .{
+    const chevron_size = theme.scaledUi(14.0);
+    queueLucideIcon(state, .{
         .x = chevron_rect.x + (chevron_rect.w - chevron_size) * 0.5,
         .y = chevron_rect.y + (chevron_rect.h - chevron_size) * 0.5,
         .w = chevron_size,
         .h = chevron_size,
-    }, NF_COD_CHEVRON_DOWN, workspaceHeaderIconColor(chevron_hover), chevron_size, rect);
+    }, LU_CHEVRON_DOWN, workspaceHeaderIconColor(chevron_hover), chevron_size, rect);
 
-    const globe_size = theme.scaledUi(16.0);
-    const browser_cy = browser_rect.y + browser_rect.h * 0.5;
-    globe_icon.queue(
-        state,
-        browser_rect.x + browser_rect.w * 0.5,
-        browser_cy,
-        globe_size,
-        workspaceHeaderIconColor(browser_hover),
-    );
+    const globe_size = theme.scaledUi(18.0);
+    queueLucideIcon(state, .{
+        .x = browser_rect.x + (browser_rect.w - globe_size) * 0.5,
+        .y = browser_rect.y + (browser_rect.h - globe_size) * 0.5,
+        .w = globe_size,
+        .h = globe_size,
+    }, LU_GLOBE, workspaceHeaderIconColor(browser_hover), globe_size, rect);
 
     const pane_focused = if (pane_id) |id| state.isCurrentProjectWorkspacePaneFocused(id) else true;
     if (state.ctrl_shortcut_hints_visible and state.shift_shortcut_hints_visible and pane_focused) {
@@ -10211,6 +10213,11 @@ test "centered label geometry balances button padding" {
     try std.testing.expectEqual(@as(f32, 27.0), label.y);
     try std.testing.expectEqual(@as(f32, 24.0), label.w);
     try std.testing.expectEqual(@as(f32, 14.0), label.h);
+}
+
+/// Lucide stroke icon (the `icon_alt` face).
+fn queueLucideIcon(state: *app_state.AppState, rect: palette.Rect, value: []const u8, color: palette.Color, font_size: f32, clip: ?palette.Rect) void {
+    state.palette_overlay_batch.roleText(state.allocator, rect, stableText(state, value), color, font_size, .icon_alt, null, clip) catch {};
 }
 
 fn queueIconText(state: *app_state.AppState, rect: palette.Rect, value: []const u8, color: palette.Color, font_size: f32, clip: ?palette.Rect) void {
