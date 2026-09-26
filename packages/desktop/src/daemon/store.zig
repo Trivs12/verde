@@ -509,6 +509,19 @@ pub const Store = struct {
             \\select turn_id, status from chat_turns
             \\where status in ('completed', 'failed', 'aborted', 'interrupted');
         ) catch |err| return mapOpenError(err);
+        // Daemon-owned provider telemetry. Kept out of `threads` because GUI
+        // snapshot replacement rewrites thread rows wholesale; a side table
+        // keyed by stable identity survives that and needs no schema bump.
+        conn.execNoArgs(
+            \\create table if not exists thread_context_usage (
+            \\    workspace_id text not null,
+            \\    local_thread_id text not null,
+            \\    used_tokens integer not null,
+            \\    window_tokens integer not null,
+            \\    updated_at_ms integer not null,
+            \\    primary key (workspace_id, local_thread_id)
+            \\);
+        ) catch |err| return mapOpenError(err);
 
         return .{
             .allocator = allocator,
@@ -521,6 +534,25 @@ pub const Store = struct {
     pub fn deinit(self: *Self) void {
         self.conn.close();
         self.allocator.free(self.path);
+    }
+
+    /// Record the latest provider-reported context-window occupancy for one
+    /// thread. Advisory metadata: it does not advance the store revision.
+    pub fn recordThreadContextUsage(
+        self: *Self,
+        workspace_id: []const u8,
+        local_thread_id: []const u8,
+        used_tokens: u64,
+        window_tokens: u64,
+        updated_at_ms: i64,
+    ) StoreError!void {
+        const used = std.math.cast(i64, used_tokens) orelse return error.InvalidParams;
+        const window = std.math.cast(i64, window_tokens) orelse return error.InvalidParams;
+        self.conn.exec(
+            "insert into thread_context_usage (workspace_id, local_thread_id, used_tokens, window_tokens, updated_at_ms) values (?1, ?2, ?3, ?4, ?5) " ++
+                "on conflict(workspace_id, local_thread_id) do update set used_tokens = excluded.used_tokens, window_tokens = excluded.window_tokens, updated_at_ms = excluded.updated_at_ms",
+            .{ workspace_id, local_thread_id, used, window, updated_at_ms },
+        ) catch |err| return mapStoreError(err);
     }
 
     /// Commit the open transaction, optionally applying the test-only fault hook.
@@ -9302,4 +9334,34 @@ test "thread sync replaces durable history atomically and preserves metadata" {
     const row = (try store.conn.row("select body from messages order by sort_index", .{})).?;
     defer row.deinit();
     try std.testing.expectEqualStrings("question", row.text(0));
+}
+
+test "thread context usage upserts per thread and survives snapshot replacement" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const db_path = try testDbPath(&tmp);
+    defer std.testing.allocator.free(db_path);
+    var store = try Store.init(std.testing.allocator, db_path);
+    defer store.deinit();
+
+    var workspace = testWorkspace("ws", "WS");
+    workspace.threads = &.{testThread("a", "A")};
+    const bootstrap = try store.replaceSnapshot(testSnapshotRequest("boot", null, true, testSnapshot(&.{workspace})));
+    const revision_before = try store.storeRevision();
+
+    try store.recordThreadContextUsage("ws", "a", 10_000, 200_000, 1);
+    try store.recordThreadContextUsage("ws", "a", 76_000, 200_000, 2);
+    // Advisory telemetry never advances the durable revision.
+    try std.testing.expectEqual(revision_before, try store.storeRevision());
+
+    // A GUI snapshot rewrites thread rows; the side table keeps the usage.
+    _ = try store.replaceSnapshot(testSnapshotRequest("again", bootstrap.store_revision, false, testSnapshot(&.{workspace})));
+    const row = (try store.conn.row(
+        "select used_tokens, window_tokens, updated_at_ms from thread_context_usage where workspace_id = 'ws' and local_thread_id = 'a'",
+        .{},
+    )).?;
+    defer row.deinit();
+    try std.testing.expectEqual(@as(i64, 76_000), row.int(0));
+    try std.testing.expectEqual(@as(i64, 200_000), row.int(1));
+    try std.testing.expectEqual(@as(i64, 2), row.int(2));
 }

@@ -10306,9 +10306,11 @@ fn loadThreadGetResult(
         \\select t.local_thread_id, t.title, t.archived, t.committed, t.last_activity_at,
         \\       t.provider_thread_id, t.model_ref, t.reasoning_effort, t.reasoning_variant,
         \\       t.fast_mode, t.access_mode, t.provider, t.harness, t.id, t.draft, t.cwd,
-        \\       t.profile_id, t.runtime_id, t.repository_id, t.repository_cwd
+        \\       t.profile_id, t.runtime_id, t.repository_id, t.repository_cwd,
+        \\       u.used_tokens, u.window_tokens
         \\from threads t
         \\join workspaces w on w.id = t.workspace_id
+        \\left join thread_context_usage u on u.workspace_id = w.workspace_id and u.local_thread_id = t.local_thread_id
         \\where w.workspace_id = ?1 and t.local_thread_id = ?2
     ,
         .{ request.workspace_id, request.local_thread_id },
@@ -10346,6 +10348,8 @@ fn loadThreadGetResult(
     const archived = meta.int(2) != 0;
     const committed = meta.int(3) != 0;
     const last_activity_at = meta.nullableInt(4);
+    const context_used_tokens: ?u64 = if (meta.nullableInt(20)) |value| std.math.cast(u64, value) else null;
+    const context_window_tokens: ?u64 = if (meta.nullableInt(21)) |value| std.math.cast(u64, value) else null;
 
     var messages_list: std.ArrayListUnmanaged(store_protocol.Message) = .empty;
     errdefer {
@@ -10390,6 +10394,8 @@ fn loadThreadGetResult(
             .runtime_id = runtime_id,
             .repository_id = repository_id,
             .repository_cwd = repository_cwd,
+            .context_used_tokens = context_used_tokens,
+            .context_window_tokens = context_window_tokens,
             .messages = try messages_list.toOwnedSlice(allocator),
         },
         .store_revision = store_revision,
@@ -11610,7 +11616,13 @@ fn loadSnapshotContents(
                 \\       fast_mode, access_mode, provider, harness, tui_dock_id, draft,
                 \\       draft_image_path, draft_image_mime, draft_image_byte_size, draft_images_json, cwd,
                 \\       profile_id, runtime_id, repository_id, repository_cwd,
-                \\       message_extent
+                \\       message_extent,
+                \\       (select u.used_tokens from thread_context_usage u
+                \\        where u.workspace_id = (select w.workspace_id from workspaces w where w.id = threads.workspace_id)
+                \\          and u.local_thread_id = threads.local_thread_id),
+                \\       (select u.window_tokens from thread_context_usage u
+                \\        where u.workspace_id = (select w.workspace_id from workspaces w where w.id = threads.workspace_id)
+                \\          and u.local_thread_id = threads.local_thread_id)
                 \\from threads
                 \\where workspace_id = ?1
                 \\  and (select archived from workspaces where id = ?1) = 0
@@ -11656,6 +11668,8 @@ fn loadSnapshotContents(
                         .runtime_id = dupeOptionalText(arena, row.nullableText(22)) catch return error.OutOfMemory,
                         .repository_id = dupeOptionalText(arena, row.nullableText(23)) catch return error.OutOfMemory,
                         .repository_cwd = dupeOptionalText(arena, row.nullableText(24)) catch return error.OutOfMemory,
+                        .context_used_tokens = if (row.nullableInt(26)) |value| std.math.cast(u64, value) else null,
+                        .context_window_tokens = if (row.nullableInt(27)) |value| std.math.cast(u64, value) else null,
                         .message_offset = if (include_messages)
                             0
                         else
@@ -15195,6 +15209,7 @@ fn chatSinkEvent(context: ?*anyopaque, event: harness.StreamEvent) void {
         .tool_call => |tool| if (tool.kind == .mcp and tool.status == .completed) {
             if (tool.output) |raw| captureChildToolResult(daemon, turn, raw, 0) catch |err| log.warn("child link capture failed: {s}", .{@errorName(err)});
         },
+        .context_usage => |usage| recordThreadContextUsage(daemon, turn, usage) catch |err| log.warn("context usage record failed: {s}", .{@errorName(err)}),
         else => {},
     };
     const allocator = turn.allocator;
@@ -15250,9 +15265,27 @@ fn chatSinkEvent(context: ?*anyopaque, event: harness.StreamEvent) void {
             defer allocator.free(payload);
             turn.appendEvent(allocator, "diff", payload);
         },
-        // Recorded and forwarded to clients in a follow-up change.
-        .context_usage => {},
+        .context_usage => |usage| {
+            var buffer: [96]u8 = undefined;
+            const payload = std.fmt.bufPrint(&buffer, "{{\"used_tokens\":{d},\"window_tokens\":{d}}}", .{ usage.used_tokens, usage.window_tokens }) catch return;
+            turn.appendEvent(allocator, "context_usage", payload);
+        },
     }
+}
+
+/// Persists the thread's latest context-window occupancy so a restarted GUI
+/// can show it before the next turn. Written outside the turn lock and
+/// independent of transcript commit: providers may report after the answer.
+fn recordThreadContextUsage(daemon: *Daemon, turn: *ChatTurn, usage: harness.ContextUsage) !void {
+    lockDaemon(daemon);
+    const service = daemon.store_service;
+    if (service) |svc| _ = svc.in_flight.fetchAdd(1, .monotonic);
+    daemon.mutex.unlock();
+    const svc = service orelse return;
+    defer _ = svc.in_flight.fetchSub(1, .monotonic);
+    lockStoreService(svc);
+    defer svc.mutex.unlock();
+    try svc.store.recordThreadContextUsage(turn.workspace_id, turn.local_thread_id, usage.used_tokens, usage.window_tokens, nowMs());
 }
 
 fn chatDiffPayloadAlloc(

@@ -230,6 +230,10 @@ pub const PersistedThread = struct {
     repository_id: ?[]const u8 = null,
     /// Runtime-independent path beneath the selected repository root.
     repository_cwd: ?[]const u8 = null,
+    /// Daemon-recorded context-window occupancy (read-only mirror; absent
+    /// in older persisted states).
+    context_used_tokens: ?u64 = null,
+    context_window_tokens: ?u64 = null,
     draft: []const u8 = "",
     draft_image: ?PersistedImageAttachment = null,
     /// Composer attachments past the primary `draft_image`. Additive

@@ -298,6 +298,11 @@ pub const Thread = struct {
     repository_id: ?[]const u8 = null,
     /// Runtime-independent directory beneath the selected repository root.
     repository_cwd: ?[]const u8 = null,
+    /// Daemon-reported context-window occupancy after the thread's latest
+    /// model call (see `provider_types.ContextUsage`). Read-only for clients:
+    /// the daemon ignores these on writes. Null when never reported.
+    context_used_tokens: ?u64 = null,
+    context_window_tokens: ?u64 = null,
     draft: []const u8 = "",
     draft_image: ?Attachment = null,
     draft_images: []const Attachment = &.{},

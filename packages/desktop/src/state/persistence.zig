@@ -28,6 +28,7 @@ const PersistedThread = db_types.PersistedThread;
 const ChatImageAttachment = chat_types.ChatImageAttachment;
 const ChatMessage = chat_types.ChatMessage;
 const ChatThread = chat_types.ChatThread;
+const ContextUsage = chat_types.ContextUsage;
 const Project = project_state.Project;
 const HerdrWorkspaceLink = herdr_types.HerdrWorkspaceLink;
 
@@ -489,6 +490,8 @@ fn threadSnapshotWithBodies(
         ),
         .repository_id = try allocator.dupe(u8, route.repository_id),
         .repository_cwd = try dupeOptionalSlice(allocator, route.relative_cwd),
+        .context_used_tokens = if (thread.persisted_context_usage) |usage| usage.used_tokens else null,
+        .context_window_tokens = if (thread.persisted_context_usage) |usage| usage.window_tokens else null,
         .draft = try allocator.dupe(u8, thread.currentDraft()),
         .draft_image = try imageSnapshot(allocator, thread.draft_image),
         .draft_extra_images = try imageListSnapshot(allocator, thread.draft_extra_images.items),
@@ -824,6 +827,7 @@ pub fn buildThreadFromPersisted(allocator: std.mem.Allocator, persisted_thread: 
         try allocator.dupeZ(u8, cwd)
     else
         null;
+    thread.persisted_context_usage = persistedContextUsage(persisted_thread);
     try restoreThreadRuntimeRoute(allocator, &thread, persisted_thread);
     thread.persisted_message_offset = persisted_thread.message_offset;
     thread.setDraft(persisted_thread.draft);
@@ -853,6 +857,10 @@ pub fn buildThreadFromPersisted(allocator: std.mem.Allocator, persisted_thread: 
     thread.rebuildBackgroundTasksFromMessages(allocator);
     if (thread.last_activity_at == 0 and thread.messages.items.len > 0) thread.touch();
     return thread;
+}
+
+fn persistedContextUsage(persisted_thread: PersistedThread) ?ContextUsage {
+    return ContextUsage.init(persisted_thread.context_used_tokens, persisted_thread.context_window_tokens);
 }
 
 fn restoreThreadRuntimeRoute(
@@ -1288,6 +1296,7 @@ pub fn applyPersistedReusing(
                     try self.allocator.dupeZ(u8, cwd)
                 else
                     null;
+                thread.persisted_context_usage = persistedContextUsage(persisted_thread);
                 try restoreThreadRuntimeRoute(self.allocator, &thread, persisted_thread);
                 thread.persisted_message_offset = persisted_thread.message_offset;
                 thread.setDraft(persisted_thread.draft);
@@ -1626,6 +1635,8 @@ fn cloneThreads(
             .runtime_id = try cloneOptionalSlice(allocator, thread.runtime_id),
             .repository_id = try cloneOptionalSlice(allocator, thread.repository_id),
             .repository_cwd = try cloneOptionalSlice(allocator, thread.repository_cwd),
+            .context_used_tokens = thread.context_used_tokens,
+            .context_window_tokens = thread.context_window_tokens,
             .draft = try allocator.dupe(u8, thread.draft),
             .draft_image = try cloneImage(allocator, thread.draft_image),
             .draft_extra_images = try cloneImageList(allocator, thread.draft_extra_images),
