@@ -184,8 +184,9 @@ Config supports UI and terminal font size, scrolling-pane activation and spacing
 ```
 
 Keybind values can be a string, a string array, `null`, an empty string, or an empty array. `null` and empty values disable that binding.
-`new_thread` and `workspace.split_terminal_horizontal` are unbound by default;
-the sample above shows how to opt back into their former direct shortcuts.
+`new_thread` defaults to `Cmd+N` on macOS and is unbound elsewhere, so `Ctrl+N`
+keeps reaching terminals. `workspace.split_terminal_horizontal` is unbound by
+default; the sample above shows how to rebind both.
 
 `keybinds.prefix` configures tmux-style prefix mode (on by default). `"prefix": false` disables it. By default, prefix mode arms `Ctrl+B` with a default table that covers every built-in command; `"prefix": "Ctrl+A"` changes the chord; the object form (`enabled`, `key`, `defaults`, `bindings`) lets you bind any action name or a `{ "command": "..." }` shell script to `prefix + key`. While armed, a status bar shows the escape hatches and `?` opens the full cheat sheet. See the website keybinds docs for the full table.
 The nested `chat` bindings only run while a GUI chat pane is focused; they do not intercept input in terminal or browser panes. The model picker includes initial provider selection on a fresh thread.

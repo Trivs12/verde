@@ -17,6 +17,7 @@ in your Verde config — see [Remapping](#remapping) below.
 | Combo                       | Action                                |
 | -------------------------- | ------------------------------------- |
 | `Ctrl+Shift+P` / `Cmd+Shift+P` | Command palette                    |
+| `Cmd+N` (macOS only)        | New chat (`keybinds.new_thread`)      |
 | unbound                     | Open Settings (`keybinds.settings`) |
 | `Ctrl+Shift+Space`          | Toggle the experimental Companion (when enabled in Settings) |
 | `Ctrl+Shift+R` / `Cmd+Shift+R`, `F5` | Refresh / reload app            |
@@ -277,9 +278,10 @@ the root of that file for editor autocomplete of every keybind and prefix
 action. Use a string for one shortcut, or a string array for multiple
 shortcuts on the same action:
 
-`Ctrl+T` and `Ctrl+Shift+T` are unbound by default. To opt back into those
-direct shortcuts, use `new_thread` and `workspace.split_terminal_horizontal`
-as shown below. Settings has no default chord; bind `settings` to add one.
+`new_thread` defaults to `Cmd+N` on macOS; elsewhere it is unbound so `Ctrl+N`
+stays with terminals. `Ctrl+Shift+T` is unbound by default. To bind those
+directly, use `new_thread` and `workspace.split_terminal_horizontal` as shown
+below. Settings has no default chord; bind `settings` to add one.
 
 ```json
 {

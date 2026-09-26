@@ -123,8 +123,9 @@ Keybinds are loaded on startup and on app refresh. Use a string for one
 shortcut or a string array for multiple shortcuts. Use `null`, an empty string,
 or an empty array to disable a binding. The `workspace.pane_select` and
 `workspace.active_select` arrays are positional and follow the corresponding
-sidebar lists in displayed order. `new_thread`, `settings`, `workspace.close`, and
-`workspace.close_current` are unbound by default; prefix `x` / `Shift+X` still
+sidebar lists in displayed order. `settings`, `workspace.close`, and
+`workspace.close_current` are unbound by default, and `new_thread` is `Cmd+N` on
+macOS only; prefix `x` / `Shift+X` still
 close a pane or workspace when prefix mode is on. Prefix `x` on an empty
 workspace closes that workspace too. The example above opts `close` back to
 `Alt+X`. See [Keybinds](/docs/keybinds) for the full keybinds reference.
