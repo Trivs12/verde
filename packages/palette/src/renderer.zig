@@ -165,6 +165,7 @@ pub const Renderer = struct {
     mono_symbols_font: ?*c.TTF_Font = null,
     symbols_font: ?*c.TTF_Font = null,
     symbols_alt_font: ?*c.TTF_Font = null,
+    icon_alt_font: ?*c.TTF_Font = null,
     math_font: ?*c.TTF_Font = null,
     emoji_font: ?*c.TTF_Font = null,
     vertex_buffer: ?*c.SDL_GPUBuffer = null,
@@ -494,6 +495,8 @@ pub const Renderer = struct {
         prose_bold_italic: *sdl.Font,
         mono: ?*sdl.Font,
         icon: ?*sdl.Font,
+        /// Null makes `icon_alt` text draw in the base face.
+        icon_alt: ?*sdl.Font = null,
         /// Null aliases `ui_medium` to `ui`.
         ui_medium: ?*sdl.Font = null,
         /// Null aliases `code` to `mono`.
@@ -572,6 +575,7 @@ pub const Renderer = struct {
         self.mono_font = if (role_fonts.mono) |fallback| @ptrCast(fallback) else null;
         self.code_font = if (role_fonts.code) |face| @ptrCast(face) else null;
         self.icon_font = if (role_fonts.icon) |fallback| @ptrCast(fallback) else null;
+        self.icon_alt_font = if (role_fonts.icon_alt) |face| @ptrCast(face) else null;
         self.mono_symbols_font = if (role_fonts.mono_symbols) |fallback| @ptrCast(fallback) else null;
         self.symbols_font = if (role_fonts.symbols) |fallback| @ptrCast(fallback) else null;
         self.symbols_alt_font = if (role_fonts.symbols_alt) |fallback| @ptrCast(fallback) else null;
@@ -1378,6 +1382,7 @@ pub const Renderer = struct {
             .mono => if (self.mono_font) |font_value| return font_value,
             .code => if (self.code_font orelse self.mono_font) |font_value| return font_value,
             .icon => if (self.icon_font) |font_value| return font_value,
+            .icon_alt => if (self.icon_alt_font) |font_value| return font_value,
             .mono_symbols => if (self.mono_symbols_font) |font_value| return font_value,
             .symbols => if (self.symbols_font) |font_value| return font_value,
             .symbols_alt => if (self.symbols_alt_font) |font_value| return font_value,
@@ -2509,6 +2514,7 @@ fn fontRoleCacheValue(font_role: ?draw.FontRole) u8 {
         .emoji => 13,
         .ui_medium => 14,
         .code => 15,
+        .icon_alt => 16,
     } else 0;
 }
 

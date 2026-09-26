@@ -87,6 +87,7 @@ pub const Renderer = struct {
     gpu_mono_symbols_font: ?*palette.sdl.Font = null,
     gpu_symbols_font: ?*palette.sdl.Font = null,
     gpu_symbols_alt_font: ?*palette.sdl.Font = null,
+    gpu_icon_alt_font: ?*palette.sdl.Font = null,
     gpu_math_font: ?*palette.sdl.Font = null,
     gpu_emoji_font: ?*palette.sdl.Font = null,
     gpu_ttf_initialized: bool = false,
@@ -115,6 +116,9 @@ pub const Renderer = struct {
         /// complements `symbols` with numbered dingbats (❶❷..❿ / ➀➁..➓) and
         /// other blocks Symbols 2 omits. Null disables.
         symbols_alt_font_path: ?[:0]const u8 = null,
+        /// Optional secondary icon face (Lucide) for the `icon_alt` role.
+        /// Null disables.
+        icon_alt_font_path: ?[:0]const u8 = null,
         /// Optional system math face for Mathematical Alphanumeric Symbols
         /// such as FX's stylized `𝒇` banner glyph. Null disables.
         math_font_path: ?[:0]const u8 = null,
@@ -158,6 +162,9 @@ pub const Renderer = struct {
         }
         if (options.symbols_alt_font_path) |path| {
             result.gpu_symbols_alt_font = palette.sdl.ttfOpenFont(path, 16.0) catch null;
+        }
+        if (options.icon_alt_font_path) |path| {
+            result.gpu_icon_alt_font = palette.sdl.ttfOpenFont(path, 16.0) catch null;
         }
         if (options.math_font_path) |path| {
             result.gpu_math_font = palette.sdl.ttfOpenFont(path, 16.0) catch null;
@@ -210,6 +217,7 @@ pub const Renderer = struct {
             .mono_symbols = self.gpu_mono_symbols_font,
             .symbols = self.gpu_symbols_font,
             .symbols_alt = self.gpu_symbols_alt_font,
+            .icon_alt = self.gpu_icon_alt_font,
             .math = self.gpu_math_font,
             .emoji = self.gpu_emoji_font,
         };
@@ -254,6 +262,7 @@ pub const Renderer = struct {
         if (self.gpu_emoji_font) |font| palette.sdl.ttfCloseFont(font);
         if (self.gpu_math_font) |font| palette.sdl.ttfCloseFont(font);
         if (self.gpu_symbols_alt_font) |font| palette.sdl.ttfCloseFont(font);
+        if (self.gpu_icon_alt_font) |font| palette.sdl.ttfCloseFont(font);
         if (self.gpu_symbols_font) |font| palette.sdl.ttfCloseFont(font);
         if (self.gpu_mono_symbols_font) |font| palette.sdl.ttfCloseFont(font);
         if (self.gpu_icon_font) |font| palette.sdl.ttfCloseFont(font);

@@ -146,6 +146,10 @@ const PALETTE_GPU_EMOJI_FONT_PATHS = [_][:0]const u8{
     "src/assets/fonts/NotoEmoji-Regular.ttf",
     "packages/desktop/src/assets/fonts/NotoEmoji-Regular.ttf",
 };
+const PALETTE_GPU_ICON_ALT_FONT_PATHS = [_][:0]const u8{
+    "src/assets/fonts/Lucide.ttf",
+    "packages/desktop/src/assets/fonts/Lucide.ttf",
+};
 const PALETTE_GPU_SYMBOLS_ALT_FONT_PATHS = [_][:0]const u8{
     "src/assets/fonts/NotoSansSymbols-Regular.ttf",
     "packages/desktop/src/assets/fonts/NotoSansSymbols-Regular.ttf",
@@ -359,6 +363,16 @@ fn mainInner(init: std.process.Init) !void {
         &PALETTE_GPU_SYMBOLS_ALT_FONT_PATHS,
     );
     defer allocator.free(palette_gpu_symbols_alt_font_path);
+    // Lucide (ISC) stroke icons for the `icon_alt` role: the redesigned
+    // sidebar and pane chrome draw their icons from it.
+    const palette_gpu_icon_alt_font_path = try paletteGpuFontPath(
+        allocator,
+        storage.pref_path,
+        "Lucide.ttf",
+        @embedFile("assets/fonts/Lucide.ttf")[0..],
+        &PALETTE_GPU_ICON_ALT_FONT_PATHS,
+    );
+    defer allocator.free(palette_gpu_icon_alt_font_path);
     const palette_gpu_math_font_path = try systemMathFontPath(allocator);
     defer if (palette_gpu_math_font_path) |path| allocator.free(path);
     // Monochrome emoji face (Noto Emoji) for the emoji-styled Dingbats that
@@ -383,6 +397,7 @@ fn mainInner(init: std.process.Init) !void {
         .mono_symbols_font_path = palette_gpu_mono_symbols_font_path,
         .symbols_font_path = palette_gpu_symbols_font_path,
         .symbols_alt_font_path = palette_gpu_symbols_alt_font_path,
+        .icon_alt_font_path = palette_gpu_icon_alt_font_path,
         .math_font_path = palette_gpu_math_font_path,
         .emoji_font_path = palette_gpu_emoji_font_path,
     });

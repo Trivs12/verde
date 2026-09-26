@@ -85,6 +85,10 @@ pub const FontRole = enum {
     // whose chrome face has no medium cut alias it to `ui`.
     ui_medium,
     icon,
+    // Secondary icon face (Lucide in Verde), addressed explicitly by code
+    // that wants its uniform stroke icons. Its private-use codepoints do not
+    // overlap `icon`'s, and it is never a coverage fallback.
+    icon_alt,
     mono,
     // Coverage-fallback face for `mono`. The user's configured terminal font
     // (read from Ghostty config) may have sparse Dingbats/Arrows coverage
