@@ -7940,14 +7940,13 @@ fn toolCallGroupHeight(
     base_message_index: usize,
     column_width: f32,
 ) f32 {
-    const header_h = theme.scaledUi(48.0);
+    const header_h = designUi(TOOL_GROUP_HEADER_CSS);
     const failed_count = toolCallGroupFailureCount(entries, start, end);
     const failed = failed_count > 0;
     const default_expanded = toolCallGroupDefaultExpanded(state, failed);
     if (!state.isCardExpandedDefault(toolCallGroupKey(base_message_index + start), default_expanded)) return header_h;
 
-    const inset = theme.scaledUi(10.0);
-    const child_width = @max(column_width - inset * 2.0, theme.scaledUi(80.0));
+    const child_width = toolCallGroupChildColumn(.{ .x = 0.0, .y = 0.0, .w = column_width, .h = 0.0 }).w;
     var height = header_h + theme.scaledUi(8.0);
     for (entries[start..end], start..) |entry, index| {
         height += transcriptCommandEventHeight(state, base_message_index + index, entry.author, entry.body, child_width, toolCallEntryStatus(entry));
@@ -7956,7 +7955,27 @@ fn toolCallGroupHeight(
     return height + theme.scaledUi(2.0);
 }
 
-// Consecutive command/tool events are rendered as one transcript region.
+/// Tool-call group summary line: design 28px tall, 14px chevron, 13.5px text.
+const TOOL_GROUP_HEADER_CSS: f32 = 28.0;
+const TOOL_GROUP_CHEVRON_CSS: f32 = 14.0;
+const TOOL_GROUP_FONT_CSS: f32 = 13.5;
+const TOOL_GROUP_GAP_CSS: f32 = 8.0;
+/// Expanded steps sit indented past a thin rule under the chevron.
+const TOOL_GROUP_CHILD_INSET_CSS: f32 = 20.0;
+
+/// Column for an expanded group's step rows; shared by height and render.
+fn toolCallGroupChildColumn(column: palette.Rect) palette.Rect {
+    const inset = designUi(TOOL_GROUP_CHILD_INSET_CSS);
+    return .{
+        .x = column.x + inset,
+        .y = column.y,
+        .w = @max(column.w - inset, theme.scaledUi(80.0)),
+        .h = column.h,
+    };
+}
+
+// Consecutive command/tool events are rendered as one transcript region: a
+// light chevron + summary line, with the step rows indented beneath it.
 fn renderToolCallGroup(
     state: *app_state.AppState,
     entries: anytype,
@@ -7980,30 +7999,44 @@ fn renderToolCallGroup(
     const key = toolCallGroupKey(base_message_index + start);
     const expanded = state.isCardExpandedDefault(key, default_expanded);
     const bubble = palette.Rect{ .x = column.x, .y = y, .w = column.w, .h = height };
-    queueRoundedShellClipped(
-        state,
-        bubble,
-        paletteColor(theme.withAlpha(theme.COLOR_PANEL_ALT, 235)),
-        // A failed child is identified by the status dot and its own row; the
-        // group shell stays neutral so one failure does not tint every call.
-        paletteColor(if (running and !failed) theme.COLOR_GREEN else theme.borderMuted()),
-        transcriptBubbleCornerRadius(),
-        clip,
-    );
+    const header_h = designUi(TOOL_GROUP_HEADER_CSS);
+    const header_rect = palette.Rect{ .x = bubble.x, .y = bubble.y, .w = bubble.w, .h = header_h };
+    const header_cy = bubble.y + header_h * 0.5;
+    const hovered = state.transcript_controller.palette_mouse_in_workspace and
+        rectContains(header_rect, state.transcript_controller.palette_mouse_x, state.transcript_controller.palette_mouse_y);
+    const line_color = if (hovered) theme.COLOR_WHITE else theme.COLOR_TEXT_SUBTLE;
 
-    const header_h = theme.scaledUi(48.0);
-    const pad_x = theme.scaledUi(14.0);
-    const status_dia = theme.scaledUi(9.0);
+    const chevron_size = designUi(TOOL_GROUP_CHEVRON_CSS);
+    queueLucideIcon(state, .{
+        .x = bubble.x,
+        .y = header_cy - chevron_size * 0.5,
+        .w = chevron_size,
+        .h = chevron_size,
+    }, if (expanded) LU_CHEVRON_DOWN else LU_CHEVRON_RIGHT, paletteColor(line_color), chevron_size, clip);
+    const gap = designUi(TOOL_GROUP_GAP_CSS);
+    var text_x = bubble.x + chevron_size + gap;
+
+    // Status dot only while something is running or failed; a completed
+    // group reads as plain text.
+    const status_dia = theme.scaledUi(7.0);
+    const partial_failure = failed_count > 0 and failed_count < count;
+    const show_status = running or failed;
     const status_rect: palette.Rect = .{
-        .x = bubble.x + pad_x,
-        .y = bubble.y + (header_h - status_dia) * 0.5,
+        .x = text_x,
+        .y = header_cy - status_dia * 0.5,
         .w = status_dia,
         .h = status_dia,
     };
-    const normal_status_color = if (running) theme.COLOR_GREEN else theme.COLOR_TEXT_MUTED;
-    const partial_failure = failed_count > 0 and failed_count < count;
-    const status_color = if (failed and !partial_failure) theme.COLOR_DIFF_REMOVE else normal_status_color;
-    queueRoundedClipped(state, status_rect, paletteColor(status_color), status_dia * 0.5, clip);
+    const status_color: [4]f32 = if (failed and !partial_failure)
+        theme.COLOR_DIFF_REMOVE
+    else if (running)
+        runningPulseColor(theme.COLOR_GREEN)
+    else
+        theme.COLOR_TEXT_SUBTLE;
+    if (show_status) {
+        queueRoundedClipped(state, status_rect, paletteColor(status_color), status_dia * 0.5, clip);
+        text_x += status_dia + gap;
+    }
     if (partial_failure) {
         const center: palette.draw.Vec2 = .{ .x = status_rect.x + status_rect.w * 0.5, .y = status_rect.y + status_rect.h * 0.5 };
         const radius = status_dia * 0.5;
@@ -8069,17 +8102,18 @@ fn renderToolCallGroup(
     else
         std.fmt.bufPrint(&summary_buf, "{d} {s}  ·  {d} completed", .{ count, noun, completed_count }) catch "Tool calls completed";
 
-    const chev_w = theme.scaledUi(22.0);
-    const text_x = bubble.x + pad_x + status_dia + theme.scaledUi(11.0);
-    queueFixedTextLine(state, .{
+    const summary_font = designUi(TOOL_GROUP_FONT_CSS);
+    var summary_trunc_buf: [160]u8 = undefined;
+    const summary_w = @max(bubble.x + bubble.w - text_x, theme.scaledUi(40.0));
+    const summary_label = truncateUiLabel(&summary_trunc_buf, summary, summary_w, summary_font);
+    queueChromeLabel(state, .{
         .x = text_x,
-        .y = bubble.y + theme.scaledUi(14.0),
-        .w = @max(bubble.w - (text_x - bubble.x) - pad_x - chev_w, theme.scaledUi(40.0)),
-        .h = theme.scaledUi(20.0),
-    }, summary, paletteColor(theme.COLOR_TEXT_MUTED), theme.scaledUi(14.0), clip);
-    queueCardChevron(state, bubble.x + bubble.w - pad_x - chev_w * 0.5, bubble.y + header_h * 0.5, expanded, paletteColor(theme.COLOR_TEXT_SUBTLE), clip);
+        .y = header_cy - summary_font * 0.7,
+        .w = summary_w,
+        .h = summary_font * 1.4,
+    }, summary_label, paletteColor(line_color), summary_font, clip);
     state.recordCardToggleHit(.{
-        .rect = .{ .x = bubble.x, .y = bubble.y, .w = bubble.w, .h = header_h },
+        .rect = header_rect,
         .key = key,
         .kind = .tool_call_group,
         .default_expanded = default_expanded,
@@ -8087,14 +8121,19 @@ fn renderToolCallGroup(
     });
 
     if (!expanded) return;
-    const inset = theme.scaledUi(10.0);
-    const child_column = palette.Rect{
-        .x = column.x + inset,
-        .y = column.y,
-        .w = @max(column.w - inset * 2.0, theme.scaledUi(80.0)),
-        .h = column.h,
-    };
+    const child_column = toolCallGroupChildColumn(column);
     var child_y = y + header_h + theme.scaledUi(8.0);
+    // Thin rule under the chevron ties the indented steps to the summary.
+    const rule_top = y + header_h;
+    const rule_bottom = y + height - theme.scaledUi(8.0);
+    if (rule_bottom > rule_top) {
+        queueRectClipped(state, snapRect(.{
+            .x = bubble.x + chevron_size * 0.5 - 0.5,
+            .y = rule_top,
+            .w = @max(theme.scaledUi(1.0), 1.0),
+            .h = rule_bottom - rule_top,
+        }), paletteColor(theme.borderMuted()), clip);
+    }
     for (entries[start..end], start..) |entry, index| {
         const message_index = base_message_index + index;
         const child_h = transcriptCommandEventHeight(state, message_index, entry.author, entry.body, child_column.w, toolCallEntryStatus(entry));
@@ -8118,6 +8157,16 @@ fn renderToolCallGroup(
         );
         child_y += child_h + theme.scaledUi(8.0);
     }
+}
+
+/// Running status dots breathe on a 1.4s cycle.
+fn runningPulseColor(color: [4]f32) [4]f32 {
+    const t_ns: i128 = profiler.nowNs();
+    const period_ns: i128 = 1_400_000_000;
+    const phase = @as(f32, @floatFromInt(@mod(t_ns, period_ns))) / @as(f32, @floatFromInt(period_ns));
+    const sin_t = std.math.sin(phase * std.math.tau);
+    const alpha = 0.45 + 0.55 * (sin_t * 0.5 + 0.5);
+    return theme.withAlpha(color, @intFromFloat(alpha * 255.0));
 }
 
 fn renderCommandEventRow(
@@ -8179,14 +8228,7 @@ fn renderCommandEventRow(
     const status_color: [4]f32 = blk: {
         if (failed) break :blk theme.COLOR_DIFF_REMOVE;
         if (stopped) break :blk theme.COLOR_YELLOW;
-        if (is_running) {
-            const t_ns: i128 = profiler.nowNs();
-            const period_ns: i128 = 1_400_000_000;
-            const phase = @as(f32, @floatFromInt(@mod(t_ns, period_ns))) / @as(f32, @floatFromInt(period_ns));
-            const sin_t = std.math.sin(phase * std.math.tau);
-            const alpha = 0.45 + 0.55 * (sin_t * 0.5 + 0.5);
-            break :blk theme.withAlpha(theme.COLOR_GREEN, @intFromFloat(alpha * 255.0));
-        }
+        if (is_running) break :blk runningPulseColor(theme.COLOR_GREEN);
         break :blk theme.COLOR_GREEN;
     };
     queueRoundedClipped(state, .{
