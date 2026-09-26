@@ -1970,15 +1970,7 @@ fn transcriptSelectableBodyRect(
     {
         return null;
     }
-    const bubble_width = if (role == .user) column.w * 0.62 else column.w;
-    const bubble_x = if (role == .user) column.x + column.w - bubble_width else column.x;
-    const label_cut = transcriptLabelRowCut(labeled);
-    return .{
-        .x = bubble_x + theme.scaledUi(14.0),
-        .y = y + theme.scaledUi(34.0) - label_cut,
-        .w = bubble_width - theme.scaledUi(28.0),
-        .h = height - theme.scaledUi(42.0) + label_cut,
-    };
+    return transcriptRowBox(role, labeled, column, y, height, body).body;
 }
 
 fn buildTranscriptSelectableBodyView(
@@ -2418,10 +2410,10 @@ fn renderApprovalCard(state: *app_state.AppState, rect: palette.Rect, approval: 
     const button_h = theme.scaledUi(36.0);
     const button_w = theme.scaledUi(96.0);
     const gap = theme.scaledUi(12.0);
-    queueRounded(state, rect, paletteColor(theme.COLOR_PANEL_ALT), theme.scaledUi(12.0));
-    queueBorder(state, rect, paletteColor(theme.COLOR_GREEN), theme.scaledUi(12.0), theme.scaledUi(1.0));
-    queueText(state, .{ .x = rect.x + pad, .y = rect.y + theme.scaledUi(12.0), .w = rect.w - pad * 2.0, .h = theme.scaledUi(20.0) }, approval.title, paletteColor(theme.COLOR_WHITE), theme.scaledUi(14.0), rect);
-    queueText(state, .{ .x = rect.x + pad, .y = rect.y + theme.scaledUi(38.0), .w = rect.w - pad * 2.0, .h = @max(rect.h - button_h - pad * 2.0 - theme.scaledUi(42.0), theme.scaledUi(44.0)) }, approval.body, paletteColor(theme.COLOR_TEXT_MUTED), theme.scaledUi(13.0), rect);
+    queueRounded(state, rect, paletteColor(theme.COLOR_PANEL_ALT), transcriptCardRadius());
+    queueBorder(state, rect, paletteColor(theme.borderMuted()), transcriptCardRadius(), theme.scaledUi(1.0));
+    queueRoleLabel(state, .{ .x = rect.x + pad, .y = rect.y + theme.scaledUi(12.0), .w = rect.w - pad * 2.0, .h = theme.scaledUi(20.0) }, approval.title, paletteColor(theme.COLOR_WHITE), theme.scaledUi(14.0), .ui_medium, rect);
+    queueRoleLabel(state, .{ .x = rect.x + pad, .y = rect.y + theme.scaledUi(38.0), .w = rect.w - pad * 2.0, .h = @max(rect.h - button_h - pad * 2.0 - theme.scaledUi(42.0), theme.scaledUi(44.0)) }, approval.body, paletteColor(theme.COLOR_TEXT_MUTED), theme.scaledUi(13.0), .ui, rect);
 
     const deny_rect = palette.Rect{ .x = rect.x + rect.w - pad - button_w * 2.0 - gap, .y = rect.y + rect.h - pad - button_h, .w = button_w, .h = button_h };
     const approve_rect = palette.Rect{ .x = deny_rect.x + button_w + gap, .y = deny_rect.y, .w = button_w, .h = button_h };
@@ -4805,7 +4797,7 @@ fn renderPendingTranscriptStream(state: *app_state.AppState, thread: *const app_
         } else {
             const role_label = transcriptRowLabel(state, event.role, event.author);
             if (y + item_h >= column.y and y <= column.y + column.h) {
-                renderTranscriptBubbleFromParts(state, column, y, item_h, event.role, role_label, event.body, false, false, clip, msg_idx, false, false);
+                renderTranscriptBubbleFromParts(state, column, y, item_h, event.role, role_label, event.body, false, false, clip, msg_idx, false, false, event.images.items.len);
                 const first_image: ?app_state.ChatImageAttachment = if (event.images.items.len > 0) event.images.items[0] else null;
                 const extra_images: []const app_state.ChatImageAttachment = if (event.images.items.len > 1) event.images.items[1..] else &.{};
                 renderTranscriptImagesFromParts(state, column, y, item_h, event.role, first_image, extra_images, clip);
@@ -4831,7 +4823,7 @@ fn renderPendingTranscriptStream(state: *app_state.AppState, thread: *const app_
     const stream_msg_idx = base_message_index + send_state.pending_events.items.len;
     const assistant_h = pendingStreamBodyHeight(state, send_state, stream_msg_idx, column.w, variant_hash);
     if (y + assistant_h >= column.y and y <= column.y + column.h) {
-        renderTranscriptBubbleFromParts(state, column, y, assistant_h, .assistant, working_label, body, stream_text.len == 0, stream_plain, clip, stream_msg_idx, stream_text.len > 0, true);
+        renderTranscriptBubbleFromParts(state, column, y, assistant_h, .assistant, working_label, body, stream_text.len == 0, stream_plain, clip, stream_msg_idx, stream_text.len > 0, true, 0);
     }
 }
 
@@ -5782,8 +5774,7 @@ fn transcriptImageBlockHeight(message: app_state.ChatMessage, column_width: f32)
 
 fn transcriptImageBlockHeightFor(role: app_state.ChatRole, count: usize, column_width: f32) f32 {
     if (count == 0) return 0.0;
-    const bubble_width = if (role == .user) column_width * 0.62 else column_width;
-    const inner_w = @max(bubble_width - theme.scaledUi(28.0), theme.scaledUi(80.0));
+    const inner_w = transcriptImageFrameWidth(role, column_width);
     const thumb_h = @max(@min(inner_w * 0.56, theme.scaledUi(220.0)), theme.scaledUi(96.0));
     const gap = theme.scaledUi(10.0);
     return gap + @as(f32, @floatFromInt(count)) * (thumb_h + gap);
@@ -5838,8 +5829,8 @@ fn transcriptMessageHeightStream(
     const font_size = theme.scaledUi(TRANSCRIPT_MARKDOWN_FONT_SIZE);
     // Rows without the small author label reclaim its reserved strip.
     const label_cut = transcriptLabelRowCut(labeled);
-    const body_width = if (role == .user) column_width * 0.62 else column_width;
-    const body_inner_width = @max(body_width - theme.scaledUi(28.0), theme.scaledUi(80.0));
+    const body_inner_width = transcriptBodyWrapWidth(role, column_width);
+    const plain_chrome = transcriptPlainRowChrome(role, labeled);
     if (role == .assistant and !assistant_plain_layout) {
         if (!streaming) {
             if (state) |app| {
@@ -5878,17 +5869,17 @@ fn transcriptMessageHeightStream(
             else
                 app.transcriptPlainBodyEntry(index, body);
             if (cached) |entry| {
-                return theme.scaledUi(46.0) - label_cut + chat_markdown.measureBodyHeight(entry.view, body_inner_width, transcriptPlainTextOptions(theme.COLOR_WHITE));
+                return plain_chrome + chat_markdown.measureBodyHeight(entry.view, body_inner_width, transcriptPlainTextOptions(theme.COLOR_WHITE));
             }
         }
     }
     var plain_view = chat_markdown.buildPlainBodyView(std.heap.page_allocator, body) catch {
         const chars_per_line = @max(@as(usize, @intFromFloat(body_inner_width / (font_size * 0.52))), 1);
         const line_count = wrappedLineCount(body, chars_per_line);
-        return theme.scaledUi(46.0) - label_cut + @as(f32, @floatFromInt(line_count)) * font_size * 1.38;
+        return plain_chrome + @as(f32, @floatFromInt(line_count)) * font_size * 1.38;
     };
     defer plain_view.deinit(std.heap.page_allocator);
-    return theme.scaledUi(46.0) - label_cut + chat_markdown.measureBodyHeight(plain_view, body_inner_width, transcriptPlainTextOptions(theme.COLOR_WHITE));
+    return plain_chrome + chat_markdown.measureBodyHeight(plain_view, body_inner_width, transcriptPlainTextOptions(theme.COLOR_WHITE));
 }
 
 /// Vertical strip reserved for a transcript row's small author label; rows
@@ -5899,12 +5890,176 @@ fn transcriptLabelRowCut(labeled: bool) f32 {
     return if (labeled) 0.0 else theme.scaledUi(TRANSCRIPT_LABEL_ROW_CUT);
 }
 
+/// User turns sit in a soft neutral bubble sized to their text and pinned to
+/// the right edge, with no author label (design: 10x16 padding, 18px radius,
+/// at most 500px wide). Values are design px (see `designUi`).
+const USER_BUBBLE_PAD_X_CSS: f32 = 16.0;
+const USER_BUBBLE_PAD_Y_CSS: f32 = 10.0;
+const USER_BUBBLE_RADIUS_CSS: f32 = 18.0;
+const USER_BUBBLE_MAX_W_CSS: f32 = 500.0;
+/// Narrow panes cap the bubble at this share of the column so it still reads
+/// as a right-aligned turn rather than a full-width block.
+const USER_BUBBLE_MAX_COLUMN_FRACTION: f32 = 0.85;
+/// Room added to the measured natural width so a shrunk bubble never
+/// re-wraps a line that the wrap-width measurement kept whole.
+const USER_BUBBLE_FIT_SLACK_CSS: f32 = 6.0;
+
+fn userBubbleMaxWidth(column_w: f32) f32 {
+    return @min(designUi(USER_BUBBLE_MAX_W_CSS), column_w * USER_BUBBLE_MAX_COLUMN_FRACTION);
+}
+
+/// Width a generic row's body wraps at. Heights are measured at this width,
+/// so it must not depend on anything the height cache key omits.
+fn transcriptBodyWrapWidth(role: app_state.ChatRole, column_w: f32) f32 {
+    return switch (role) {
+        .user => @max(userBubbleMaxWidth(column_w) - designUi(USER_BUBBLE_PAD_X_CSS) * 2.0, theme.scaledUi(80.0)),
+        .system => @max(column_w - systemNoticeTextInset() - theme.scaledUi(14.0), theme.scaledUi(80.0)),
+        .assistant => @max(column_w - theme.scaledUi(28.0), theme.scaledUi(80.0)),
+    };
+}
+
+/// Vertical chrome a generic row adds around its measured plain-text body.
+fn transcriptPlainRowChrome(role: app_state.ChatRole, labeled: bool) f32 {
+    return switch (role) {
+        .user => designUi(USER_BUBBLE_PAD_Y_CSS) * 2.0,
+        .system => systemNoticeBodyTop() + designUi(SYSTEM_NOTICE_BOTTOM_PAD_CSS),
+        .assistant => theme.scaledUi(46.0) - transcriptLabelRowCut(labeled),
+    };
+}
+
+/// Width of image attachment frames under a row.
+fn transcriptImageFrameWidth(role: app_state.ChatRole, column_w: f32) f32 {
+    return switch (role) {
+        .user => @max(userBubbleMaxWidth(column_w), theme.scaledUi(80.0)),
+        .assistant, .system => @max(column_w - theme.scaledUi(28.0), theme.scaledUi(80.0)),
+    };
+}
+
+/// Widest line of `body` in transcript plain-text metrics, or null as soon as
+/// a line reaches `limit` (the body then wraps and fills the bubble).
+fn transcriptPlainNaturalWidth(body: []const u8, limit: f32) ?f32 {
+    const font_size = theme.scaledUi(TRANSCRIPT_MARKDOWN_FONT_SIZE);
+    // Cheap early-out for long lines: no glyph is narrower than this.
+    const min_byte_w = font_size * 0.2;
+    var widest: f32 = 0.0;
+    var lines = std.mem.splitScalar(u8, body, '\n');
+    while (lines.next()) |raw_line| {
+        const line = std.mem.trimEnd(u8, raw_line, "\r\t ");
+        if (@as(f32, @floatFromInt(line.len)) * min_byte_w >= limit) return null;
+        const width = text_measure.textWidth(.prose, font_size, line);
+        if (width >= limit) return null;
+        widest = @max(widest, width);
+    }
+    return widest;
+}
+
+fn userBubbleWidth(column_w: f32, body: []const u8) f32 {
+    const max_w = userBubbleMaxWidth(column_w);
+    const pad_x = designUi(USER_BUBBLE_PAD_X_CSS);
+    const natural = transcriptPlainNaturalWidth(body, transcriptBodyWrapWidth(.user, column_w)) orelse return max_w;
+    return @min(max_w, natural + pad_x * 2.0 + designUi(USER_BUBBLE_FIT_SLACK_CSS));
+}
+
+/// System notices ("System", "Handoff prepared", "Send failed", ...) read as
+/// quiet lines: a small Lucide icon, a medium-weight small title, and the
+/// body in the muted colour below it. No fill or border. Design px.
+const SYSTEM_NOTICE_ICON_CSS: f32 = 14.0;
+/// Icon column: icon plus gap before the title/body text.
+const SYSTEM_NOTICE_INDENT_CSS: f32 = 22.0;
+const SYSTEM_NOTICE_TOP_PAD_CSS: f32 = 4.0;
+const SYSTEM_NOTICE_TITLE_H_CSS: f32 = 20.0;
+const SYSTEM_NOTICE_TITLE_FONT_CSS: f32 = 13.0;
+const SYSTEM_NOTICE_BODY_GAP_CSS: f32 = 2.0;
+const SYSTEM_NOTICE_BOTTOM_PAD_CSS: f32 = 4.0;
+const LU_INFO = "\u{E0F9}";
+const LU_ALERT_CIRCLE = "\u{E077}";
+const LU_ARROW_RIGHT_LEFT = "\u{E417}";
+
+/// Transcript category for generic system notices; picks the icon and accent.
+const SystemNoticeTone = enum { info, failure, handoff };
+
+fn systemNoticeTone(author_raw: []const u8, body_raw: []const u8) SystemNoticeTone {
+    const author = std.mem.trim(u8, author_raw, "\n\r\t ");
+    if (std.ascii.startsWithIgnoreCase(author, "handoff")) return .handoff;
+    inline for (.{ "fail", "error", "denied", "rejected" }) |needle| {
+        if (std.ascii.indexOfIgnoreCase(author, needle) != null) return .failure;
+    }
+    const body = std.mem.trimStart(u8, body_raw, "\n\r\t ");
+    if (std.ascii.startsWithIgnoreCase(body, "error")) return .failure;
+    return .info;
+}
+
+test "system notice tone categorises handoff, failure and plain notices" {
+    try std.testing.expectEqual(SystemNoticeTone.handoff, systemNoticeTone("Handoff prepared", "Source pane 11 handed off"));
+    try std.testing.expectEqual(SystemNoticeTone.handoff, systemNoticeTone("Handoff source", ""));
+    try std.testing.expectEqual(SystemNoticeTone.failure, systemNoticeTone("Send failed", "timeout"));
+    try std.testing.expectEqual(SystemNoticeTone.failure, systemNoticeTone("Agent error", ""));
+    try std.testing.expectEqual(SystemNoticeTone.failure, systemNoticeTone("System", "Error: stream closed"));
+    try std.testing.expectEqual(SystemNoticeTone.info, systemNoticeTone("System", "stop_sequence"));
+    try std.testing.expectEqual(SystemNoticeTone.info, systemNoticeTone("Notice", "Connection restored"));
+}
+
+fn systemNoticeBodyTop() f32 {
+    return designUi(SYSTEM_NOTICE_TOP_PAD_CSS + SYSTEM_NOTICE_TITLE_H_CSS + SYSTEM_NOTICE_BODY_GAP_CSS);
+}
+
+/// Left edge of notice text relative to the column: aligned with reply
+/// text, after the icon column.
+fn systemNoticeTextInset() f32 {
+    return theme.scaledUi(14.0) + designUi(SYSTEM_NOTICE_INDENT_CSS);
+}
+
+const TranscriptRowBox = struct {
+    /// Row surface; only the user bubble is filled.
+    bubble: palette.Rect,
+    /// Selectable body text area.
+    body: palette.Rect,
+};
+
+/// Geometry of a generic transcript row (user bubble, assistant reply,
+/// system notice). Rendering, selection and link hit-testing share it.
+fn transcriptRowBox(role: app_state.ChatRole, labeled: bool, column: palette.Rect, y: f32, height: f32, body_raw: []const u8) TranscriptRowBox {
+    switch (role) {
+        .user => {
+            const width = userBubbleWidth(column.w, std.mem.trim(u8, body_raw, "\n\r\t "));
+            const pad_x = designUi(USER_BUBBLE_PAD_X_CSS);
+            const pad_y = designUi(USER_BUBBLE_PAD_Y_CSS);
+            const bubble = palette.Rect{ .x = column.x + column.w - width, .y = y, .w = width, .h = height };
+            return .{ .bubble = bubble, .body = .{
+                .x = bubble.x + pad_x,
+                .y = y + pad_y,
+                .w = @max(width - pad_x * 2.0, theme.scaledUi(1.0)),
+                .h = @max(height - pad_y * 2.0, theme.scaledUi(1.0)),
+            } };
+        },
+        .system => {
+            const inset = systemNoticeTextInset();
+            const top = systemNoticeBodyTop();
+            return .{ .bubble = .{ .x = column.x, .y = y, .w = column.w, .h = height }, .body = .{
+                .x = column.x + inset,
+                .y = y + top,
+                .w = transcriptBodyWrapWidth(.system, column.w),
+                .h = @max(height - top, theme.scaledUi(1.0)),
+            } };
+        },
+        .assistant => {
+            const label_cut = transcriptLabelRowCut(labeled);
+            return .{ .bubble = .{ .x = column.x, .y = y, .w = column.w, .h = height }, .body = .{
+                .x = column.x + theme.scaledUi(14.0),
+                .y = y + theme.scaledUi(34.0) - label_cut,
+                .w = column.w - theme.scaledUi(28.0),
+                .h = height - theme.scaledUi(42.0) + label_cut,
+            } };
+        },
+    }
+}
+
 /// Ordinary assistant replies carry no author label: the thread's provider
 /// is implied. The label stays when it tells authors apart, i.e. the reply
 /// came from a different provider than the thread's current one (the model
 /// picker can switch providers mid-thread). Generic "Assistant" authors and
-/// empty authors never distinguish anything. User and system rows keep their
-/// labels.
+/// empty authors never distinguish anything. User bubbles never carry a
+/// label; system rows keep theirs.
 fn assistantAuthorLabelShown(author: []const u8, thread_provider_label: []const u8) bool {
     const name = std.mem.trim(u8, author, " \t");
     if (name.len == 0 or std.ascii.eqlIgnoreCase(name, "Assistant")) return false;
@@ -5912,6 +6067,7 @@ fn assistantAuthorLabelShown(author: []const u8, thread_provider_label: []const 
 }
 
 fn transcriptRowLabeled(state: *app_state.AppState, role: app_state.ChatRole, author: []const u8) bool {
+    if (role == .user) return false;
     if (role != .assistant) return true;
     return assistantAuthorLabelShown(author, utils.providerLabel(state.currentThread().provider));
 }
@@ -5920,7 +6076,7 @@ fn transcriptRowLabeled(state: *app_state.AppState, role: app_state.ChatRole, au
 fn transcriptRowLabel(state: *app_state.AppState, role: app_state.ChatRole, author: []const u8) ?[]const u8 {
     if (!transcriptRowLabeled(state, role, author)) return null;
     return switch (role) {
-        .user => "You",
+        .user => null,
         .assistant => author,
         .system => if (author.len > 0) author else "System",
     };
@@ -5937,6 +6093,24 @@ test "assistant author label shows only when it distinguishes authors" {
 /// Corner radius for transcript bubbles (user / assistant / system) and shell command rows.
 fn transcriptBubbleCornerRadius() f32 {
     return theme.scaledUi(14.0);
+}
+
+/// Transcript cards (usage, provider failure, slash-command result, plan,
+/// approval) share the diff card's quiet shell: panel fill, 1px light
+/// border, 12 design px radius.
+const TRANSCRIPT_CARD_RADIUS_CSS: f32 = 12.0;
+
+fn transcriptCardRadius() f32 {
+    return designUi(TRANSCRIPT_CARD_RADIUS_CSS);
+}
+
+fn queueTranscriptCardSurface(state: *app_state.AppState, bubble: palette.Rect, clip: palette.Rect) void {
+    queueRoundedShellClipped(state, bubble, paletteColor(theme.COLOR_PANEL_ALT), paletteColor(theme.COLOR_PANEL_MUTED), transcriptCardRadius(), clip);
+}
+
+/// Neutral disc behind a card's header glyph.
+fn queueTranscriptCardIconDisc(state: *app_state.AppState, rect: palette.Rect, clip: palette.Rect) void {
+    queueRoundedClipped(state, rect, paletteColor(theme.COLOR_PANEL_MUTED), rect.w * 0.5, clip);
 }
 
 /// Rounded fill with a rounded border ring (avoids `rectBorder`, which draws a sharp axis-aligned outline).
@@ -5998,7 +6172,7 @@ fn renderTranscriptMessage(state: *app_state.AppState, thread: *const app_state.
         }
     }
     const role_label = transcriptRowLabel(state, message.role, message.author);
-    renderTranscriptBubbleFromParts(state, column, y, height, message.role, role_label, message.body, false, false, clip, message_index, false, false);
+    renderTranscriptBubbleFromParts(state, column, y, height, message.role, role_label, message.body, false, false, clip, message_index, false, false, transcriptImageCount(message));
     renderTranscriptImages(state, column, y, height, message, clip);
 }
 
@@ -6030,14 +6204,7 @@ fn renderProviderFailureActionCard(
     message_index: usize,
 ) void {
     const bubble = snapRect(palette.Rect{ .x = column.x, .y = y, .w = column.w, .h = height });
-    queueRoundedShellClipped(
-        state,
-        bubble,
-        paletteColor(theme.withAlpha(theme.COLOR_YELLOW, 42)),
-        paletteColor(theme.withAlpha(theme.COLOR_YELLOW, 210)),
-        transcriptBubbleCornerRadius(),
-        clip,
-    );
+    queueTranscriptCardSurface(state, bubble, clip);
 
     const pad = theme.scaledUi(16.0);
     var title_buf: [80]u8 = undefined;
@@ -6046,12 +6213,23 @@ fn renderProviderFailureActionCard(
         std.fmt.bufPrint(&title_buf, "{s} usage limit reached", .{utils.providerLabel(provider)}) catch "Usage limit reached"
     else
         std.fmt.bufPrint(&title_buf, "{s} request failed", .{utils.providerLabel(provider)}) catch "Provider request failed";
-    queueChromeLabel(state, .{
+    // A small alert glyph carries the severity; the title stays neutral.
+    const title_row_y = bubble.y + theme.scaledUi(11.0);
+    const title_row_h = theme.scaledUi(20.0);
+    const icon_size = designUi(SYSTEM_NOTICE_ICON_CSS);
+    queueLucideIcon(state, .{
         .x = bubble.x + pad,
-        .y = bubble.y + theme.scaledUi(11.0),
-        .w = bubble.w - pad * 2.0,
-        .h = theme.scaledUi(20.0),
-    }, title, paletteColor(theme.COLOR_YELLOW), theme.scaledUi(13.0), clip);
+        .y = title_row_y + (title_row_h - icon_size) * 0.5,
+        .w = icon_size,
+        .h = icon_size,
+    }, LU_ALERT_CIRCLE, paletteColor(if (is_usage_limit) theme.warning() else theme.danger()), icon_size, clip);
+    const title_x = bubble.x + pad + icon_size + designUi(8.0);
+    queueRoleLabel(state, .{
+        .x = title_x,
+        .y = title_row_y,
+        .w = @max(bubble.x + bubble.w - pad - title_x, theme.scaledUi(20.0)),
+        .h = title_row_h,
+    }, title, paletteColor(theme.COLOR_WHITE), designUi(SYSTEM_NOTICE_TITLE_FONT_CSS), .ui_medium, clip);
 
     const font_size = theme.scaledUi(TRANSCRIPT_MARKDOWN_FONT_SIZE);
     const inner_width = @max(bubble.w - pad * 2.0, theme.scaledUi(80.0));
@@ -6059,12 +6237,12 @@ fn renderProviderFailureActionCard(
     const body = std.mem.trim(u8, utils.providerFailureActionBody(body_raw), "\n\r\t ");
     const line_count = wrappedLineCount(body, chars_per_line);
     const body_height = @as(f32, @floatFromInt(line_count)) * font_size * 1.38;
-    renderWrappedBody(state, .{
+    renderWrappedBodyRole(state, .{
         .x = bubble.x + pad,
         .y = bubble.y + theme.scaledUi(38.0),
         .w = inner_width,
         .h = body_height,
-    }, body, paletteColor(theme.COLOR_WHITE), font_size, clip);
+    }, body, paletteColor(theme.COLOR_TEXT_MUTED), font_size, .prose, clip);
 
     const button = snapRect(palette.Rect{
         .x = bubble.x + pad,
@@ -6081,16 +6259,16 @@ fn renderProviderFailureActionCard(
         state,
         button,
         paletteColor(button_fill),
-        paletteColor(theme.withAlpha(theme.COLOR_GREEN, if (hovered) 230 else 165)),
+        paletteColor(if (hovered) theme.COLOR_TEXT_MUTED else theme.borderMuted()),
         theme.scaledUi(8.0),
         clip,
     );
-    queueFixedTextLine(state, .{
+    queueRoleLabel(state, .{
         .x = button.x + theme.scaledUi(13.0),
         .y = button.y + theme.scaledUi(8.0),
         .w = button.w - theme.scaledUi(26.0),
         .h = theme.scaledUi(18.0),
-    }, "View usage", paletteColor(if (hovered) theme.COLOR_WHITE else theme.COLOR_TEXT_MUTED), theme.scaledUi(13.0), clip);
+    }, "View usage", paletteColor(if (hovered) theme.COLOR_WHITE else theme.COLOR_TEXT_MUTED), theme.scaledUi(13.0), .ui_medium, clip);
     if (intersectClipRect(clip, button)) |visible_button| recordUsageActionHit(visible_button);
 
     const copy_button = snapRect(.{
@@ -6121,11 +6299,12 @@ fn renderTranscriptImagesFromParts(
     const count = (if (first_image != null) @as(usize, 1) else 0) + extra_images.len;
     if (count == 0) return;
 
-    const bubble_width = if (role == .user) column.w * 0.62 else column.w;
-    const bubble_x = if (role == .user) column.x + column.w - bubble_width else column.x;
     const pad = theme.scaledUi(14.0);
     const gap = theme.scaledUi(10.0);
-    const inner_w = @max(bubble_width - pad * 2.0, theme.scaledUi(80.0));
+    const inner_w = transcriptImageFrameWidth(role, column.w);
+    // User attachments sit right-aligned under the text bubble at its
+    // maximum width; other rows keep them inset in the column.
+    const frame_x = if (role == .user) column.x + column.w - inner_w else column.x + pad;
     const thumb_h = @max(@min(inner_w * 0.56, theme.scaledUi(220.0)), theme.scaledUi(96.0));
     var image_y = y + height - transcriptImageBlockHeightFor(role, count, column.w) + gap;
 
@@ -6136,7 +6315,7 @@ fn renderTranscriptImagesFromParts(
         else
             extra_images[index];
         const frame = palette.Rect{
-            .x = bubble_x + pad,
+            .x = frame_x,
             .y = image_y,
             .w = inner_w,
             .h = thumb_h,
@@ -6301,8 +6480,7 @@ fn usageSummaryTitle(body_raw: []const u8) []const u8 {
 fn renderUsageSummaryCard(state: *app_state.AppState, column: palette.Rect, y: f32, height: f32, body_raw: []const u8, clip: palette.Rect, message_index: usize) void {
     const data = parseUsageSummary(body_raw);
     const bubble = snapRect(palette.Rect{ .x = column.x, .y = y, .w = column.w, .h = height });
-    const rr = transcriptBubbleCornerRadius();
-    queueRoundedShellClipped(state, bubble, paletteColor(theme.withAlpha(theme.COLOR_PANEL_ALT, 248)), paletteColor(theme.withAlpha(theme.COLOR_GREEN, 150)), rr, clip);
+    queueTranscriptCardSurface(state, bubble, clip);
 
     const pad = theme.scaledUi(16.0);
     const gap = theme.scaledUi(12.0);
@@ -6376,26 +6554,26 @@ fn renderUsageHeader(state: *app_state.AppState, bubble: palette.Rect, y: f32, h
     const icon = theme.scaledUi(30.0);
     const icon_rect = palette.Rect{ .x = bubble.x + pad, .y = y + theme.scaledUi(5.0), .w = icon, .h = icon };
     renderUsageHeaderIcon(state, icon_rect, clip);
-    queueChromeLabel(state, .{ .x = icon_rect.x + icon + theme.scaledUi(11.0), .y = y + theme.scaledUi(3.0), .w = bubble.w - pad * 2.0 - icon - theme.scaledUi(11.0), .h = theme.scaledUi(22.0) }, title, paletteColor(theme.COLOR_WHITE), theme.scaledUi(16.0), clip);
-    queueText(state, .{ .x = icon_rect.x + icon + theme.scaledUi(11.0), .y = y + theme.scaledUi(27.0), .w = bubble.w - pad * 2.0 - icon - theme.scaledUi(11.0), .h = theme.scaledUi(18.0) }, "Rate limits, reset windows, and recent token activity", paletteColor(theme.COLOR_TEXT_MUTED), theme.scaledUi(12.5), clip);
+    queueRoleLabel(state, .{ .x = icon_rect.x + icon + theme.scaledUi(11.0), .y = y + theme.scaledUi(3.0), .w = bubble.w - pad * 2.0 - icon - theme.scaledUi(11.0), .h = theme.scaledUi(22.0) }, title, paletteColor(theme.COLOR_WHITE), theme.scaledUi(16.0), .ui_medium, clip);
+    queueRoleLabel(state, .{ .x = icon_rect.x + icon + theme.scaledUi(11.0), .y = y + theme.scaledUi(27.0), .w = bubble.w - pad * 2.0 - icon - theme.scaledUi(11.0), .h = theme.scaledUi(18.0) }, "Rate limits, reset windows, and recent token activity", paletteColor(theme.COLOR_TEXT_MUTED), theme.scaledUi(12.5), .ui, clip);
     queueRectClipped(state, .{ .x = bubble.x + pad, .y = y + height - 1.0, .w = bubble.w - pad * 2.0, .h = 1.0 }, paletteColor(theme.withAlpha(theme.COLOR_PANEL_MUTED, 190)), clip);
 }
 
-/// Usage card header mark: a Lucide bar chart on a soft green disc.
+/// Usage card header mark: a Lucide bar chart on a neutral disc.
 fn renderUsageHeaderIcon(state: *app_state.AppState, rect: palette.Rect, clip: palette.Rect) void {
-    queueRoundedClipped(state, rect, paletteColor(theme.withAlpha(theme.COLOR_GREEN, 42)), rect.w * 0.5, clip);
+    queueTranscriptCardIconDisc(state, rect, clip);
     const size = theme.scaledUi(17.0);
     queueLucideIcon(state, .{
         .x = rect.x + (rect.w - size) * 0.5,
         .y = rect.y + (rect.h - size) * 0.5,
         .w = size,
         .h = size,
-    }, LU_CHART_BARS, paletteColor(theme.COLOR_GREEN), size, clip);
+    }, LU_CHART_BARS, paletteColor(theme.COLOR_TEXT_MUTED), size, clip);
 }
 
 /// Renders a compact all-caps-style section label inside the usage card.
 fn renderUsageSectionTitle(state: *app_state.AppState, bubble: palette.Rect, y: f32, title: []const u8, clip: palette.Rect) void {
-    queueChromeLabel(state, .{ .x = bubble.x + theme.scaledUi(16.0), .y = y, .w = bubble.w - theme.scaledUi(32.0), .h = theme.scaledUi(18.0) }, title, paletteColor(theme.COLOR_TEXT_MUTED), theme.scaledUi(12.0), clip);
+    queueRoleLabel(state, .{ .x = bubble.x + theme.scaledUi(16.0), .y = y, .w = bubble.w - theme.scaledUi(32.0), .h = theme.scaledUi(18.0) }, title, paletteColor(theme.COLOR_TEXT_MUTED), theme.scaledUi(12.0), .ui_medium, clip);
 }
 
 /// Renders one remaining-limit row with text and a percent-left progress bar.
@@ -6405,10 +6583,10 @@ fn renderUsageLimitRow(state: *app_state.AppState, rect: palette.Rect, row: Usag
     const label_h = theme.scaledUi(19.0);
     const percent_text = std.fmt.allocPrint(state.allocator, "{d}% left", .{percent}) catch "";
     defer if (percent_text.len > 0) state.allocator.free(percent_text);
-    queueFixedTextLine(state, .{ .x = rect.x, .y = rect.y, .w = rect.w * 0.54, .h = label_h }, row.label, paletteColor(theme.COLOR_WHITE), theme.scaledUi(13.0), clip);
-    queueFixedTextLine(state, .{ .x = rect.x + rect.w * 0.56, .y = rect.y, .w = rect.w * 0.18, .h = label_h }, percent_text, paletteColor(usagePercentColor(percent)), theme.scaledUi(13.0), clip);
+    queueRoleLabel(state, .{ .x = rect.x, .y = rect.y, .w = rect.w * 0.54, .h = label_h }, row.label, paletteColor(theme.COLOR_WHITE), theme.scaledUi(13.0), .ui, clip);
+    queueRoleLabel(state, .{ .x = rect.x + rect.w * 0.56, .y = rect.y, .w = rect.w * 0.18, .h = label_h }, percent_text, paletteColor(usagePercentColor(percent)), theme.scaledUi(13.0), .ui, clip);
     if (row.reset.len > 0) {
-        queueFixedTextLine(state, .{ .x = rect.x + rect.w * 0.73, .y = rect.y, .w = rect.w * 0.27, .h = label_h }, row.reset, paletteColor(theme.COLOR_TEXT_MUTED), theme.scaledUi(12.0), clip);
+        queueRoleLabel(state, .{ .x = rect.x + rect.w * 0.73, .y = rect.y, .w = rect.w * 0.27, .h = label_h }, row.reset, paletteColor(theme.COLOR_TEXT_MUTED), theme.scaledUi(12.0), .ui, clip);
     }
     const bar = palette.Rect{ .x = rect.x, .y = rect.y + theme.scaledUi(25.0), .w = rect.w, .h = bar_h };
     queueRoundedClipped(state, bar, paletteColor(theme.withAlpha(theme.COLOR_PANEL_MUTED, 210)), bar_h * 0.5, clip);
@@ -6418,14 +6596,14 @@ fn renderUsageLimitRow(state: *app_state.AppState, rect: palette.Rect, row: Usag
 /// Renders one account-activity metric tile in the usage card.
 fn renderUsageStatTile(state: *app_state.AppState, rect: palette.Rect, row: UsageTextRow, clip: palette.Rect) void {
     queueRoundedClipped(state, rect, paletteColor(theme.withAlpha(theme.COLOR_PANEL_MUTED, 135)), theme.scaledUi(9.0), clip);
-    queueText(state, .{ .x = rect.x + theme.scaledUi(11.0), .y = rect.y + theme.scaledUi(8.0), .w = rect.w - theme.scaledUi(22.0), .h = theme.scaledUi(16.0) }, row.label, paletteColor(theme.COLOR_TEXT_MUTED), theme.scaledUi(11.5), clip);
-    queueFixedTextLine(state, .{ .x = rect.x + theme.scaledUi(11.0), .y = rect.y + theme.scaledUi(28.0), .w = rect.w - theme.scaledUi(22.0), .h = theme.scaledUi(19.0) }, row.value, paletteColor(theme.COLOR_WHITE), theme.scaledUi(13.5), clip);
+    queueRoleLabel(state, .{ .x = rect.x + theme.scaledUi(11.0), .y = rect.y + theme.scaledUi(8.0), .w = rect.w - theme.scaledUi(22.0), .h = theme.scaledUi(16.0) }, row.label, paletteColor(theme.COLOR_TEXT_MUTED), theme.scaledUi(11.5), .ui, clip);
+    queueRoleLabel(state, .{ .x = rect.x + theme.scaledUi(11.0), .y = rect.y + theme.scaledUi(28.0), .w = rect.w - theme.scaledUi(22.0), .h = theme.scaledUi(19.0) }, row.value, paletteColor(theme.COLOR_WHITE), theme.scaledUi(13.5), .ui, clip);
 }
 
 /// Renders one recent daily usage row in the usage card.
 fn renderUsageRecentRow(state: *app_state.AppState, rect: palette.Rect, row: UsageTextRow, clip: palette.Rect) void {
-    queueFixedTextLine(state, .{ .x = rect.x, .y = rect.y, .w = rect.w * 0.42, .h = rect.h }, row.label, paletteColor(theme.COLOR_TEXT_MUTED), theme.scaledUi(12.0), clip);
-    queueFixedTextLine(state, .{ .x = rect.x + rect.w * 0.44, .y = rect.y, .w = rect.w * 0.56, .h = rect.h }, row.value, paletteColor(theme.COLOR_WHITE), theme.scaledUi(12.0), clip);
+    queueRoleLabel(state, .{ .x = rect.x, .y = rect.y, .w = rect.w * 0.42, .h = rect.h }, row.label, paletteColor(theme.COLOR_TEXT_MUTED), theme.scaledUi(12.0), .ui, clip);
+    queueRoleLabel(state, .{ .x = rect.x + rect.w * 0.44, .y = rect.y, .w = rect.w * 0.56, .h = rect.h }, row.value, paletteColor(theme.COLOR_WHITE), theme.scaledUi(12.0), .ui, clip);
 }
 
 fn usagePercentColor(percent_left: i64) [4]f32 {
@@ -6476,14 +6654,7 @@ fn renderSlashCommandResultCard(
     message_index: usize,
 ) void {
     const bubble = snapRect(palette.Rect{ .x = column.x, .y = y, .w = column.w, .h = height });
-    queueRoundedShellClipped(
-        state,
-        bubble,
-        paletteColor(theme.withAlpha(theme.COLOR_PANEL_ALT, 248)),
-        paletteColor(theme.withAlpha(theme.COLOR_GREEN, 135)),
-        transcriptBubbleCornerRadius(),
-        clip,
-    );
+    queueTranscriptCardSurface(state, bubble, clip);
 
     const pad = theme.scaledUi(16.0);
     const header_h = theme.scaledUi(46.0);
@@ -6494,18 +6665,18 @@ fn renderSlashCommandResultCard(
     const pill_w = theme.scaledUi(84.0);
     const title_x = icon_rect.x + icon + theme.scaledUi(11.0);
     const title_w = @max(bubble.w - pad * 2.0 - icon - theme.scaledUi(11.0) - pill_w - theme.scaledUi(10.0), theme.scaledUi(40.0));
-    queueChromeLabel(state, .{
+    queueRoleLabel(state, .{
         .x = title_x,
         .y = bubble.y + pad + theme.scaledUi(1.0),
         .w = title_w,
         .h = theme.scaledUi(22.0),
-    }, author, paletteColor(theme.COLOR_WHITE), theme.scaledUi(15.5), clip);
-    queueText(state, .{
+    }, author, paletteColor(theme.COLOR_WHITE), theme.scaledUi(15.5), .ui_medium, clip);
+    queueRoleLabel(state, .{
         .x = title_x,
         .y = bubble.y + pad + theme.scaledUi(25.0),
         .w = title_w,
         .h = theme.scaledUi(18.0),
-    }, "Slash command output", paletteColor(theme.COLOR_TEXT_MUTED), theme.scaledUi(12.5), clip);
+    }, "Slash command output", paletteColor(theme.COLOR_TEXT_MUTED), theme.scaledUi(12.5), .ui, clip);
 
     const pill = palette.Rect{ .x = bubble.x + bubble.w - pad - pill_w, .y = bubble.y + pad + theme.scaledUi(8.0), .w = pill_w, .h = theme.scaledUi(24.0) };
     queueRoundedClipped(state, pill, paletteColor(theme.withAlpha(theme.COLOR_GREEN, 48)), pill.h * 0.5, clip);
@@ -6530,13 +6701,13 @@ fn renderSlashCommandResultCard(
 
 /// Renders the slash glyph used in completed provider-command result cards.
 fn renderSlashCommandResultIcon(state: *app_state.AppState, rect: palette.Rect, clip: palette.Rect) void {
-    queueRoundedClipped(state, rect, paletteColor(theme.withAlpha(theme.COLOR_GREEN, 42)), rect.w * 0.5, clip);
+    queueTranscriptCardIconDisc(state, rect, clip);
     queueChromeLabel(state, .{
         .x = rect.x,
         .y = rect.y + theme.scaledUi(2.0),
         .w = rect.w,
         .h = rect.h,
-    }, "/", paletteColor(theme.COLOR_GREEN), theme.scaledUi(18.0), clip);
+    }, "/", paletteColor(theme.COLOR_TEXT_MUTED), theme.scaledUi(18.0), clip);
 }
 
 // ----- Diff summary card -----
@@ -6751,8 +6922,8 @@ fn renderTodoCard(
     const border = if (active)
         theme.withAlpha(accent, @intFromFloat(70.0 + pulse * 60.0))
     else
-        theme.borderMuted();
-    queueRoundedShellClipped(state, bubble, paletteColor(theme.withAlpha(theme.COLOR_PANEL_ALT, 235)), paletteColor(border), transcriptBubbleCornerRadius(), clip);
+        theme.COLOR_PANEL_MUTED;
+    queueRoundedShellClipped(state, bubble, paletteColor(theme.COLOR_PANEL_ALT), paletteColor(border), transcriptCardRadius(), clip);
 
     const inner_x = bubble.x + metrics.pad_x;
     const inner_w = bubble.w - metrics.pad_x * 2.0;
@@ -6767,7 +6938,7 @@ fn renderTodoCard(
     else
         std.fmt.bufPrint(&count_buf, "{d} of {d} done", .{ summary.completed, summary.total }) catch "";
     const count_w = chromeLabelWidth(label_font, count_label);
-    queueChromeLabel(state, .{ .x = inner_x, .y = header_y, .w = @max(inner_w - count_w - theme.scaledUi(12.0), theme.scaledUi(40.0)), .h = label_h }, "Plan", paletteColor(theme.COLOR_TEXT_MUTED), label_font, clip);
+    queueRoleLabel(state, .{ .x = inner_x, .y = header_y, .w = @max(inner_w - count_w - theme.scaledUi(12.0), theme.scaledUi(40.0)), .h = label_h }, "Plan", paletteColor(theme.COLOR_TEXT_MUTED), label_font, .ui_medium, clip);
     queueChromeLabel(state, .{ .x = inner_x + inner_w - count_w, .y = header_y, .w = count_w, .h = label_h }, count_label, paletteColor(if (all_done) accent else theme.COLOR_TEXT_MUTED), label_font, clip);
 
     const bar_h = theme.scaledUi(3.0);
@@ -8622,6 +8793,8 @@ fn renderTranscriptBubbleFromParts(
     message_index: usize,
     streaming: bool,
     active: bool,
+    /// Attachments drawn under the row; the user bubble's fill stops above them.
+    image_count: usize,
 ) void {
     if (childNotification(role, body_raw)) |notification| {
         // Region: clickable child identity header; the message body remains selectable.
@@ -8671,18 +8844,23 @@ fn renderTranscriptBubbleFromParts(
         }
         return;
     }
-    const bubble_width = if (role == .user) column.w * 0.62 else column.w;
-    const bubble_x = if (role == .user) column.x + column.w - bubble_width else column.x;
-    const bubble = snapRect(palette.Rect{ .x = bubble_x, .y = y, .w = bubble_width, .h = height });
+    const box = transcriptRowBox(role, role_label != null, column, y, height, body_raw);
+    if (role == .system) {
+        renderSystemNotice(state, column, box, role_label orelse "System", body_raw, clip, message_index, streaming);
+        return;
+    }
+    const bubble = snapRect(box.bubble);
     // Replies render directly on the pane background with no card; the
     // user's own turns sit in a soft neutral bubble. Live state is carried by
     // the pulsing dot beside the role label, not by the bubble edge.
-    const rr = transcriptBubbleCornerRadius();
     const activity = if (active) theme.activityPulse(profiler.nowNs()) else 0.0;
     switch (role) {
-        .user => queueRoundedClipped(state, bubble, paletteColor(theme.userBubble()), rr, clip),
-        .assistant => {},
-        .system => queueRoundedShellClipped(state, bubble, paletteColor(theme.wash(theme.COLOR_YELLOW, 54)), paletteColor(theme.restingEdge()), rr, clip),
+        .user => {
+            var fill = bubble;
+            fill.h = @max(fill.h - transcriptImageBlockHeightFor(.user, image_count, column.w), theme.scaledUi(1.0));
+            queueRoundedClipped(state, fill, paletteColor(theme.userBubble()), designUi(USER_BUBBLE_RADIUS_CSS), clip);
+        },
+        .assistant, .system => {},
     }
 
     var label_x = bubble.x + theme.scaledUi(14.0);
@@ -8713,13 +8891,7 @@ fn renderTranscriptBubbleFromParts(
             .h = theme.scaledUi(20.0),
         }, label, paletteColor(if (active) theme.COLOR_GREEN else theme.COLOR_TEXT_MUTED), theme.scaledUi(13.0), .ui_medium, clip);
     }
-    const label_cut = transcriptLabelRowCut(role_label != null);
-    const body_rect = palette.Rect{
-        .x = bubble.x + theme.scaledUi(14.0),
-        .y = bubble.y + theme.scaledUi(34.0) - label_cut,
-        .w = bubble.w - theme.scaledUi(28.0),
-        .h = bubble.h - theme.scaledUi(42.0) + label_cut,
-    };
+    const body_rect = box.body;
     const body_text = std.mem.trim(u8, body_raw, "\n\r\t ");
     last_body_tail = null;
     if (role == .assistant and !muted_body and !assistant_plain_layout) {
@@ -8736,6 +8908,49 @@ fn renderTranscriptBubbleFromParts(
         );
     }
     if (active) renderStreamCaret(state, last_body_tail, clip);
+}
+
+// System notice region: icon + medium title on one line, muted body below.
+fn renderSystemNotice(
+    state: *app_state.AppState,
+    column: palette.Rect,
+    box: TranscriptRowBox,
+    title: []const u8,
+    body_raw: []const u8,
+    clip: palette.Rect,
+    message_index: usize,
+    streaming: bool,
+) void {
+    const tone = systemNoticeTone(title, body_raw);
+    const icon_size = designUi(SYSTEM_NOTICE_ICON_CSS);
+    const title_y = box.bubble.y + designUi(SYSTEM_NOTICE_TOP_PAD_CSS);
+    const title_h = designUi(SYSTEM_NOTICE_TITLE_H_CSS);
+    const icon_color = switch (tone) {
+        .failure => theme.danger(),
+        .info, .handoff => theme.COLOR_TEXT_SUBTLE,
+    };
+    queueLucideIcon(state, .{
+        .x = column.x + theme.scaledUi(14.0),
+        .y = title_y + (title_h - icon_size) * 0.5,
+        .w = icon_size,
+        .h = icon_size,
+    }, switch (tone) {
+        .info => LU_INFO,
+        .failure => LU_ALERT_CIRCLE,
+        .handoff => LU_ARROW_RIGHT_LEFT,
+    }, paletteColor(icon_color), icon_size, clip);
+    const text_x = column.x + systemNoticeTextInset();
+    const title_w = @max(column.x + column.w - theme.scaledUi(14.0) - text_x, theme.scaledUi(20.0));
+    const title_font = designUi(SYSTEM_NOTICE_TITLE_FONT_CSS);
+    var title_buf: [256]u8 = undefined;
+    queueRoleLabel(state, .{
+        .x = text_x,
+        .y = title_y,
+        .w = title_w,
+        .h = title_h,
+    }, truncateUiLabel(&title_buf, title, title_w, title_font), paletteColor(theme.COLOR_WHITE), title_font, .ui_medium, clip);
+    last_body_tail = null;
+    renderPlainSelectableBody(state, message_index, box.body, std.mem.trim(u8, body_raw, "\n\r\t "), theme.COLOR_TEXT_MUTED, clip, streaming);
 }
 
 /// End of the last prose line drawn by the most recent body render (fresh
@@ -9264,6 +9479,12 @@ fn wrappedLineCount(body: []const u8, chars_per_line: usize) usize {
 }
 
 fn renderWrappedBody(state: *app_state.AppState, rect: palette.Rect, body: []const u8, color: palette.Color, font_size: f32, clip: palette.Rect) void {
+    renderWrappedBodyRole(state, rect, body, color, font_size, null, clip);
+}
+
+/// `renderWrappedBody` in an explicit font role; a null role keeps the
+/// legacy fixed-line path.
+fn renderWrappedBodyRole(state: *app_state.AppState, rect: palette.Rect, body: []const u8, color: palette.Color, font_size: f32, role: ?palette.FontRole, clip: palette.Rect) void {
     if (body.len == 0) return;
     const char_w = font_size * 0.52;
     const line_h = font_size * 1.28;
@@ -9277,7 +9498,7 @@ fn renderWrappedBody(state: *app_state.AppState, rect: palette.Rect, body: []con
         const line_end = i;
         if (line_end == chunk_start) {
             if (y + line_h >= clip.y and y <= clip.y + clip.h) {
-                queueFixedTextLine(state, .{ .x = rect.x, .y = y, .w = rect.w, .h = line_h }, " ", color, font_size, clip);
+                queueWrappedBodyLine(state, role, .{ .x = rect.x, .y = y, .w = rect.w, .h = line_h }, " ", color, font_size, clip);
             }
             y += line_h;
         } else {
@@ -9286,13 +9507,21 @@ fn renderWrappedBody(state: *app_state.AppState, rect: palette.Rect, body: []con
                 const chunk_len = @min(remaining, chars_per_line);
                 const chunk = body[chunk_start .. chunk_start + chunk_len];
                 if (y + line_h >= clip.y and y <= clip.y + clip.h) {
-                    queueFixedTextLine(state, .{ .x = rect.x, .y = y, .w = rect.w, .h = line_h }, chunk, color, font_size, clip);
+                    queueWrappedBodyLine(state, role, .{ .x = rect.x, .y = y, .w = rect.w, .h = line_h }, chunk, color, font_size, clip);
                 }
                 y += line_h;
                 chunk_start += chunk_len;
             }
         }
         line_start = i + 1;
+    }
+}
+
+fn queueWrappedBodyLine(state: *app_state.AppState, role: ?palette.FontRole, rect: palette.Rect, value: []const u8, color: palette.Color, font_size: f32, clip: ?palette.Rect) void {
+    if (role) |font_role| {
+        queueRoleLabel(state, rect, value, color, font_size, font_role, clip);
+    } else {
+        queueFixedTextLine(state, rect, value, color, font_size, clip);
     }
 }
 
@@ -10030,13 +10259,12 @@ fn renderPendingFollowupPin(
     const previous_z = state.palette_overlay_batch.setZIndex(COMPOSER_FOLLOWUP_PIN_Z);
     defer state.palette_overlay_batch.restoreZIndex(previous_z);
 
-    const radius = theme.scaledUi(11.0);
     queuePanel(
         state,
         rect,
-        paletteColor(theme.withAlpha(theme.COLOR_YELLOW, 54)),
-        paletteColor(theme.withAlpha(theme.COLOR_YELLOW, 150)),
-        radius,
+        paletteColor(theme.COLOR_PANEL_ALT),
+        paletteColor(theme.COLOR_PANEL_MUTED),
+        transcriptCardRadius(),
         @max(theme.scaledUi(1.0), 1.0),
     );
 
@@ -10053,20 +10281,20 @@ fn renderPendingFollowupPin(
     const note_w = @as(f32, @floatFromInt(note.len)) * note_font * 0.52;
     const label_room = if (rect.w >= theme.scaledUi(360.0)) inner_w - note_w - theme.scaledUi(10.0) else inner_w;
 
-    queueText(state, .{
+    queueRoleLabel(state, .{
         .x = rect.x + pad_x,
         .y = rect.y + theme.scaledUi(8.0),
         .w = @max(label_room, theme.scaledUi(1.0)),
         .h = label_font + theme.scaledUi(2.0),
-    }, label, paletteColor(theme.raise(theme.COLOR_YELLOW, 0.18)), label_font, rect);
+    }, label, paletteColor(theme.COLOR_TEXT_MUTED), label_font, .ui_medium, rect);
 
     if (rect.w >= theme.scaledUi(360.0)) {
-        queueText(state, .{
+        queueRoleLabel(state, .{
             .x = rect.x + rect.w - pad_x - note_w,
             .y = rect.y + theme.scaledUi(9.0),
             .w = note_w,
             .h = note_font + theme.scaledUi(2.0),
-        }, note, paletteColor(theme.withAlpha(theme.COLOR_TEXT_MUTED, 220)), note_font, rect);
+        }, note, paletteColor(theme.COLOR_TEXT_SUBTLE), note_font, .ui, rect);
     }
 
     // Preview only the first line so the pinned card stays compact; the renderer
@@ -10076,12 +10304,12 @@ fn renderPendingFollowupPin(
     else
         followup.prompt;
     const body_font = theme.scaledUi(14.0);
-    queueText(state, .{
+    queueRoleLabel(state, .{
         .x = rect.x + pad_x,
         .y = rect.y + theme.scaledUi(26.0),
         .w = inner_w,
         .h = @max(rect.h - theme.scaledUi(30.0), body_font),
-    }, prompt, paletteColor(theme.COLOR_WHITE), body_font, rect);
+    }, prompt, paletteColor(theme.COLOR_WHITE), body_font, .ui, rect);
 }
 
 // Vertical nudge from the pill's geometric center to the label text's optical
