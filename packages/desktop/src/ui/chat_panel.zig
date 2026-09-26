@@ -97,6 +97,13 @@ const LU_CHEVRON_DOWN = "\u{E06D}";
 const LU_GLOBE = "\u{E0E8}";
 const LU_FOLDER = "\u{E0D7}";
 const LU_EXTERNAL_LINK = "\u{E0B9}";
+// Lucide glyphs for transcript chrome (card chevrons, linked chats, usage).
+const LU_CHEVRON_RIGHT = "\u{E06F}";
+const LU_CHEVRON_LEFT = "\u{E06E}";
+const LU_X = "\u{E1B2}";
+const LU_CHART_BARS = "\u{E06A}"; // chart-no-axes-column-increasing
+/// Transcript card expand/collapse chevron size (UI units).
+const CARD_CHEVRON_SIZE: f32 = 13.0;
 /// codicon-device-desktop: the composer runtime-route pill's glyph.
 const NF_COD_DEVICE_DESKTOP = "\u{EA7A}";
 /// Shared max width for the chat content column. The composer card and the
@@ -1175,13 +1182,13 @@ fn renderLinkedChatsDrawer(state: *app_state.AppState, rect: palette.Rect, layou
     });
     const chevron_hover = rectContains(chevron_rect, mouse_x, mouse_y);
     if (chevron_hover) queueRounded(state, chevron_rect, paletteColor(theme.withAlpha(theme.COLOR_WHITE, 18)), theme.scaledUi(6.0));
-    const chevron_size = theme.scaledUi(12.0);
-    queueIconText(state, .{
+    const chevron_size = theme.scaledUi(14.0);
+    queueLucideIcon(state, .{
         .x = chevron_rect.x + (chevron_rect.w - chevron_size) * 0.5,
         .y = chevron_rect.y + (chevron_rect.h - chevron_size) * 0.5,
         .w = chevron_size,
         .h = chevron_size,
-    }, NF_COD_CHEVRON_RIGHT, paletteColor(if (chevron_hover) theme.COLOR_WHITE else theme.COLOR_TEXT_SUBTLE), chevron_size, rect);
+    }, LU_CHEVRON_RIGHT, paletteColor(if (chevron_hover) theme.COLOR_WHITE else theme.COLOR_TEXT_SUBTLE), chevron_size, rect);
     appendLinkedChatHit(pane_id, chevron_rect, .toggle, workspace_id, parent_id, "", "");
 
     var controls_left = chevron_rect.x;
@@ -1310,7 +1317,7 @@ fn renderLinkedChatRow(
     const dot_r = theme.scaledUi(4.0);
     const dot_cy = row.y + theme.scaledUi(15.0);
     if (entry.is_parent) {
-        queueIconText(state, .{ .x = row.x + pad_x, .y = dot_cy - theme.scaledUi(6.0), .w = theme.scaledUi(12.0), .h = theme.scaledUi(12.0) }, NF_COD_LINK_EXTERNAL, paletteColor(theme.COLOR_TEXT_MUTED), theme.scaledUi(12.0), clip);
+        queueLucideIcon(state, .{ .x = row.x + pad_x - theme.scaledUi(0.5), .y = dot_cy - theme.scaledUi(6.5), .w = theme.scaledUi(13.0), .h = theme.scaledUi(13.0) }, LU_EXTERNAL_LINK, paletteColor(theme.COLOR_TEXT_MUTED), theme.scaledUi(13.0), clip);
     } else {
         queueRoundedClipped(state, .{
             .x = row.x + pad_x,
@@ -1359,13 +1366,13 @@ fn renderLinkedChatRow(
     // The hide control only appears on hover so settled rows stay quiet.
     if (!entry.is_parent and (hover or close_hover)) {
         if (close_hover) queueRoundedClipped(state, close_rect, paletteColor(theme.withAlpha(theme.COLOR_WHITE, 22)), theme.scaledUi(5.0), clip);
-        const icon = theme.scaledUi(11.0);
-        queueIconText(state, .{
+        const icon = theme.scaledUi(12.0);
+        queueLucideIcon(state, .{
             .x = close_rect.x + (close_rect.w - icon) * 0.5,
             .y = close_rect.y + (close_rect.h - icon) * 0.5,
             .w = icon,
             .h = icon,
-        }, NF_COD_CLOSE, paletteColor(if (close_hover) theme.COLOR_WHITE else theme.COLOR_TEXT_MUTED), icon, clip);
+        }, LU_X, paletteColor(if (close_hover) theme.COLOR_WHITE else theme.COLOR_TEXT_MUTED), icon, clip);
     }
     if (visible.w <= 0.0 or visible.h <= 0.0) return;
     appendLinkedChatHit(pane_id, visible, .open, workspace_id, parent_id, entry.link_id, entry.local_thread_id);
@@ -1382,13 +1389,14 @@ fn renderLinkedChatsRail(state: *app_state.AppState, rect: palette.Rect, parent:
     const mouse_y = state.transcript_controller.palette_mouse_y;
     const hover = rectContains(rect, mouse_x, mouse_y);
     if (hover) queueRounded(state, rect, paletteColor(theme.withAlpha(theme.COLOR_WHITE, 10)), theme.scaledUi(10.0));
-    const icon = theme.scaledUi(12.0);
-    queueIconText(state, .{
+    // Lucide at 14px (Codicon was 12px), kept centred on the old glyph box.
+    const icon = theme.scaledUi(14.0);
+    queueLucideIcon(state, .{
         .x = rect.x + (rect.w - icon) * 0.5,
-        .y = rect.y + theme.scaledUi(8.0),
+        .y = rect.y + theme.scaledUi(7.0),
         .w = icon,
         .h = icon,
-    }, NF_COD_CHEVRON_LEFT, paletteColor(if (hover) theme.COLOR_WHITE else theme.COLOR_TEXT_SUBTLE), icon, rect);
+    }, LU_CHEVRON_LEFT, paletteColor(if (hover) theme.COLOR_WHITE else theme.COLOR_TEXT_SUBTLE), icon, rect);
 
     const entries = parent.entries.items;
     const child_start = parent.parentCount();
@@ -6315,25 +6323,16 @@ fn renderUsageHeader(state: *app_state.AppState, bubble: palette.Rect, y: f32, h
     queueRectClipped(state, .{ .x = bubble.x + pad, .y = y + height - 1.0, .w = bubble.w - pad * 2.0, .h = 1.0 }, paletteColor(theme.withAlpha(theme.COLOR_PANEL_MUTED, 190)), clip);
 }
 
-/// Renders a small bar-chart glyph for the usage card header without relying on font symbols.
+/// Usage card header mark: a Lucide bar chart on a soft green disc.
 fn renderUsageHeaderIcon(state: *app_state.AppState, rect: palette.Rect, clip: palette.Rect) void {
     queueRoundedClipped(state, rect, paletteColor(theme.withAlpha(theme.COLOR_GREEN, 42)), rect.w * 0.5, clip);
-
-    const bar_w = theme.scaledUi(3.0);
-    const gap = theme.scaledUi(2.5);
-    const base_y = rect.y + rect.h - theme.scaledUi(8.0);
-    const heights = [_]f32{ theme.scaledUi(8.0), theme.scaledUi(13.0), theme.scaledUi(18.0) };
-    const total_w = bar_w * 3.0 + gap * 2.0;
-    var x = rect.x + (rect.w - total_w) * 0.5;
-    for (heights) |bar_h| {
-        queueRoundedClipped(state, .{
-            .x = x,
-            .y = base_y - bar_h,
-            .w = bar_w,
-            .h = bar_h,
-        }, paletteColor(theme.COLOR_GREEN), bar_w * 0.5, clip);
-        x += bar_w + gap;
-    }
+    const size = theme.scaledUi(17.0);
+    queueLucideIcon(state, .{
+        .x = rect.x + (rect.w - size) * 0.5,
+        .y = rect.y + (rect.h - size) * 0.5,
+        .w = size,
+        .h = size,
+    }, LU_CHART_BARS, paletteColor(theme.COLOR_GREEN), size, clip);
 }
 
 /// Renders a compact all-caps-style section label inside the usage card.
@@ -8312,29 +8311,17 @@ fn intersectClipRect(parent: ?palette.Rect, child: palette.Rect) ?palette.Rect {
     };
 }
 
-/// Right-pointing triangle when collapsed, down-pointing when expanded.
-/// Clipped so rows scrolled out of the transcript never bleed into other panes.
+/// Lucide chevron: right when collapsed, down when expanded, centred on
+/// (`cx`, `cy`). Clipped so rows scrolled out of the transcript never bleed
+/// into other panes.
 fn queueCardChevron(state: *app_state.AppState, cx: f32, cy: f32, expanded: bool, color: palette.Color, clip: palette.Rect) void {
-    const half = theme.scaledUi(4.0);
-    if (expanded) {
-        queueTriangleClipped(
-            state,
-            .{ .x = cx - half, .y = cy - half * 0.5 },
-            .{ .x = cx + half, .y = cy - half * 0.5 },
-            .{ .x = cx, .y = cy + half * 0.7 },
-            color,
-            clip,
-        );
-    } else {
-        queueTriangleClipped(
-            state,
-            .{ .x = cx - half * 0.5, .y = cy - half },
-            .{ .x = cx + half * 0.7, .y = cy },
-            .{ .x = cx - half * 0.5, .y = cy + half },
-            color,
-            clip,
-        );
-    }
+    const size = theme.scaledUi(CARD_CHEVRON_SIZE);
+    queueLucideIcon(state, .{
+        .x = cx - size * 0.5,
+        .y = cy - size * 0.5,
+        .w = size,
+        .h = size,
+    }, if (expanded) LU_CHEVRON_DOWN else LU_CHEVRON_RIGHT, color, size, clip);
 }
 
 // Transcript message bubble, including the live activity cue for a pending assistant turn.
