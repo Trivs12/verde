@@ -7296,14 +7296,36 @@ fn renderDiffSummaryCard(
         .h = header_font * 1.4,
     }, header_label orelse "Files changed", paletteColor(theme.COLOR_WHITE), header_font, .ui_medium, clip);
 
-    const counts = std.fmt.allocPrint(state.allocator, "+{d}  -{d}", .{ total_add, total_del }) catch null;
-    defer if (counts) |t| state.allocator.free(t);
-    queueFixedTextLine(state, snapRect(.{
-        .x = counts_x,
-        .y = header_y + theme.scaledUi(9.0),
-        .w = header_counts_w,
-        .h = theme.scaledUi(20.0),
-    }), counts orelse "", paletteColor(theme.COLOR_TEXT_MUTED), theme.scaledUi(13.0), clip);
+    // Totals sit in the file rows' count column (same geometry as the rows
+    // below: a 92-wide +/- column just left of the Comment/Copy/Open
+    // actions) and use the same diff colours.
+    const header_action_font = designUi(DIFF_FILE_ACTION_FONT_CSS);
+    const header_action_pad = designUi(DIFF_FILE_ACTION_PAD_CSS);
+    const header_actions_w = chromeLabelWidth(header_action_font, "Open") + chromeLabelWidth(header_action_font, "Copy") +
+        chromeLabelWidth(header_action_font, "Comment") + header_action_pad * 6.0 + theme.scaledUi(2.0) * 2.0;
+    const header_counts_col_w = theme.scaledUi(92.0);
+    const header_counts_right = bubble.x + bubble.w - pad_x - header_actions_w - theme.scaledUi(8.0);
+    const header_counts_font = theme.scaledUi(13.0);
+    const header_counts_y = header_y + (header_h - header_counts_font * 1.25) * 0.5;
+    const add_total = std.fmt.allocPrint(state.allocator, "+{d}", .{total_add}) catch null;
+    defer if (add_total) |t| state.allocator.free(t);
+    const del_total = std.fmt.allocPrint(state.allocator, "-{d}", .{total_del}) catch null;
+    defer if (del_total) |t| state.allocator.free(t);
+    // Keep the totals clear of the layout toggle when the card is narrow.
+    if (!can_split or header_counts_right <= layout_toggle_rect.x - layout_toggle_gap) {
+        queueFixedTextLine(state, snapRect(.{
+            .x = header_counts_right - header_counts_col_w,
+            .y = header_counts_y,
+            .w = header_counts_col_w * 0.5,
+            .h = header_counts_font * 1.25,
+        }), add_total orelse "", paletteColor(theme.COLOR_DIFF_ADD), header_counts_font, clip);
+        queueFixedTextLine(state, snapRect(.{
+            .x = header_counts_right - header_counts_col_w * 0.5,
+            .y = header_counts_y,
+            .w = header_counts_col_w * 0.5,
+            .h = header_counts_font * 1.25,
+        }), del_total orelse "", paletteColor(theme.COLOR_DIFF_REMOVE), header_counts_font, clip);
+    }
     if (can_split) {
         renderDiffLayoutToggle(state, layout_toggle_rect, layout, clip);
     }
@@ -7512,7 +7534,7 @@ fn renderDiffLayoutOption(
         rect,
         label,
         paletteColor(if (selected or hovered) theme.COLOR_WHITE else theme.COLOR_TEXT_MUTED),
-        theme.scaledUi(10.5),
+        theme.scaledUi(13.0),
         clip,
     );
 }
