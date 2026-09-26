@@ -14,6 +14,8 @@ const sdl = @import("zsdl3");
 const theme = @import("theme.zig");
 const runtime = @import("runtime.zig");
 const sidebar = @import("sidebar.zig");
+const context_menu = @import("context_menu.zig");
+const text_measure = @import("text_measure.zig");
 const workspace_panes = @import("workspace_panes.zig");
 const native_state = @import("../state.zig");
 const app_config = @import("../app/config.zig");
@@ -30,20 +32,119 @@ const log = std.log.scoped(.native_ui_command_palette);
 const MAX_ROWS: usize = 64;
 /// Scratch candidate pool scored before the top results are taken.
 const MAX_CANDIDATES: usize = 512;
-const ROW_H_CSS: f32 = 42.0;
-const HEADER_H_CSS: f32 = 26.0;
-const INPUT_H_CSS: f32 = 38.0;
-const FOOTER_H_CSS: f32 = 30.0;
-const PAD_CSS: f32 = 14.0;
 
-// Lucide (ISC) row glyphs drawn through the `icon_alt` role.
+/// Canvas-to-app scale for the palette's design values (same factor as
+/// `DESIGN_SCALE` in sidebar.zig): the design draws body text at 15px where
+/// the app uses 18 UI units, so a design px is 1.2 UI units. Constants
+/// suffixed `_CSS` below are design px and go through `designUi`.
+const DESIGN_SCALE: f32 = 18.0 / 15.0;
+
+fn designUi(px: f32) f32 {
+    return theme.scaledUi(px * DESIGN_SCALE);
+}
+
+// Dialog shell.
+const DIALOG_W_CSS: f32 = 640.0;
+const DIALOG_H_CSS: f32 = 560.0;
+/// Distance from the window top on tall windows; shorter windows scale down.
+const DIALOG_TOP_CSS: f32 = 110.0;
+const DIALOG_MARGIN_CSS: f32 = 16.0;
+const DIALOG_RADIUS_CSS: f32 = 16.0;
+/// Scrim strength behind the dialog (matches the Settings sheet).
+const SCRIM_ALPHA: f32 = 0.22;
+// Search row.
+const SEARCH_ROW_H_CSS: f32 = 56.0;
+const SEARCH_PAD_X_CSS: f32 = 18.0;
+const SEARCH_ICON_CSS: f32 = 17.0;
+const SEARCH_GAP_CSS: f32 = 12.0;
+const SEARCH_FONT_CSS: f32 = 16.0;
+const SCOPE_FONT_CSS: f32 = 12.0;
+/// `layout.zig` hit-tests modal text from `rect.x + 10` UI units, so the
+/// registered input rect starts this far left of the drawn query text.
+const MODAL_TEXT_INSET_UI: f32 = 10.0;
+// Result list.
+const LIST_PAD_CSS: f32 = 8.0;
+const ROW_GAP_CSS: f32 = 1.0;
+const ROW_H_CSS: f32 = 38.0;
+/// Chat rows carry a second "workspace · age" line.
+const ROW_TWO_LINE_H_CSS: f32 = 44.0;
+const HEADER_FIRST_H_CSS: f32 = 28.0;
+const HEADER_H_CSS: f32 = 34.0;
+const HEADER_FONT_CSS: f32 = 12.0;
+const HEADER_BOTTOM_PAD_CSS: f32 = 4.0;
+const ROW_RADIUS_CSS: f32 = 9.0;
+const ROW_PAD_X_CSS: f32 = 10.0;
+const ROW_ICON_CSS: f32 = 16.0;
+const ROW_ICON_GAP_CSS: f32 = 12.0;
+const ROW_FONT_CSS: f32 = 14.0;
+const ROW_META_FONT_CSS: f32 = 12.0;
+const TAG_FONT_CSS: f32 = 11.5;
+const TAG_PAD_X_CSS: f32 = 6.0;
+const TAG_RADIUS_CSS: f32 = 5.0;
+/// Provider bitmap drawn by `sidebar.queuePaletteProviderGlyph` (UI units).
+const PROVIDER_GLYPH_UI: f32 = 22.0;
+// Footer key hints.
+const FOOTER_H_CSS: f32 = 40.0;
+const FOOTER_GAP_CSS: f32 = 16.0;
+const FOOTER_FONT_CSS: f32 = 12.0;
+const FOOTER_KEY_GAP_CSS: f32 = 5.0;
+// Action submenu (Tab on a chat row).
+const ACTION_MENU_W_CSS: f32 = 200.0;
+// Neutral panel→text tints for fills (see `panelTint`).
+const SELECTED_TINT: f32 = 0.06;
+const HOVER_TINT: f32 = 0.035;
+const DIVIDER_TINT: f32 = 0.07;
+const SCROLL_THUMB_TINT: f32 = 0.22;
+/// Longest title prefix measured for match highlighting; longer titles are
+/// ellipsized well before this at any dialog width.
+const MAX_HIGHLIGHT_BYTES: usize = 256;
+const ELLIPSIS = "\u{2026}";
+
+// Lucide (ISC) glyphs drawn through the `icon_alt` role.
+const LU_SEARCH = "\u{E151}";
 const LU_CHEVRON_RIGHT = "\u{E06F}";
 const LU_FOLDER = "\u{E0D7}";
+const LU_FOLDER_OPEN = "\u{E247}";
+const LU_FOLDER_PLUS = "\u{E0D9}";
+const LU_FOLDER_X = "\u{E33E}";
+const LU_ARCHIVE = "\u{E041}";
 const LU_ARCHIVE_RESTORE = "\u{E2CD}";
-/// Leading glyph slot shared by action/workspace rows (UI units).
-const ROW_GLYPH_X_CSS: f32 = 12.0;
-const ROW_GLYPH_SLOT_CSS: f32 = 16.0;
-const ROW_GLYPH_SIZE_CSS: f32 = 15.0;
+const LU_MESSAGE_SQUARE_PLUS = "\u{E40C}";
+const LU_BOT = "\u{E1BB}";
+const LU_SLIDERS = "\u{E29A}";
+const LU_PENCIL = "\u{E1F9}";
+const LU_WAND = "\u{E357}";
+const LU_REFRESH = "\u{E145}";
+const LU_ARROW_LEFT_RIGHT = "\u{E24A}";
+const LU_SQUARE_TERMINAL = "\u{E20A}";
+const LU_DOWNLOAD = "\u{E0B2}";
+const LU_COLUMNS_2 = "\u{E098}";
+const LU_ROWS_2 = "\u{E439}";
+const LU_COLUMNS_3 = "\u{E099}";
+const LU_CHEVRONS_LEFT_RIGHT = "\u{E293}";
+const LU_GLOBE = "\u{E0E8}";
+const LU_PLUS = "\u{E13D}";
+const LU_COPY = "\u{E09E}";
+const LU_PIN = "\u{E259}";
+const LU_ARROW_LEFT = "\u{E048}";
+const LU_ARROW_RIGHT = "\u{E049}";
+const LU_X = "\u{E1B2}";
+const LU_MAXIMIZE = "\u{E113}";
+const LU_MINIMIZE = "\u{E11B}";
+const LU_PIP = "\u{E3AF}";
+const LU_DOCK = "\u{E455}";
+const LU_LAPTOP = "\u{E1CD}";
+const LU_SETTINGS = "\u{E154}";
+const LU_SMARTPHONE = "\u{E163}";
+const LU_UNLINK = "\u{E19C}";
+const LU_HISTORY = "\u{E1F5}";
+const LU_PANEL_LEFT = "\u{E12A}";
+const LU_CORNER_DOWN_LEFT = "\u{E0A1}";
+// macOS modifier symbols, drawn as Lucide glyphs (see `queueShortcutHint`).
+const LU_COMMAND = "\u{E09A}";
+const LU_SHIFT = "\u{E1E4}";
+const LU_OPTION = "\u{E1F8}";
+const LU_CONTROL = "\u{E070}";
 
 const Section = enum { threads, panes, workspaces, app };
 
@@ -63,6 +164,8 @@ const Command = struct {
     title: []const u8,
     keywords: []const u8 = "",
     section: Section = .app,
+    /// Leading Lucide glyph for the row.
+    icon: []const u8 = LU_CHEVRON_RIGHT,
     keybind: ?KeybindRef = null,
     enabled: *const fn (state: *runtime.AppState) bool = alwaysEnabled,
     run: *const fn (state: *runtime.AppState) void,
@@ -95,68 +198,68 @@ const KeybindRef = enum {
 
 /// Static command table — add a row here to add a palette entry.
 const STATIC_COMMANDS = [_]Command{
-    .{ .id = "thread.new", .title = "New Chat", .keywords = "thread conversation start", .section = .threads, .keybind = .new_thread, .run = runNewChat, .enabled = hasProjects },
-    .{ .id = "thread.choose_model", .title = "Choose Chat Model", .keywords = "provider initial picker", .section = .threads, .keybind = .chat_model_picker, .run = runChooseChatModel, .enabled = hasFocusedGuiChat },
-    .{ .id = "thread.run_config", .title = "Configure Reasoning and Run Settings", .keywords = "effort speed access permissions", .section = .threads, .keybind = .chat_run_config, .run = runChatRunConfig, .enabled = hasFocusedGuiChat },
-    .{ .id = "thread.choose_directory", .title = "Choose Chat Working Directory", .keywords = "cwd folder path scratch home project", .section = .threads, .keybind = .chat_directory_picker, .run = runChooseChatDirectory, .enabled = hasFocusedGuiChat },
-    .{ .id = "thread.rename_current", .title = "Rename Current Chat", .keywords = "thread title label", .section = .threads, .run = runRenameCurrentChat, .enabled = currentThreadCommitted },
-    .{ .id = "thread.regenerate_title", .title = "Regenerate Chat Title", .keywords = "thread rename luna automatic", .section = .threads, .run = runRegenerateChatTitle, .enabled = canRegenerateChatTitle },
-    .{ .id = "thread.sync_current", .title = "Sync Current Thread", .keywords = "refresh provider", .section = .threads, .run = runSyncCurrentThread, .enabled = canSyncCurrentThread },
-    .{ .id = "thread.handoff_current", .title = "Handoff Current Chat or TUI", .keywords = "transfer provider model agent continue context", .section = .threads, .run = runHandoffCurrent, .enabled = canHandoffFocusedPane },
-    .{ .id = "thread.open_current_codex_tui", .title = "Open Codex TUI for Current Thread", .keywords = "open codex tui current thread terminal resume active focused", .section = .threads, .run = runOpenCurrentThreadInTui, .enabled = canOpenFocusedCodexThreadInTui },
-    .{ .id = "thread.open_current_tui", .title = "Open Current Thread in TUI", .keywords = "open agent tui current thread opencode claude cursor terminal resume active focused", .section = .threads, .run = runOpenCurrentThreadInTui, .enabled = canOpenFocusedNonCodexThreadInTui },
-    .{ .id = "thread.archive_current", .title = "Archive Current Thread", .keywords = "delete remove chat", .section = .threads, .run = runArchiveCurrentThread, .enabled = currentThreadNotPending },
-    .{ .id = "thread.import_codex", .title = "Import Codex Thread", .keywords = "resume session", .section = .threads, .run = runImportCodex, .enabled = hasProjects },
-    .{ .id = "thread.import_opencode", .title = "Import OpenCode Thread", .keywords = "resume session", .section = .threads, .run = runImportOpencode, .enabled = hasProjects },
-    .{ .id = "thread.import_claude", .title = "Import Claude Thread", .keywords = "resume session", .section = .threads, .run = runImportClaude, .enabled = hasProjects },
-    .{ .id = "pane.split_chat_right", .title = "Split Chat Right", .keywords = "vsplit vertical pane", .section = .panes, .keybind = .workspace_split_chat_vertical, .run = runSplitChatRight, .enabled = hasProjects },
-    .{ .id = "pane.split_chat_down", .title = "Split Chat Down", .keywords = "hsplit horizontal pane stacked", .section = .panes, .keybind = .workspace_split_chat_horizontal, .run = runSplitChatDown, .enabled = hasProjects },
-    .{ .id = "pane.split_terminal_right", .title = "Split Terminal Right", .keywords = "vsplit vertical shell", .section = .panes, .keybind = .workspace_split_terminal_vertical, .run = runSplitTerminalRight, .enabled = hasProjects },
-    .{ .id = "pane.split_terminal_down", .title = "Split Terminal Down", .keywords = "hsplit horizontal shell stacked", .section = .panes, .keybind = .workspace_split_terminal_horizontal, .run = runSplitTerminalDown, .enabled = hasProjects },
-    .{ .id = "pane.terminal", .title = "Open Terminal Pane", .keywords = "shell console", .section = .panes, .keybind = .toggle_terminal, .run = runOpenTerminal, .enabled = hasProjects },
-    .{ .id = "pane.browser", .title = "Toggle Browser Pane", .keywords = "web url", .section = .panes, .keybind = .toggle_browser, .run = runToggleBrowser, .enabled = hasProjects },
-    .{ .id = "browser.tab.new", .title = "Browser: New Tab", .keywords = "web page create", .section = .panes, .run = runNewBrowserTab, .enabled = hasBrowserPane },
-    .{ .id = "browser.tab.duplicate", .title = "Browser: Duplicate Active Tab", .keywords = "web page copy", .section = .panes, .run = runDuplicateBrowserTab, .enabled = hasBrowserTab },
-    .{ .id = "browser.tab.pin", .title = "Browser: Pin or Unpin Active Tab", .keywords = "web page keep", .section = .panes, .run = runToggleBrowserTabPinned, .enabled = hasBrowserTab },
-    .{ .id = "browser.tab.move_left", .title = "Browser: Move Active Tab Left", .keywords = "web page reorder", .section = .panes, .run = runMoveBrowserTabLeft, .enabled = canMoveBrowserTabLeft },
-    .{ .id = "browser.tab.move_right", .title = "Browser: Move Active Tab Right", .keywords = "web page reorder", .section = .panes, .run = runMoveBrowserTabRight, .enabled = canMoveBrowserTabRight },
-    .{ .id = "browser.tab.close", .title = "Browser: Close Active Tab", .keywords = "web page remove", .section = .panes, .run = runCloseBrowserTab, .enabled = hasBrowserTab },
-    .{ .id = "pane.close", .title = "Close Pane", .section = .panes, .keybind = .workspace_close, .run = runClosePane, .enabled = hasProjects },
-    .{ .id = "pane.zoom", .title = "Zoom Pane", .keywords = "maximize restore fullscreen", .section = .panes, .keybind = .workspace_toggle_maximize, .run = runZoomPane, .enabled = hasProjects },
-    .{ .id = "pane.previous", .title = "Previous Pane", .keywords = "niri scroll focus left up back", .section = .panes, .keybind = .workspace_previous_pane, .run = runPreviousPane, .enabled = canFocusPreviousPane },
-    .{ .id = "pane.next", .title = "Next Pane", .keywords = "niri scroll focus right down forward", .section = .panes, .keybind = .workspace_next_pane, .run = runNextPane, .enabled = canFocusNextPane },
-    .{ .id = "pane.float", .title = "Float Focused Pane", .keywords = "quick scratch overlay", .section = .panes, .run = runFloatPane, .enabled = hasProjects },
-    .{ .id = "pane.quick_toggle", .title = "New or Toggle Quick Terminal", .keywords = "create show hide scratch floating overlay", .section = .panes, .keybind = .workspace_toggle_quick_pane, .run = runToggleQuickPane, .enabled = hasProjects },
-    .{ .id = "pane.quick_maximize", .title = "Maximize or Restore Quick Pane", .keywords = "floating overlay", .section = .panes, .run = runMaximizeQuickPane, .enabled = hasQuickPane },
-    .{ .id = "pane.quick_minimize", .title = "Minimize Quick Pane", .keywords = "hide floating overlay", .section = .panes, .run = runMinimizeQuickPane, .enabled = hasQuickPane },
-    .{ .id = "pane.quick_pin", .title = "Pin or Unpin Quick Pane", .keywords = "floating dim backdrop", .section = .panes, .run = runPinQuickPane, .enabled = hasQuickPane },
-    .{ .id = "pane.quick_tile", .title = "Return Quick Pane to Tile", .keywords = "dock floating", .section = .panes, .run = runTileQuickPane, .enabled = hasQuickPane },
-    .{ .id = "workspace.scrolling_use_global", .title = "Scrolling Layout: Use Global Default", .keywords = "niri panes mode inherit reset", .section = .workspaces, .run = runScrollingUseGlobal, .enabled = hasProjects },
-    .{ .id = "workspace.scrolling_automatic", .title = "Scrolling Layout: Automatic", .keywords = "niri panes mode threshold tiled", .section = .workspaces, .run = runScrollingAutomatic, .enabled = hasProjects },
-    .{ .id = "workspace.scrolling_always", .title = "Scrolling Layout: Always", .keywords = "niri panes mode pin enable", .section = .workspaces, .run = runScrollingAlways, .enabled = hasProjects },
-    .{ .id = "workspace.scrolling_disabled", .title = "Scrolling Layout: Disabled", .keywords = "niri panes mode tiled off disable", .section = .workspaces, .run = runScrollingDisabled, .enabled = hasProjects },
-    .{ .id = "workspace.scrolling_reset_column_width", .title = "Reset Scrolling Pane Widths", .keywords = "niri panes resize default per view", .section = .workspaces, .run = runResetScrollingColumnWidth, .enabled = hasCustomScrollingColumnWidth },
-    .{ .id = "workspace.runtime_default_current", .title = "Use Current Chat Runtime as Workspace Default", .keywords = "local remote new chat thread route", .section = .workspaces, .run = runUseCurrentRuntimeDefault, .enabled = hasFocusedGuiChat },
-    .{ .id = "workspace.runtime_default_local", .title = "Use Local as Workspace Runtime Default", .keywords = "remote new chat thread route reset", .section = .workspaces, .run = runUseLocalRuntimeDefault, .enabled = hasProjects },
-    .{ .id = "workspace.open_settings", .title = "Workspace: Open Settings", .keywords = "default runtime local remote profile connections configure", .section = .workspaces, .run = runOpenWorkspaceSettings, .enabled = hasCommandTargetProject },
-    .{ .id = "workspace.add", .title = "Add Workspace", .keywords = "new project folder directory create", .section = .workspaces, .run = runAddWorkspace },
-    .{ .id = "workspace.rename", .title = "Rename Workspace", .keywords = "label", .section = .workspaces, .run = runRenameWorkspace, .enabled = hasProjects },
-    .{ .id = "workspace.close", .title = "Close Workspace", .keywords = "archive remove project save state", .section = .workspaces, .keybind = .workspace_close_current, .run = runCloseWorkspace, .enabled = workspaceNotBusy },
-    .{ .id = "workspace.reopen", .title = "Reopen Last Closed Workspace", .keywords = "restore archived project", .section = .workspaces, .run = runReopenWorkspace, .enabled = hasClosedWorkspaces },
-    .{ .id = "workspace.codex_tui", .title = "Start New Codex TUI", .keywords = "agent terminal workspace fresh openai", .section = .workspaces, .run = runOpenCodexTui, .enabled = hasProjects },
-    .{ .id = "workspace.claude_tui", .title = "Start New Claude TUI", .keywords = "agent terminal workspace fresh anthropic claude code", .section = .workspaces, .run = runOpenClaudeTui, .enabled = hasProjects },
-    .{ .id = "workspace.opencode_tui", .title = "Start New OpenCode TUI", .keywords = "agent terminal workspace fresh opencode", .section = .workspaces, .run = runOpenOpencodeTui, .enabled = hasProjects },
-    .{ .id = "workspace.cursor_tui", .title = "Start New Cursor TUI", .keywords = "agent terminal workspace fresh cursor agent", .section = .workspaces, .run = runOpenCursorTui, .enabled = hasProjects },
-    .{ .id = "workspace.grok_tui", .title = "Start New Grok TUI", .keywords = "agent terminal workspace fresh xai grok build", .section = .workspaces, .run = runOpenGrokTui, .enabled = hasProjectsAndGrok },
-    .{ .id = "workspace.muse_tui", .title = "Start New Muse TUI", .keywords = "agent terminal workspace fresh meta muse code", .section = .workspaces, .run = runOpenMuseTui, .enabled = hasProjects },
-    .{ .id = "app.grok_setup", .title = "Set Up Grok Build", .keywords = "install xai agent provider tui", .section = .app, .run = runGrokSetup, .enabled = grokSetupNeeded },
-    .{ .id = "workspace.amp_tui", .title = "Start New Amp TUI", .keywords = "agent terminal workspace fresh amp sourcegraph", .section = .workspaces, .run = runOpenAmpTui, .enabled = hasProjects },
-    .{ .id = "workspace.herdr_handoff", .title = "Handoff Workspace to Herdr", .keywords = "runtime local terminal tui phone", .section = .workspaces, .run = runHerdrHandoffWorkspace, .enabled = hasProjects },
-    .{ .id = "workspace.herdr_focus_terminal", .title = "Open/Focus Herdr Terminal", .keywords = "runtime terminal tui", .section = .workspaces, .run = runFocusHerdrTerminal, .enabled = currentWorkspaceHerdrLinked },
-    .{ .id = "workspace.herdr_unlink", .title = "Run Workspace Locally", .keywords = "unlink herdr runtime local", .section = .workspaces, .run = runUnlinkHerdrWorkspace, .enabled = currentWorkspaceHerdrLinked },
-    .{ .id = "app.history", .title = "History: This Workspace", .keywords = "saved chats threads search recent", .section = .app, .run = runHistoryThisWorkspace, .enabled = hasProjects, .keeps_open = true },
-    .{ .id = "app.settings", .title = "Open Settings", .keywords = "preferences config options", .section = .app, .keybind = .settings, .run = runSettings },
-    .{ .id = "app.sidebar", .title = "Toggle Sidebar", .keywords = "rail collapse", .section = .app, .keybind = .toggle_sidebar, .run = runToggleSidebar },
+    .{ .id = "thread.new", .title = "New Chat", .keywords = "thread conversation start", .section = .threads, .icon = LU_MESSAGE_SQUARE_PLUS, .keybind = .new_thread, .run = runNewChat, .enabled = hasProjects },
+    .{ .id = "thread.choose_model", .title = "Choose Chat Model", .keywords = "provider initial picker", .section = .threads, .icon = LU_BOT, .keybind = .chat_model_picker, .run = runChooseChatModel, .enabled = hasFocusedGuiChat },
+    .{ .id = "thread.run_config", .title = "Configure Reasoning and Run Settings", .keywords = "effort speed access permissions", .section = .threads, .icon = LU_SLIDERS, .keybind = .chat_run_config, .run = runChatRunConfig, .enabled = hasFocusedGuiChat },
+    .{ .id = "thread.choose_directory", .title = "Choose Chat Working Directory", .keywords = "cwd folder path scratch home project", .section = .threads, .icon = LU_FOLDER_OPEN, .keybind = .chat_directory_picker, .run = runChooseChatDirectory, .enabled = hasFocusedGuiChat },
+    .{ .id = "thread.rename_current", .title = "Rename Current Chat", .keywords = "thread title label", .section = .threads, .icon = LU_PENCIL, .run = runRenameCurrentChat, .enabled = currentThreadCommitted },
+    .{ .id = "thread.regenerate_title", .title = "Regenerate Chat Title", .keywords = "thread rename luna automatic", .section = .threads, .icon = LU_WAND, .run = runRegenerateChatTitle, .enabled = canRegenerateChatTitle },
+    .{ .id = "thread.sync_current", .title = "Sync Current Thread", .keywords = "refresh provider", .section = .threads, .icon = LU_REFRESH, .run = runSyncCurrentThread, .enabled = canSyncCurrentThread },
+    .{ .id = "thread.handoff_current", .title = "Handoff Current Chat or TUI", .keywords = "transfer provider model agent continue context", .section = .threads, .icon = LU_ARROW_LEFT_RIGHT, .run = runHandoffCurrent, .enabled = canHandoffFocusedPane },
+    .{ .id = "thread.open_current_codex_tui", .title = "Open Codex TUI for Current Thread", .keywords = "open codex tui current thread terminal resume active focused", .section = .threads, .icon = LU_SQUARE_TERMINAL, .run = runOpenCurrentThreadInTui, .enabled = canOpenFocusedCodexThreadInTui },
+    .{ .id = "thread.open_current_tui", .title = "Open Current Thread in TUI", .keywords = "open agent tui current thread opencode claude cursor terminal resume active focused", .section = .threads, .icon = LU_SQUARE_TERMINAL, .run = runOpenCurrentThreadInTui, .enabled = canOpenFocusedNonCodexThreadInTui },
+    .{ .id = "thread.archive_current", .title = "Archive Current Thread", .keywords = "delete remove chat", .section = .threads, .icon = LU_ARCHIVE, .run = runArchiveCurrentThread, .enabled = currentThreadNotPending },
+    .{ .id = "thread.import_codex", .title = "Import Codex Thread", .keywords = "resume session", .section = .threads, .icon = LU_DOWNLOAD, .run = runImportCodex, .enabled = hasProjects },
+    .{ .id = "thread.import_opencode", .title = "Import OpenCode Thread", .keywords = "resume session", .section = .threads, .icon = LU_DOWNLOAD, .run = runImportOpencode, .enabled = hasProjects },
+    .{ .id = "thread.import_claude", .title = "Import Claude Thread", .keywords = "resume session", .section = .threads, .icon = LU_DOWNLOAD, .run = runImportClaude, .enabled = hasProjects },
+    .{ .id = "pane.split_chat_right", .title = "Split Chat Right", .keywords = "vsplit vertical pane", .section = .panes, .icon = LU_COLUMNS_2, .keybind = .workspace_split_chat_vertical, .run = runSplitChatRight, .enabled = hasProjects },
+    .{ .id = "pane.split_chat_down", .title = "Split Chat Down", .keywords = "hsplit horizontal pane stacked", .section = .panes, .icon = LU_ROWS_2, .keybind = .workspace_split_chat_horizontal, .run = runSplitChatDown, .enabled = hasProjects },
+    .{ .id = "pane.split_terminal_right", .title = "Split Terminal Right", .keywords = "vsplit vertical shell", .section = .panes, .icon = LU_COLUMNS_2, .keybind = .workspace_split_terminal_vertical, .run = runSplitTerminalRight, .enabled = hasProjects },
+    .{ .id = "pane.split_terminal_down", .title = "Split Terminal Down", .keywords = "hsplit horizontal shell stacked", .section = .panes, .icon = LU_ROWS_2, .keybind = .workspace_split_terminal_horizontal, .run = runSplitTerminalDown, .enabled = hasProjects },
+    .{ .id = "pane.terminal", .title = "Open Terminal Pane", .keywords = "shell console", .section = .panes, .icon = LU_SQUARE_TERMINAL, .keybind = .toggle_terminal, .run = runOpenTerminal, .enabled = hasProjects },
+    .{ .id = "pane.browser", .title = "Toggle Browser Pane", .keywords = "web url", .section = .panes, .icon = LU_GLOBE, .keybind = .toggle_browser, .run = runToggleBrowser, .enabled = hasProjects },
+    .{ .id = "browser.tab.new", .title = "Browser: New Tab", .keywords = "web page create", .section = .panes, .icon = LU_PLUS, .run = runNewBrowserTab, .enabled = hasBrowserPane },
+    .{ .id = "browser.tab.duplicate", .title = "Browser: Duplicate Active Tab", .keywords = "web page copy", .section = .panes, .icon = LU_COPY, .run = runDuplicateBrowserTab, .enabled = hasBrowserTab },
+    .{ .id = "browser.tab.pin", .title = "Browser: Pin or Unpin Active Tab", .keywords = "web page keep", .section = .panes, .icon = LU_PIN, .run = runToggleBrowserTabPinned, .enabled = hasBrowserTab },
+    .{ .id = "browser.tab.move_left", .title = "Browser: Move Active Tab Left", .keywords = "web page reorder", .section = .panes, .icon = LU_ARROW_LEFT, .run = runMoveBrowserTabLeft, .enabled = canMoveBrowserTabLeft },
+    .{ .id = "browser.tab.move_right", .title = "Browser: Move Active Tab Right", .keywords = "web page reorder", .section = .panes, .icon = LU_ARROW_RIGHT, .run = runMoveBrowserTabRight, .enabled = canMoveBrowserTabRight },
+    .{ .id = "browser.tab.close", .title = "Browser: Close Active Tab", .keywords = "web page remove", .section = .panes, .icon = LU_X, .run = runCloseBrowserTab, .enabled = hasBrowserTab },
+    .{ .id = "pane.close", .title = "Close Pane", .section = .panes, .icon = LU_X, .keybind = .workspace_close, .run = runClosePane, .enabled = hasProjects },
+    .{ .id = "pane.zoom", .title = "Zoom Pane", .keywords = "maximize restore fullscreen", .section = .panes, .icon = LU_MAXIMIZE, .keybind = .workspace_toggle_maximize, .run = runZoomPane, .enabled = hasProjects },
+    .{ .id = "pane.previous", .title = "Previous Pane", .keywords = "niri scroll focus left up back", .section = .panes, .icon = LU_ARROW_LEFT, .keybind = .workspace_previous_pane, .run = runPreviousPane, .enabled = canFocusPreviousPane },
+    .{ .id = "pane.next", .title = "Next Pane", .keywords = "niri scroll focus right down forward", .section = .panes, .icon = LU_ARROW_RIGHT, .keybind = .workspace_next_pane, .run = runNextPane, .enabled = canFocusNextPane },
+    .{ .id = "pane.float", .title = "Float Focused Pane", .keywords = "quick scratch overlay", .section = .panes, .icon = LU_PIP, .run = runFloatPane, .enabled = hasProjects },
+    .{ .id = "pane.quick_toggle", .title = "New or Toggle Quick Terminal", .keywords = "create show hide scratch floating overlay", .section = .panes, .icon = LU_SQUARE_TERMINAL, .keybind = .workspace_toggle_quick_pane, .run = runToggleQuickPane, .enabled = hasProjects },
+    .{ .id = "pane.quick_maximize", .title = "Maximize or Restore Quick Pane", .keywords = "floating overlay", .section = .panes, .icon = LU_MAXIMIZE, .run = runMaximizeQuickPane, .enabled = hasQuickPane },
+    .{ .id = "pane.quick_minimize", .title = "Minimize Quick Pane", .keywords = "hide floating overlay", .section = .panes, .icon = LU_MINIMIZE, .run = runMinimizeQuickPane, .enabled = hasQuickPane },
+    .{ .id = "pane.quick_pin", .title = "Pin or Unpin Quick Pane", .keywords = "floating dim backdrop", .section = .panes, .icon = LU_PIN, .run = runPinQuickPane, .enabled = hasQuickPane },
+    .{ .id = "pane.quick_tile", .title = "Return Quick Pane to Tile", .keywords = "dock floating", .section = .panes, .icon = LU_DOCK, .run = runTileQuickPane, .enabled = hasQuickPane },
+    .{ .id = "workspace.scrolling_use_global", .title = "Scrolling Layout: Use Global Default", .keywords = "niri panes mode inherit reset", .section = .workspaces, .icon = LU_COLUMNS_3, .run = runScrollingUseGlobal, .enabled = hasProjects },
+    .{ .id = "workspace.scrolling_automatic", .title = "Scrolling Layout: Automatic", .keywords = "niri panes mode threshold tiled", .section = .workspaces, .icon = LU_COLUMNS_3, .run = runScrollingAutomatic, .enabled = hasProjects },
+    .{ .id = "workspace.scrolling_always", .title = "Scrolling Layout: Always", .keywords = "niri panes mode pin enable", .section = .workspaces, .icon = LU_COLUMNS_3, .run = runScrollingAlways, .enabled = hasProjects },
+    .{ .id = "workspace.scrolling_disabled", .title = "Scrolling Layout: Disabled", .keywords = "niri panes mode tiled off disable", .section = .workspaces, .icon = LU_COLUMNS_3, .run = runScrollingDisabled, .enabled = hasProjects },
+    .{ .id = "workspace.scrolling_reset_column_width", .title = "Reset Scrolling Pane Widths", .keywords = "niri panes resize default per view", .section = .workspaces, .icon = LU_CHEVRONS_LEFT_RIGHT, .run = runResetScrollingColumnWidth, .enabled = hasCustomScrollingColumnWidth },
+    .{ .id = "workspace.runtime_default_current", .title = "Use Current Chat Runtime as Workspace Default", .keywords = "local remote new chat thread route", .section = .workspaces, .icon = LU_LAPTOP, .run = runUseCurrentRuntimeDefault, .enabled = hasFocusedGuiChat },
+    .{ .id = "workspace.runtime_default_local", .title = "Use Local as Workspace Runtime Default", .keywords = "remote new chat thread route reset", .section = .workspaces, .icon = LU_LAPTOP, .run = runUseLocalRuntimeDefault, .enabled = hasProjects },
+    .{ .id = "workspace.open_settings", .title = "Workspace: Open Settings", .keywords = "default runtime local remote profile connections configure", .section = .workspaces, .icon = LU_SETTINGS, .run = runOpenWorkspaceSettings, .enabled = hasCommandTargetProject },
+    .{ .id = "workspace.add", .title = "Add Workspace", .keywords = "new project folder directory create", .section = .workspaces, .icon = LU_FOLDER_PLUS, .run = runAddWorkspace },
+    .{ .id = "workspace.rename", .title = "Rename Workspace", .keywords = "label", .section = .workspaces, .icon = LU_PENCIL, .run = runRenameWorkspace, .enabled = hasProjects },
+    .{ .id = "workspace.close", .title = "Close Workspace", .keywords = "archive remove project save state", .section = .workspaces, .icon = LU_FOLDER_X, .keybind = .workspace_close_current, .run = runCloseWorkspace, .enabled = workspaceNotBusy },
+    .{ .id = "workspace.reopen", .title = "Reopen Last Closed Workspace", .keywords = "restore archived project", .section = .workspaces, .icon = LU_ARCHIVE_RESTORE, .run = runReopenWorkspace, .enabled = hasClosedWorkspaces },
+    .{ .id = "workspace.codex_tui", .title = "Start New Codex TUI", .keywords = "agent terminal workspace fresh openai", .section = .workspaces, .icon = LU_SQUARE_TERMINAL, .run = runOpenCodexTui, .enabled = hasProjects },
+    .{ .id = "workspace.claude_tui", .title = "Start New Claude TUI", .keywords = "agent terminal workspace fresh anthropic claude code", .section = .workspaces, .icon = LU_SQUARE_TERMINAL, .run = runOpenClaudeTui, .enabled = hasProjects },
+    .{ .id = "workspace.opencode_tui", .title = "Start New OpenCode TUI", .keywords = "agent terminal workspace fresh opencode", .section = .workspaces, .icon = LU_SQUARE_TERMINAL, .run = runOpenOpencodeTui, .enabled = hasProjects },
+    .{ .id = "workspace.cursor_tui", .title = "Start New Cursor TUI", .keywords = "agent terminal workspace fresh cursor agent", .section = .workspaces, .icon = LU_SQUARE_TERMINAL, .run = runOpenCursorTui, .enabled = hasProjects },
+    .{ .id = "workspace.grok_tui", .title = "Start New Grok TUI", .keywords = "agent terminal workspace fresh xai grok build", .section = .workspaces, .icon = LU_SQUARE_TERMINAL, .run = runOpenGrokTui, .enabled = hasProjectsAndGrok },
+    .{ .id = "workspace.muse_tui", .title = "Start New Muse TUI", .keywords = "agent terminal workspace fresh meta muse code", .section = .workspaces, .icon = LU_SQUARE_TERMINAL, .run = runOpenMuseTui, .enabled = hasProjects },
+    .{ .id = "app.grok_setup", .title = "Set Up Grok Build", .keywords = "install xai agent provider tui", .section = .app, .icon = LU_DOWNLOAD, .run = runGrokSetup, .enabled = grokSetupNeeded },
+    .{ .id = "workspace.amp_tui", .title = "Start New Amp TUI", .keywords = "agent terminal workspace fresh amp sourcegraph", .section = .workspaces, .icon = LU_SQUARE_TERMINAL, .run = runOpenAmpTui, .enabled = hasProjects },
+    .{ .id = "workspace.herdr_handoff", .title = "Handoff Workspace to Herdr", .keywords = "runtime local terminal tui phone", .section = .workspaces, .icon = LU_SMARTPHONE, .run = runHerdrHandoffWorkspace, .enabled = hasProjects },
+    .{ .id = "workspace.herdr_focus_terminal", .title = "Open/Focus Herdr Terminal", .keywords = "runtime terminal tui", .section = .workspaces, .icon = LU_SQUARE_TERMINAL, .run = runFocusHerdrTerminal, .enabled = currentWorkspaceHerdrLinked },
+    .{ .id = "workspace.herdr_unlink", .title = "Run Workspace Locally", .keywords = "unlink herdr runtime local", .section = .workspaces, .icon = LU_UNLINK, .run = runUnlinkHerdrWorkspace, .enabled = currentWorkspaceHerdrLinked },
+    .{ .id = "app.history", .title = "History: This Workspace", .keywords = "saved chats threads search recent", .section = .app, .icon = LU_HISTORY, .run = runHistoryThisWorkspace, .enabled = hasProjects, .keeps_open = true },
+    .{ .id = "app.settings", .title = "Open Settings", .keywords = "preferences config options", .section = .app, .icon = LU_SETTINGS, .keybind = .settings, .run = runSettings },
+    .{ .id = "app.sidebar", .title = "Toggle Sidebar", .keywords = "rail collapse", .section = .app, .icon = LU_PANEL_LEFT, .keybind = .toggle_sidebar, .run = runToggleSidebar },
 };
 
 const ThreadRef = struct { project: usize, thread: usize };
@@ -200,8 +303,13 @@ var results: [MAX_ROWS]Result = undefined;
 var result_count: usize = 0;
 var row_rects: [MAX_ROWS]palette.Rect = undefined;
 var modal_rect: palette.Rect = .{};
+var search_rect: palette.Rect = .{};
 var input_rect: palette.Rect = .{};
 var list_rect: palette.Rect = .{};
+var footer_rect: palette.Rect = .{};
+/// Left edge of the drawn query text and of the scope label.
+var search_text_x: f32 = 0.0;
+var scope_x: f32 = 0.0;
 var scroll_y: f32 = 0.0;
 var max_scroll_y: f32 = 0.0;
 var hovered_row: ?usize = null;
@@ -487,43 +595,26 @@ pub fn runActionRow(state: *runtime.AppState, action_index: usize) void {
     }
 }
 
-/// Renders the palette overlay: scrim, chrome, search field, scope line,
-/// result rows, optional action submenu, footer key hints, and scrollbar.
+/// Renders the palette overlay: scrim, dialog shell, search row, result
+/// rows, optional action submenu, footer key hints, and scrollbar.
 pub fn render(state: *runtime.AppState, width: f32, height: f32) void {
     if (!state.command_controller.open) return;
     computeLayout(state, width, height);
 
-    // Scrim + modal chrome. The panel fill derives from the dark `background`
-    // via a small lighten, NOT COLOR_PANEL_ALT: under omarchy themes panel_alt /
-    // panel_muted are sourced from terminal color0/color8, which can be *light*
-    // mid-grays. Using them as the body-text backdrop produced light-text-on-
-    // light-panel and made the palette unreadable. Lightening the (always dark)
-    // background keeps a subtle elevation while guaranteeing the text tokens land
-    // on a dark surface, matching the contrast the rest of the UI gets on PANEL.
-    // The scrim is a touch heavier (0.55) so background content reads as dimmed.
-    queueRect(state, .{ .x = 0.0, .y = 0.0, .w = width, .h = height }, paletteColor(theme.scrim(0.55)));
-    queueRoundedRect(state, modal_rect, paletteColor(theme.raise(theme.background(), 0.04)), theme.scaledUi(16.0));
-    queueBorder(state, modal_rect, paletteColor(theme.COLOR_PANEL_MUTED), theme.scaledUi(16.0), theme.scaledUi(1.0));
+    // Scrim, then the dialog on the neutral panel surface with a soft
+    // stacked shadow and a hairline edge (the edge carries the separation on
+    // dark themes where the shadow barely reads).
+    queueRect(state, .{ .x = 0.0, .y = 0.0, .w = width, .h = height }, paletteColor(theme.scrim(SCRIM_ALPHA)));
+    const radius = designUi(DIALOG_RADIUS_CSS);
+    queueDialogShadow(state, modal_rect, radius);
+    queueRoundedRect(state, modal_rect, paletteColor(theme.COLOR_PANEL), radius);
+    queueBorder(state, modal_rect, paletteColor(theme.restingEdge()), radius, hairline());
 
-    renderSearchField(state);
-    renderScopeLine(state);
+    renderSearchRow(state);
     renderRows(state);
     renderFooter(state);
+    renderScrollbar(state);
     if (state.command_controller.action_menu_open) renderActionMenu(state);
-
-    // Scrollbar on the list region when results overflow.
-    if (max_scroll_y > 1.0 and list_rect.h > theme.scaledUi(32.0)) {
-        const track: palette.Rect = .{
-            .x = modal_rect.x + modal_rect.w - theme.scaledUi(8.0),
-            .y = list_rect.y + theme.scaledUi(2.0),
-            .w = theme.scaledUi(3.0),
-            .h = list_rect.h - theme.scaledUi(4.0),
-        };
-        const thumb_h = @max(theme.scaledUi(28.0), track.h * (track.h / (track.h + max_scroll_y)));
-        const thumb_y = track.y + (track.h - thumb_h) * (scroll_y / max_scroll_y);
-        queueRoundedRect(state, track, paletteColor(theme.withAlpha(theme.COLOR_PANEL_MUTED, 120)), theme.scaledUi(2.0));
-        queueRoundedRect(state, .{ .x = track.x, .y = thumb_y, .w = track.w, .h = thumb_h }, paletteColor(theme.withAlpha(theme.COLOR_TEXT_MUTED, 200)), theme.scaledUi(2.0));
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -533,56 +624,91 @@ pub fn render(state: *runtime.AppState, width: f32, height: f32) void {
 /// Recomputes the modal geometry and result rows for the current state. Pure
 /// function of state + window size; cheap enough to run twice per frame.
 fn computeLayout(state: *runtime.AppState, width: f32, height: f32) void {
-    const modal_w = theme.clampf(width * 0.46, theme.scaledUi(480.0), theme.scaledUi(720.0));
-    const modal_h = theme.clampf(height * 0.62, theme.scaledUi(340.0), theme.scaledUi(640.0));
-    // Anchored in the upper third like launcher UIs, so results grow downward
-    // and the eye line stays stable while typing.
-    const modal_y = @max(height * 0.14, theme.scaledUi(24.0));
-    modal_rect = .{ .x = (width - modal_w) * 0.5, .y = modal_y, .w = modal_w, .h = modal_h };
+    // Dialog: fixed design size, shrunk to fit small windows, anchored near
+    // the top like launcher UIs so the eye line stays put while typing.
+    const margin = designUi(DIALOG_MARGIN_CSS);
+    const modal_w = @max(@min(designUi(DIALOG_W_CSS), width - margin * 2.0), 0.0);
+    const modal_y = theme.clampf(height * 0.12, margin, designUi(DIALOG_TOP_CSS));
+    const modal_h = @max(@min(designUi(DIALOG_H_CSS), height - modal_y - margin), 0.0);
+    modal_rect = context_menu.snap(.{ .x = (width - modal_w) * 0.5, .y = modal_y, .w = modal_w, .h = modal_h });
 
-    const pad = theme.scaledUi(PAD_CSS);
+    // Search row: icon, query text, scope label at the right edge. The input
+    // hit rect starts `MODAL_TEXT_INSET_UI` left of the text so layout.zig's
+    // click-to-caret mapping lands on the drawn glyphs.
+    const pad_x = designUi(SEARCH_PAD_X_CSS);
+    search_rect = .{ .x = modal_rect.x, .y = modal_rect.y, .w = modal_rect.w, .h = designUi(SEARCH_ROW_H_CSS) };
+    search_text_x = modal_rect.x + pad_x + designUi(SEARCH_ICON_CSS) + designUi(SEARCH_GAP_CSS);
+    var scope_buf: [160]u8 = undefined;
+    const scope_label = scopeLabel(state, &scope_buf);
+    const scope_w = text_measure.textWidth(.ui, designUi(SCOPE_FONT_CSS), scope_label);
+    scope_x = modal_rect.x + modal_rect.w - pad_x - scope_w;
+    const input_x = search_text_x - theme.scaledUi(MODAL_TEXT_INSET_UI);
     input_rect = .{
-        .x = modal_rect.x + pad,
-        .y = modal_rect.y + pad,
-        .w = modal_rect.w - pad * 2.0,
-        .h = theme.scaledUi(INPUT_H_CSS),
+        .x = input_x,
+        .y = search_rect.y,
+        .w = @max(scope_x - designUi(SEARCH_GAP_CSS) - input_x, theme.scaledUi(40.0)),
+        .h = search_rect.h,
     };
-    const scope_h = theme.scaledUi(22.0);
-    const list_top = input_rect.y + input_rect.h + scope_h + theme.scaledUi(4.0);
-    const footer_h = theme.scaledUi(FOOTER_H_CSS);
+
+    const footer_h = designUi(FOOTER_H_CSS);
+    footer_rect = .{ .x = modal_rect.x, .y = modal_rect.y + modal_rect.h - footer_h, .w = modal_rect.w, .h = footer_h };
+    const list_pad = designUi(LIST_PAD_CSS);
+    const list_top = search_rect.y + search_rect.h + list_pad;
     list_rect = .{
-        .x = modal_rect.x + pad,
+        .x = modal_rect.x + list_pad,
         .y = list_top,
-        .w = modal_rect.w - pad * 2.0,
-        .h = @max(modal_rect.y + modal_rect.h - footer_h - list_top, 0.0),
+        .w = @max(modal_rect.w - list_pad * 2.0, 0.0),
+        .h = @max(footer_rect.y - list_pad - list_top, 0.0),
     };
 
     rebuildResults(state);
 
-    // Row geometry: headers are shorter than selectable rows.
-    var y = list_rect.y - scroll_y;
-    var i: usize = 0;
-    while (i < result_count) : (i += 1) {
-        const h = if (results[i].ref == .header) theme.scaledUi(HEADER_H_CSS) else theme.scaledUi(ROW_H_CSS);
-        row_rects[i] = .{ .x = list_rect.x, .y = y, .w = list_rect.w, .h = h };
-        y += h;
-    }
-    const content_h = y + scroll_y - list_rect.y;
+    layoutRows();
+    const content_h = if (result_count > 0) row_rects[result_count - 1].y + row_rects[result_count - 1].h + scroll_y - list_rect.y else 0.0;
     max_scroll_y = @max(content_h - list_rect.h, 0.0);
     scroll_y = theme.clampf(scroll_y, 0.0, max_scroll_y);
 
     ensureSelectedVisible(state);
 
     // Re-derive row rects after any scroll adjustment so hits match visuals.
-    y = list_rect.y - scroll_y;
-    i = 0;
-    while (i < result_count) : (i += 1) {
-        const h = if (results[i].ref == .header) theme.scaledUi(HEADER_H_CSS) else theme.scaledUi(ROW_H_CSS);
-        row_rects[i] = .{ .x = list_rect.x, .y = y, .w = list_rect.w, .h = h };
-        y += h;
-    }
+    layoutRows();
 
     computeActionMenuLayout(state);
+}
+
+/// Stacks result rows from the list top at the current scroll offset.
+fn layoutRows() void {
+    var y = list_rect.y - scroll_y;
+    for (0..result_count) |i| {
+        const h = rowHeight(results[i].ref, i == 0);
+        row_rects[i] = .{ .x = list_rect.x, .y = y, .w = list_rect.w, .h = h };
+        y += h + designUi(ROW_GAP_CSS);
+    }
+}
+
+/// Section headers carry their own top gap (smaller for the first one);
+/// chat rows are taller for their second line.
+fn rowHeight(ref: ResultRef, first: bool) f32 {
+    return switch (ref) {
+        .header => designUi(if (first) HEADER_FIRST_H_CSS else HEADER_H_CSS),
+        .thread, .history, .agent_tui => designUi(ROW_TWO_LINE_H_CSS),
+        .command, .workspace, .closed_workspace => designUi(ROW_H_CSS),
+    };
+}
+
+/// Right-hand label of the search row: which history the palette searches.
+fn scopeLabel(state: *runtime.AppState, buf: []u8) []const u8 {
+    if (state.command_controller.scope_project) |pi| {
+        if (pi < state.project_controller.projects.items.len) {
+            return std.fmt.bufPrint(buf, "{s} history", .{state.project_controller.projects.items[pi].label}) catch "Workspace history";
+        }
+    }
+    return "All workspaces";
+}
+
+/// Query-field font size, shared with layout.zig's click-to-caret mapping.
+pub fn searchFontSize() f32 {
+    return designUi(SEARCH_FONT_CSS);
 }
 
 /// Builds the result list for the current query + scope, resetting selection
@@ -634,23 +760,26 @@ fn buildSuggestions(state: *runtime.AppState) void {
         }
     }
     if (recent_count > 0) {
-        appendResult(.{ .header = "RECENT CHATS" });
+        appendResult(.{ .header = "Recent chats" });
         for (recent[0..recent_count]) |entry| appendResult(.{ .thread = entry.ref });
     }
-    appendResult(.{ .header = "COMMANDS" });
+    appendResult(.{ .header = "Commands" });
     for (STATIC_COMMANDS, 0..) |command, ci| {
         if (!command.enabled(state)) continue;
         appendResult(.{ .command = ci });
     }
-    if (state.project_controller.projects.items.len > 1) {
-        appendResult(.{ .header = "WORKSPACES" });
+    // Open workspaces to switch to, then closed ones (tagged "closed" on the
+    // row) under the same section.
+    const has_switch_targets = state.project_controller.projects.items.len > 1;
+    const has_closed = state.project_controller.archived_projects.items.len > 0;
+    if (has_switch_targets or has_closed) appendResult(.{ .header = "Workspaces" });
+    if (has_switch_targets) {
         for (state.project_controller.projects.items, 0..) |_, pi| {
             if (pi == state.project_controller.selected_index) continue;
             appendResult(.{ .workspace = pi });
         }
     }
-    if (state.project_controller.archived_projects.items.len > 0) {
-        appendResult(.{ .header = "CLOSED WORKSPACES" });
+    if (has_closed) {
         var remaining = state.project_controller.archived_projects.items.len;
         while (remaining > 0) {
             remaining -= 1;
@@ -714,9 +843,9 @@ fn buildScopedHistory(state: *runtime.AppState, project_index: usize, query: []c
             if (next_bucket > bucket) {
                 bucket = next_bucket;
                 appendResult(.{ .header = switch (next_bucket) {
-                    1 => "TODAY",
-                    2 => "THIS WEEK",
-                    else => "OLDER",
+                    1 => "Today",
+                    2 => "This week",
+                    else => "Older",
                 } });
             }
         }
@@ -798,8 +927,48 @@ fn buildRanked(state: *runtime.AppState, query: []const u8) void {
     }
 
     std.sort.pdq(Candidate, candidates[0..candidate_count], {}, candidateLessThan);
-    for (candidates[0..@min(candidate_count, MAX_ROWS)]) |candidate| {
-        appendResult(candidate.ref);
+    appendGroupedCandidates(candidates[0..candidate_count]);
+}
+
+/// Section a ranked result is listed under while searching.
+const ResultGroup = enum { commands, chats, workspaces };
+
+fn resultGroup(ref: ResultRef) ResultGroup {
+    return switch (ref) {
+        .command, .header => .commands,
+        .thread, .agent_tui, .history => .chats,
+        .workspace, .closed_workspace => .workspaces,
+    };
+}
+
+fn resultGroupLabel(group: ResultGroup) []const u8 {
+    return switch (group) {
+        .commands => "Commands",
+        .chats => "Recent chats",
+        .workspaces => "Workspaces",
+    };
+}
+
+/// Emits score-sorted candidates under section headers. Sections appear in
+/// the order of their best match and keep score order inside, so the top
+/// overall match stays the first selectable row.
+fn appendGroupedCandidates(sorted: []const Candidate) void {
+    const group_count = @typeInfo(ResultGroup).@"enum".fields.len;
+    const take = sorted[0..@min(sorted.len, MAX_ROWS - group_count)];
+    var order: [group_count]ResultGroup = undefined;
+    var order_len: usize = 0;
+    for (take) |candidate| {
+        const group = resultGroup(candidate.ref);
+        if (std.mem.indexOfScalar(ResultGroup, order[0..order_len], group) == null) {
+            order[order_len] = group;
+            order_len += 1;
+        }
+    }
+    for (order[0..order_len]) |group| {
+        appendResult(.{ .header = resultGroupLabel(group) });
+        for (take) |candidate| {
+            if (resultGroup(candidate.ref) == group) appendResult(candidate.ref);
+        }
     }
 }
 
@@ -1014,22 +1183,24 @@ fn computeActionMenuLayout(state: *runtime.AppState) void {
     appendAction(.handoff, "Handoff to Another Agent", !pending);
     appendAction(.archive, "Archive Thread", !pending);
 
-    const row_h = theme.scaledUi(32.0);
-    const menu_w = theme.scaledUi(220.0);
-    const menu_pad = theme.scaledUi(6.0);
+    // Shared context-menu metrics, anchored under the selected row's right
+    // edge (flipped above it when the dialog bottom would clip it).
+    const row_h = theme.scaledUi(context_menu.ROW_HEIGHT_UI);
+    const menu_w = designUi(ACTION_MENU_W_CSS);
+    const menu_pad = theme.scaledUi(context_menu.PAD_UI);
     const menu_h = menu_pad * 2.0 + row_h * @as(f32, @floatFromInt(action_count));
     const anchor = row_rects[selected];
-    var menu_x = anchor.x + anchor.w - menu_w - theme.scaledUi(8.0);
-    var menu_y = anchor.y + anchor.h - theme.scaledUi(2.0);
-    menu_x = theme.clampf(menu_x, modal_rect.x + theme.scaledUi(8.0), modal_rect.x + modal_rect.w - menu_w - theme.scaledUi(8.0));
-    if (menu_y + menu_h > modal_rect.y + modal_rect.h) menu_y = anchor.y - menu_h + theme.scaledUi(2.0);
-    action_menu_rect = .{ .x = menu_x, .y = menu_y, .w = menu_w, .h = menu_h };
-    var i: usize = 0;
-    while (i < action_count) : (i += 1) {
+    const edge = designUi(LIST_PAD_CSS);
+    var menu_x = anchor.x + anchor.w - menu_w - edge;
+    var menu_y = anchor.y + anchor.h + theme.scaledUi(2.0);
+    menu_x = theme.clampf(menu_x, modal_rect.x + edge, modal_rect.x + modal_rect.w - menu_w - edge);
+    if (menu_y + menu_h > modal_rect.y + modal_rect.h) menu_y = anchor.y - menu_h - theme.scaledUi(2.0);
+    action_menu_rect = context_menu.snap(.{ .x = menu_x, .y = menu_y, .w = menu_w, .h = menu_h });
+    for (0..action_count) |i| {
         action_rects[i] = .{
-            .x = menu_x + theme.scaledUi(4.0),
-            .y = menu_y + menu_pad + row_h * @as(f32, @floatFromInt(i)),
-            .w = menu_w - theme.scaledUi(8.0),
+            .x = action_menu_rect.x + menu_pad,
+            .y = action_menu_rect.y + menu_pad + row_h * @as(f32, @floatFromInt(i)),
+            .w = action_menu_rect.w - menu_pad * 2.0,
             .h = row_h,
         };
     }
@@ -1582,22 +1753,63 @@ fn runToggleSidebar(state: *runtime.AppState) void {
 // Rendering
 // ---------------------------------------------------------------------------
 
-/// Search field with selection highlight + caret, matching the metrics
-/// `layout.zig` uses for modal text hit-testing (font 14, +10px text inset).
-fn renderSearchField(state: *runtime.AppState) void {
+/// Soft ambient shadow approximating the design's `0 24px 64px` drop with
+/// stacked, offset translucent fills (the renderer has no blur pass).
+fn queueDialogShadow(state: *runtime.AppState, rect: palette.Rect, radius: f32) void {
+    const layers = [_]struct { spread: f32, drop: f32, alpha: f32 }{
+        .{ .spread = 32.0, .drop = 24.0, .alpha = 0.025 },
+        .{ .spread = 20.0, .drop = 18.0, .alpha = 0.035 },
+        .{ .spread = 10.0, .drop = 10.0, .alpha = 0.05 },
+        .{ .spread = 3.0, .drop = 4.0, .alpha = 0.06 },
+    };
+    for (layers) |layer| {
+        const spread = designUi(layer.spread);
+        queueRoundedRect(state, context_menu.snap(.{
+            .x = rect.x - spread,
+            .y = rect.y - spread + designUi(layer.drop),
+            .w = rect.w + spread * 2.0,
+            .h = rect.h + spread * 2.0,
+        }), paletteColor(theme.scrim(layer.alpha)), radius + spread);
+    }
+}
+
+/// Search row: magnifier, query field, scope label, bottom divider.
+fn renderSearchRow(state: *runtime.AppState) void {
+    const cy = search_rect.y + search_rect.h * 0.5;
+    const icon = designUi(SEARCH_ICON_CSS);
+    queueLucide(state, .{
+        .x = search_rect.x + designUi(SEARCH_PAD_X_CSS),
+        .y = cy - icon * 0.5,
+        .w = icon,
+        .h = icon,
+    }, LU_SEARCH, icon, paletteColor(theme.COLOR_TEXT_SUBTLE), search_rect);
+    renderSearchField(state, cy);
+
+    var scope_buf: [160]u8 = undefined;
+    const label = scopeLabel(state, &scope_buf);
+    const font = designUi(SCOPE_FONT_CSS);
+    queueUiText(state, .{
+        .x = scope_x,
+        .y = @round(cy - font * 0.65),
+        .w = modal_rect.x + modal_rect.w - scope_x,
+        .h = font * 1.3,
+    }, label, paletteColor(theme.COLOR_TEXT_SUBTLE), font, .ui, search_rect);
+    queueDivider(state, search_rect.y + search_rect.h - hairline());
+}
+
+/// Borderless query field with selection highlight + caret. Text starts
+/// `MODAL_TEXT_INSET_UI` inside `input_rect`, which is what layout.zig's
+/// click/drag caret mapping assumes, and uses `searchFontSize()`.
+fn renderSearchField(state: *runtime.AppState, cy: f32) void {
     const focused = state.palette_modal_text_focus == .command_palette;
     const value = state.commandPaletteQuery();
-    const border = if (focused) theme.COLOR_GREEN else theme.COLOR_PANEL_MUTED;
-    // Recessed field: darker than the (opaque) panel so it reads as an input,
-    // matching the sidebar's selected-workspace card treatment.
-    queueRoundedRect(state, input_rect, paletteColor(theme.background()), theme.scaledUi(7.0));
-    queueBorder(state, input_rect, paletteColor(border), theme.scaledUi(7.0), theme.scaledUi(1.0));
-
-    const font_size = theme.scaledUi(14.0);
+    const font_size = searchFontSize();
     const line_height = font_size * 1.25;
-    const text_x = input_rect.x + theme.scaledUi(10.0);
-    const text_y = input_rect.y + (input_rect.h - line_height) * 0.5;
-    const text_w = input_rect.w - theme.scaledUi(20.0);
+    const text_x = search_text_x;
+    const text_y = cy - line_height * 0.5;
+    const text_w = @max(input_rect.x + input_rect.w - text_x, 0.0);
+    // Leave room left of the text for the caret at offset 0.
+    const text_clip: palette.Rect = .{ .x = text_x - theme.scaledUi(2.0), .y = search_rect.y, .w = text_w + theme.scaledUi(2.0), .h = search_rect.h };
 
     if (focused) {
         state.modal_text_input_rect = input_rect;
@@ -1619,9 +1831,13 @@ fn renderSearchField(state: *runtime.AppState) void {
         }
     }
 
-    const shown = if (value.len > 0) value else "Search threads and commands...";
+    const placeholder = if (state.command_controller.scope_project != null)
+        "Search this workspace's chats"
+    else
+        "Search chats, commands, and workspaces";
+    const shown = if (value.len > 0) value else placeholder;
     const color = if (value.len > 0) theme.COLOR_WHITE else theme.COLOR_TEXT_SUBTLE;
-    queueRoleText(state, .{ .x = text_x, .y = text_y, .w = text_w, .h = line_height }, shown, paletteColor(color), font_size, input_rect);
+    queueRoleText(state, .{ .x = text_x, .y = text_y, .w = text_w, .h = line_height }, shown, paletteColor(color), font_size, text_clip);
 
     if (focused) {
         const clamped_cursor = @min(state.command_controller.cursor, value.len);
@@ -1630,55 +1846,22 @@ fn renderSearchField(state: *runtime.AppState) void {
     }
 }
 
-/// Scope/status line between the search field and the results.
-fn renderScopeLine(state: *runtime.AppState) void {
-    var buf: [128]u8 = undefined;
-    const label = blk: {
-        if (state.command_controller.scope_project) |pi| {
-            if (pi < state.project_controller.projects.items.len) {
-                break :blk std.fmt.bufPrint(&buf, "{s} - history  (Ctrl+Shift+P for all)", .{state.project_controller.projects.items[pi].label}) catch "history";
-            }
-        }
-        break :blk "All workspaces";
-    };
-    queueText(state, .{
-        .x = input_rect.x + theme.scaledUi(2.0),
-        .y = input_rect.y + input_rect.h + theme.scaledUi(4.0),
-        .w = input_rect.w - theme.scaledUi(4.0),
-        .h = theme.scaledUi(16.0),
-    }, label, paletteColor(theme.COLOR_TEXT_SUBTLE), theme.scaledUi(12.0), modal_rect);
-}
-
-/// Result rows: section headers, command rows with keybind hints, thread rows
-/// with provider glyph + workspace + open badge + relative time.
+/// Result rows: sentence-case section headers, then command / chat /
+/// workspace rows, or the empty state.
 fn renderRows(state: *runtime.AppState) void {
     if (result_count == 0) {
-        queueText(state, .{
-            .x = list_rect.x + theme.scaledUi(8.0),
-            .y = list_rect.y + theme.scaledUi(12.0),
-            .w = list_rect.w - theme.scaledUi(16.0),
-            .h = theme.scaledUi(20.0),
-        }, "No matches.", paletteColor(theme.COLOR_TEXT_SUBTLE), theme.scaledUi(13.0), list_rect);
+        renderEmptyState(state);
         return;
     }
-
-    var i: usize = 0;
-    while (i < result_count) : (i += 1) {
+    for (0..result_count) |i| {
         const rect = row_rects[i];
         if (!rowVisible(rect)) continue;
-        // Partially-scrolled rows must clip to the list viewport so they
-        // never paint over the scope line above or the footer hints below.
+        // Partially-scrolled rows clip to the list viewport so they never
+        // paint over the search row above or the footer below.
         const row_clip = intersectRects(rect, list_rect);
         if (row_clip.w <= 0.0 or row_clip.h <= 0.0) continue;
         switch (results[i].ref) {
-            .header => |label| {
-                queueText(state, .{
-                    .x = rect.x + theme.scaledUi(4.0),
-                    .y = rect.y + rect.h - theme.scaledUi(18.0),
-                    .w = rect.w - theme.scaledUi(8.0),
-                    .h = theme.scaledUi(16.0),
-                }, label, paletteColor(theme.COLOR_TEXT_MUTED), theme.scaledUi(11.0), row_clip);
-            },
+            .header => |label| renderHeader(state, rect, label, row_clip),
             .command => |ci| renderCommandRow(state, i, ci, rect, row_clip),
             .thread => |tr| renderThreadRow(state, i, tr, rect, row_clip),
             .history => |hi| renderHistoryRow(state, i, hi, rect, row_clip),
@@ -1689,158 +1872,216 @@ fn renderRows(state: *runtime.AppState) void {
     }
 }
 
-fn renderRowBackground(state: *runtime.AppState, row_index: usize, rect: palette.Rect, row_clip: palette.Rect) void {
+/// Section label sitting on the bottom of its (gap-including) header band.
+fn renderHeader(state: *runtime.AppState, rect: palette.Rect, label: []const u8, clip: palette.Rect) void {
+    const font = designUi(HEADER_FONT_CSS);
+    const bottom = rect.y + rect.h - designUi(HEADER_BOTTOM_PAD_CSS);
+    queueUiText(state, .{
+        .x = rect.x + designUi(ROW_PAD_X_CSS),
+        .y = @round(bottom - font * 1.3),
+        .w = rect.w - designUi(ROW_PAD_X_CSS) * 2.0,
+        .h = font * 1.3,
+    }, label, paletteColor(theme.COLOR_TEXT_SUBTLE), font, .ui_medium, clip);
+}
+
+fn renderEmptyState(state: *runtime.AppState) void {
+    const query = state.commandPaletteQuery();
+    var buf: [320]u8 = undefined;
+    const label = if (query.len > 0)
+        std.fmt.bufPrint(&buf, "No results for \u{201C}{s}\u{201D}", .{query}) catch "No results"
+    else if (state.command_controller.scope_project != null)
+        "No saved chats in this workspace yet"
+    else
+        "Nothing to show yet";
+    const font = designUi(ROW_FONT_CSS);
+    const max_w = @max(list_rect.w - designUi(ROW_PAD_X_CSS) * 2.0, 0.0);
+    const w = @min(text_measure.textWidth(.ui, font, label), max_w);
+    queueMatchText(state, list_rect.x + (list_rect.w - w) * 0.5, list_rect.y + designUi(32.0), w, label, 0, "", paletteColor(theme.COLOR_TEXT_SUBTLE), font, list_rect);
+}
+
+/// Leading slot of a result row: a Lucide glyph or a provider logo.
+const RowLeading = union(enum) {
+    icon: []const u8,
+    provider: Provider,
+};
+
+/// Right-aligned element of a result row.
+const RowTrailing = union(enum) {
+    none,
+    /// Keybind hint as produced by `keybinds.formatKeybind`.
+    hint: []const u8,
+    /// Plain status word ("open", "saved").
+    status: struct { label: []const u8, color: [4]f32 },
+    /// Small outlined tag ("closed").
+    tag: []const u8,
+};
+
+const RowSpec = struct {
+    leading: RowLeading,
+    title: []const u8,
+    /// Byte offset where query highlighting may start, so fixed prefixes
+    /// ("Switch to ") never light up.
+    match_from: usize = 0,
+    /// Secondary line; rows without one are single-line.
+    meta: []const u8 = "",
+    trailing: RowTrailing = .none,
+};
+
+/// Shared row body: selection/hover fill, leading slot, title with matched
+/// query characters in medium weight, optional meta line, trailing element.
+fn renderResultRow(state: *runtime.AppState, row_index: usize, rect: palette.Rect, clip: palette.Rect, spec: RowSpec) void {
+    renderRowBackground(state, row_index, rect, clip);
+    const selected = state.command_controller.selected == row_index;
+    const pad = designUi(ROW_PAD_X_CSS);
+    const icon = designUi(ROW_ICON_CSS);
+    const cy = rect.y + rect.h * 0.5;
+    const icon_x = rect.x + pad;
+    switch (spec.leading) {
+        .icon => |glyph| queueLucide(
+            state,
+            .{ .x = icon_x, .y = cy - icon * 0.5, .w = icon, .h = icon },
+            glyph,
+            icon,
+            paletteColor(if (selected) theme.COLOR_WHITE else theme.COLOR_TEXT_MUTED),
+            clip,
+        ),
+        .provider => |provider| {
+            const glyph = theme.scaledUi(PROVIDER_GLYPH_UI);
+            sidebar.queuePaletteProviderGlyph(state, provider, icon_x + (icon - glyph) * 0.5, cy, clip);
+        },
+    }
+
+    const gap = designUi(ROW_ICON_GAP_CSS);
+    const title_x = icon_x + icon + gap;
+    const right = rect.x + rect.w - pad;
+    const trailing_w = queueRowTrailing(state, right, cy, spec.trailing, clip);
+    const title_right = if (trailing_w > 0.0) right - trailing_w - gap else right;
+    const max_w = @max(title_right - title_x, 0.0);
+    const font = designUi(ROW_FONT_CSS);
+    const query = state.commandPaletteQuery();
+    const title_color = paletteColor(theme.COLOR_WHITE);
+    if (spec.meta.len == 0) {
+        queueMatchText(state, title_x, cy, max_w, spec.title, spec.match_from, query, title_color, font, clip);
+        return;
+    }
+    // Title + meta at line-height 1.3, centred as one block.
+    const meta_font = designUi(ROW_META_FONT_CSS);
+    const title_h = font * 1.3;
+    const meta_h = meta_font * 1.3;
+    const top = cy - (title_h + meta_h) * 0.5;
+    queueMatchText(state, title_x, top + title_h * 0.5, max_w, spec.title, spec.match_from, query, title_color, font, clip);
+    queueMatchText(state, title_x, top + title_h + meta_h * 0.5, max_w, spec.meta, 0, "", paletteColor(theme.COLOR_TEXT_SUBTLE), meta_font, clip);
+}
+
+/// Draws the trailing element ending at `right`; returns its width.
+fn queueRowTrailing(state: *runtime.AppState, right: f32, cy: f32, trailing: RowTrailing, clip: palette.Rect) f32 {
+    const font = designUi(ROW_META_FONT_CSS);
+    switch (trailing) {
+        .none => return 0.0,
+        .hint => |hint| {
+            if (hint.len == 0) return 0.0;
+            const w = shortcutHintWidth(hint, font);
+            queueShortcutHint(state, right - w, cy, hint, paletteColor(theme.COLOR_TEXT_SUBTLE), font, clip);
+            return w;
+        },
+        .status => |status| {
+            const w = text_measure.textWidth(.ui, font, status.label);
+            queueUiText(state, .{
+                .x = right - w,
+                .y = @round(cy - font * 0.65),
+                .w = w + theme.scaledUi(2.0),
+                .h = font * 1.3,
+            }, status.label, paletteColor(status.color), font, .ui, clip);
+            return w;
+        },
+        .tag => |label| {
+            const tag_font = designUi(TAG_FONT_CSS);
+            const pad_x = designUi(TAG_PAD_X_CSS);
+            const text_w = text_measure.textWidth(.ui, tag_font, label);
+            const w = text_w + pad_x * 2.0;
+            const h = tag_font * 1.3 + designUi(2.0);
+            const pill = context_menu.snap(.{ .x = right - w, .y = cy - h * 0.5, .w = w, .h = h });
+            state.palette_overlay_batch.rectBorderClipped(state.allocator, pill, paletteColor(theme.restingEdge()), designUi(TAG_RADIUS_CSS), hairline(), clip) catch |err| {
+                log.warn("failed to queue palette tag border: {s}", .{@errorName(err)});
+            };
+            queueUiText(state, .{
+                .x = pill.x + pad_x,
+                .y = @round(cy - tag_font * 0.65),
+                .w = text_w + theme.scaledUi(2.0),
+                .h = tag_font * 1.3,
+            }, label, paletteColor(theme.COLOR_TEXT_SUBTLE), tag_font, .ui, clip);
+            return w;
+        },
+    }
+}
+
+/// Soft neutral fill for the keyboard-selected row, lighter for hover.
+fn renderRowBackground(state: *runtime.AppState, row_index: usize, rect: palette.Rect, clip: palette.Rect) void {
     const selected = state.command_controller.selected == row_index;
     const hovered = hovered_row != null and hovered_row.? == row_index;
-    // Clamp the highlight to the viewport so a half-scrolled row's card
-    // doesn't poke into the input/footer chrome.
-    const bg_rect = intersectRects(rect, row_clip);
-    if (bg_rect.w <= 0.0 or bg_rect.h <= 0.0) return;
-    if (selected) {
-        // Accent tint rather than a lighter-gray card: on the dark panel a
-        // translucent accent keeps the active row distinct and on-brand, and
-        // stays independent of the theme-derived (possibly light) panel tokens.
-        // Slightly stronger when also hovered for feedback.
-        const bg = theme.withAlpha(theme.COLOR_GREEN, if (hovered) 76 else 56);
-        queueRoundedRect(state, bg_rect, paletteColor(bg), theme.scaledUi(7.0));
-    } else if (hovered) {
-        // Neutral light wash over the dark panel; theme-independent so hover
-        // never collapses into the surface on light color0/color8 themes.
-        queueRoundedRect(state, bg_rect, paletteColor(theme.withAlpha(theme.COLOR_WHITE, 20)), theme.scaledUi(7.0));
-    }
+    if (!selected and !hovered) return;
+    const fill = panelTint(if (selected) SELECTED_TINT else HOVER_TINT);
+    state.palette_overlay_batch.roundedRectClipped(state.allocator, rect, paletteColor(fill), designUi(ROW_RADIUS_CSS), clip) catch |err| {
+        log.warn("failed to queue palette row fill: {s}", .{@errorName(err)});
+    };
 }
 
-fn renderCommandRow(state: *runtime.AppState, row_index: usize, command_index: usize, rect: palette.Rect, row_clip: palette.Rect) void {
-    renderRowBackground(state, row_index, rect, row_clip);
+fn renderCommandRow(state: *runtime.AppState, row_index: usize, command_index: usize, rect: palette.Rect, clip: palette.Rect) void {
     const command = STATIC_COMMANDS[command_index];
-    const emphasis = state.command_controller.selected == row_index;
-    const font_size = theme.scaledUi(13.5);
-    const text_y = rect.y + (rect.h - font_size * 1.3) * 0.5;
-
-    // Chevron glyph marks action rows apart from thread rows at a glance.
-    queueRowGlyph(state, rect, LU_CHEVRON_RIGHT, row_clip);
-
-    const hint = keybindHintFor(state, command.keybind);
-    const hint_w = if (hint.len > 0) theme.scaledUi(110.0) else theme.scaledUi(0.0);
-    queueText(state, .{
-        .x = rect.x + theme.scaledUi(34.0),
-        .y = text_y,
-        .w = rect.w - theme.scaledUi(34.0) - hint_w - theme.scaledUi(12.0),
-        .h = font_size * 1.3,
-    }, command.title, paletteColor(if (emphasis) theme.COLOR_WHITE else theme.COLOR_TEXT_MUTED), font_size, row_clip);
-    if (hint.len > 0) {
-        queueText(state, .{
-            .x = rect.x + rect.w - hint_w - theme.scaledUi(10.0),
-            .y = text_y,
-            .w = hint_w,
-            .h = font_size * 1.3,
-        }, hint, paletteColor(theme.COLOR_TEXT_SUBTLE), theme.scaledUi(12.0), row_clip);
-    }
+    renderResultRow(state, row_index, rect, clip, .{
+        .leading = .{ .icon = command.icon },
+        .title = command.title,
+        .trailing = .{ .hint = keybindHintFor(state, command.keybind) },
+    });
 }
 
-fn renderThreadRow(state: *runtime.AppState, row_index: usize, tr: ThreadRef, rect: palette.Rect, row_clip: palette.Rect) void {
-    renderRowBackground(state, row_index, rect, row_clip);
+fn renderThreadRow(state: *runtime.AppState, row_index: usize, tr: ThreadRef, rect: palette.Rect, clip: palette.Rect) void {
     if (tr.project >= state.project_controller.projects.items.len) return;
     const project = &state.project_controller.projects.items[tr.project];
     if (tr.thread >= project.threads.items.len) return;
     const thread = &project.threads.items[tr.thread];
-    const emphasis = state.command_controller.selected == row_index;
-    const font_size = theme.scaledUi(13.5);
-    const text_y = rect.y + (rect.h - font_size * 1.3) * 0.5;
-
-    sidebar.queuePaletteProviderGlyph(state, thread.provider, rect.x + theme.scaledUi(10.0), rect.y + rect.h * 0.5, row_clip);
-
-    const is_open = threadOpenPaneId(project, tr.thread) != null;
-    const time_w = theme.scaledUi(56.0);
-    const open_w = if (is_open) theme.scaledUi(42.0) else 0.0;
-    // Show the owning workspace when results span workspaces (global scope).
-    const show_workspace = state.command_controller.scope_project == null;
-    const workspace_w = if (show_workspace) theme.scaledUi(96.0) else 0.0;
-    const title_x = rect.x + theme.scaledUi(42.0);
     var title_buf: sidebar.TerminalTitleBuffer = undefined;
-    queueText(state, .{
-        .x = title_x,
-        .y = text_y,
-        .w = rect.w - (title_x - rect.x) - workspace_w - open_w - time_w - theme.scaledUi(16.0),
-        .h = font_size * 1.3,
-    }, sidebar.chatTitle(&title_buf, thread.title), paletteColor(if (emphasis) theme.COLOR_WHITE else theme.COLOR_TEXT_MUTED), font_size, row_clip);
-
-    var right = rect.x + rect.w - theme.scaledUi(8.0);
-    var time_buf: [24]u8 = undefined;
-    const relative_time = sidebar.formatRelativeTime(&time_buf, thread.last_activity_at);
-    right -= time_w;
-    queueText(state, .{ .x = right, .y = text_y, .w = time_w, .h = font_size * 1.3 }, relative_time, paletteColor(theme.COLOR_TEXT_SUBTLE), theme.scaledUi(12.0), row_clip);
-    if (is_open) {
-        right -= open_w;
-        queueText(state, .{ .x = right, .y = text_y, .w = open_w, .h = font_size * 1.3 }, "open", paletteColor(theme.COLOR_GREEN), theme.scaledUi(12.0), row_clip);
-    }
-    if (show_workspace) {
-        right -= workspace_w;
-        queueText(state, .{ .x = right, .y = text_y, .w = workspace_w - theme.scaledUi(8.0), .h = font_size * 1.3 }, project.label, paletteColor(theme.COLOR_TEXT_SUBTLE), theme.scaledUi(12.0), row_clip);
-    }
+    var meta_buf: [192]u8 = undefined;
+    renderResultRow(state, row_index, rect, clip, .{
+        .leading = .{ .provider = thread.provider },
+        .title = sidebar.chatTitle(&title_buf, thread.title),
+        .meta = chatMeta(state, &meta_buf, "", project.label, thread.last_activity_at),
+        .trailing = statusTrailing(threadOpenPaneId(project, tr.thread) != null),
+    });
 }
 
 /// Row for a closed thread fetched from the daemon (item 5b).
-fn renderHistoryRow(state: *runtime.AppState, row_index: usize, history_index: usize, rect: palette.Rect, row_clip: palette.Rect) void {
-    renderRowBackground(state, row_index, rect, row_clip);
+fn renderHistoryRow(state: *runtime.AppState, row_index: usize, history_index: usize, rect: palette.Rect, clip: palette.Rect) void {
     const items = state.paletteHistoryItems();
     if (history_index >= items.len) return;
     const item = items[history_index];
-    const emphasis = state.command_controller.selected == row_index;
-    const font_size = theme.scaledUi(13.5);
-    const text_y = rect.y + (rect.h - font_size * 1.3) * 0.5;
-
-    const provider = std.meta.stringToEnum(Provider, item.provider) orelse .opencode;
-    sidebar.queuePaletteProviderGlyph(state, provider, rect.x + theme.scaledUi(10.0), rect.y + rect.h * 0.5, row_clip);
-
-    const time_w = theme.scaledUi(56.0);
-    const closed_w = theme.scaledUi(48.0);
-    const show_workspace = state.command_controller.scope_project == null;
-    const workspace_w = if (show_workspace) theme.scaledUi(96.0) else 0.0;
-    const title_x = rect.x + theme.scaledUi(42.0);
-    queueText(state, .{
-        .x = title_x,
-        .y = text_y,
-        .w = rect.w - (title_x - rect.x) - workspace_w - closed_w - time_w - theme.scaledUi(16.0),
-        .h = font_size * 1.3,
-    }, item.title, paletteColor(if (emphasis) theme.COLOR_WHITE else theme.COLOR_TEXT_MUTED), font_size, row_clip);
-
-    var right = rect.x + rect.w - theme.scaledUi(8.0);
-    var time_buf: [24]u8 = undefined;
-    const relative_time = sidebar.formatRelativeTime(&time_buf, item.last_activity_at orelse 0);
-    right -= time_w;
-    queueText(state, .{ .x = right, .y = text_y, .w = time_w, .h = font_size * 1.3 }, relative_time, paletteColor(theme.COLOR_TEXT_SUBTLE), theme.scaledUi(12.0), row_clip);
-    right -= closed_w;
-    queueText(state, .{ .x = right, .y = text_y, .w = closed_w, .h = font_size * 1.3 }, "closed", paletteColor(theme.COLOR_TEXT_SUBTLE), theme.scaledUi(12.0), row_clip);
-    if (show_workspace) {
-        right -= workspace_w;
-        var label: []const u8 = item.workspace_id;
-        for (state.project_controller.projects.items) |*project| {
-            if (std.mem.eql(u8, project.id, item.workspace_id)) {
-                label = project.label;
-                break;
-            }
+    var workspace: []const u8 = item.workspace_id;
+    for (state.project_controller.projects.items) |*project| {
+        if (std.mem.eql(u8, project.id, item.workspace_id)) {
+            workspace = project.label;
+            break;
         }
-        queueText(state, .{ .x = right, .y = text_y, .w = workspace_w - theme.scaledUi(8.0), .h = font_size * 1.3 }, label, paletteColor(theme.COLOR_TEXT_SUBTLE), theme.scaledUi(12.0), row_clip);
     }
+    var meta_buf: [192]u8 = undefined;
+    renderResultRow(state, row_index, rect, clip, .{
+        .leading = .{ .provider = std.meta.stringToEnum(Provider, item.provider) orelse .opencode },
+        .title = item.title,
+        .meta = chatMeta(state, &meta_buf, "", workspace, item.last_activity_at orelse 0),
+        .trailing = statusTrailing(false),
+    });
 }
 
-// History row for a saved agent TUI terminal session.
-fn renderAgentTuiRow(state: *runtime.AppState, row_index: usize, tui: AgentTuiRef, rect: palette.Rect, row_clip: palette.Rect) void {
-    renderRowBackground(state, row_index, rect, row_clip);
+/// History row for a saved agent TUI terminal session.
+fn renderAgentTuiRow(state: *runtime.AppState, row_index: usize, tui: AgentTuiRef, rect: palette.Rect, clip: palette.Rect) void {
     if (tui.project >= state.project_controller.projects.items.len) return;
     const project = &state.project_controller.projects.items[tui.project];
     const provider = state.workspaceAgentTuiProvider(tui.project, tui.dock) orelse return;
-    const emphasis = state.command_controller.selected == row_index;
-    const font_size = theme.scaledUi(13.5);
-    const text_y = rect.y + (rect.h - font_size * 1.3) * 0.5;
-    sidebar.queuePaletteAgentTuiProviderGlyph(state, provider, rect.x + theme.scaledUi(10.0), rect.y + rect.h * 0.5, row_clip);
-
+    const provider_label = agentTuiSearchLabel(provider);
     var title_buf: [96]u8 = undefined;
     const title = if (state.projectTerminalDock(tui.project, tui.dock)) |dock|
         dock.activeProcessLabel(&title_buf)
     else
-        agentTuiSearchLabel(provider);
+        provider_label;
     var is_open = false;
     for (project.workspace_layout.panes.items) |pane| {
         switch (pane.ref) {
@@ -1851,127 +2092,356 @@ fn renderAgentTuiRow(state: *runtime.AppState, row_index: usize, tui: AgentTuiRe
             else => {},
         }
     }
-    const status_w = theme.scaledUi(52.0);
-    const time_w = theme.scaledUi(56.0);
-    const workspace_w = if (state.command_controller.scope_project == null) theme.scaledUi(96.0) else 0.0;
-    const title_x = rect.x + theme.scaledUi(54.0);
-    queueText(state, .{
-        .x = title_x,
-        .y = text_y,
-        .w = rect.w - (title_x - rect.x) - workspace_w - status_w - time_w - theme.scaledUi(16.0),
-        .h = font_size * 1.3,
-    }, title, paletteColor(if (emphasis) theme.COLOR_WHITE else theme.COLOR_TEXT_MUTED), font_size, row_clip);
-
-    var right = rect.x + rect.w - theme.scaledUi(8.0);
-    var time_buf: [24]u8 = undefined;
+    var meta_buf: [192]u8 = undefined;
     const activity_at = @divTrunc(state.workspaceAgentTuiHistoryAt(tui.project, tui.dock), std.time.ms_per_s);
-    const relative_time = sidebar.formatRelativeTime(&time_buf, activity_at);
-    right -= time_w;
-    queueText(state, .{ .x = right, .y = text_y, .w = time_w, .h = font_size * 1.3 }, relative_time, paletteColor(theme.COLOR_TEXT_SUBTLE), theme.scaledUi(12.0), row_clip);
-    right -= status_w;
-    queueText(state, .{ .x = right, .y = text_y, .w = status_w, .h = font_size * 1.3 }, if (is_open) "open" else "saved", paletteColor(if (is_open) theme.COLOR_GREEN else theme.COLOR_TEXT_SUBTLE), theme.scaledUi(12.0), row_clip);
-    if (state.command_controller.scope_project == null) {
-        right -= workspace_w;
-        queueText(state, .{ .x = right, .y = text_y, .w = workspace_w - theme.scaledUi(8.0), .h = font_size * 1.3 }, project.label, paletteColor(theme.COLOR_TEXT_SUBTLE), theme.scaledUi(12.0), row_clip);
-    }
+    const prefix = if (std.mem.eql(u8, title, provider_label)) "" else provider_label;
+    renderResultRow(state, row_index, rect, clip, .{
+        .leading = .{ .icon = LU_SQUARE_TERMINAL },
+        .title = title,
+        .meta = chatMeta(state, &meta_buf, prefix, project.label, activity_at),
+        .trailing = statusTrailing(is_open),
+    });
 }
 
-fn renderWorkspaceRow(state: *runtime.AppState, row_index: usize, project_index: usize, rect: palette.Rect, row_clip: palette.Rect) void {
-    renderRowBackground(state, row_index, rect, row_clip);
+fn renderWorkspaceRow(state: *runtime.AppState, row_index: usize, project_index: usize, rect: palette.Rect, clip: palette.Rect) void {
     if (project_index >= state.project_controller.projects.items.len) return;
-    const emphasis = state.command_controller.selected == row_index;
-    const font_size = theme.scaledUi(13.5);
-    const text_y = rect.y + (rect.h - font_size * 1.3) * 0.5;
-    var buf: [96]u8 = undefined;
-    const label = std.fmt.bufPrint(&buf, "Switch to {s}", .{state.project_controller.projects.items[project_index].label}) catch "Switch workspace";
-    queueRowGlyph(state, rect, LU_FOLDER, row_clip);
+    const prefix = "Switch to ";
+    var buf: [128]u8 = undefined;
+    const label = std.fmt.bufPrint(&buf, prefix ++ "{s}", .{state.project_controller.projects.items[project_index].label}) catch "Switch workspace";
     var hint_buf_local: [32]u8 = undefined;
-    const hint = workspaceSelectHintFor(state, &hint_buf_local, project_index);
-    const hint_w = if (hint.len > 0) theme.scaledUi(110.0) else theme.scaledUi(0.0);
-    queueText(state, .{
-        .x = rect.x + theme.scaledUi(34.0),
-        .y = text_y,
-        .w = rect.w - theme.scaledUi(34.0) - hint_w - theme.scaledUi(12.0),
-        .h = font_size * 1.3,
-    }, label, paletteColor(if (emphasis) theme.COLOR_WHITE else theme.COLOR_TEXT_MUTED), font_size, row_clip);
-    if (hint.len > 0) {
-        queueText(state, .{
-            .x = rect.x + rect.w - hint_w - theme.scaledUi(10.0),
-            .y = text_y,
-            .w = hint_w,
-            .h = font_size * 1.3,
-        }, hint, paletteColor(theme.COLOR_TEXT_SUBTLE), theme.scaledUi(12.0), row_clip);
-    }
+    renderResultRow(state, row_index, rect, clip, .{
+        .leading = .{ .icon = LU_FOLDER },
+        .title = label,
+        .match_from = prefix.len,
+        .trailing = .{ .hint = workspaceSelectHintFor(state, &hint_buf_local, project_index) },
+    });
 }
 
-fn renderClosedWorkspaceRow(state: *runtime.AppState, row_index: usize, archived_index: usize, rect: palette.Rect, row_clip: palette.Rect) void {
-    renderRowBackground(state, row_index, rect, row_clip);
+fn renderClosedWorkspaceRow(state: *runtime.AppState, row_index: usize, archived_index: usize, rect: palette.Rect, clip: palette.Rect) void {
     if (archived_index >= state.project_controller.archived_projects.items.len) return;
-    const emphasis = state.command_controller.selected == row_index;
-    const font_size = theme.scaledUi(13.5);
-    const text_y = rect.y + (rect.h - font_size * 1.3) * 0.5;
-    var buf: [96]u8 = undefined;
-    const label = std.fmt.bufPrint(&buf, "Reopen {s}", .{state.project_controller.archived_projects.items[archived_index].label}) catch "Reopen workspace";
-    queueRowGlyph(state, rect, LU_ARCHIVE_RESTORE, row_clip);
-    queueText(state, .{
-        .x = rect.x + theme.scaledUi(34.0),
-        .y = text_y,
-        .w = rect.w - theme.scaledUi(34.0) - theme.scaledUi(96.0),
-        .h = font_size * 1.3,
-    }, label, paletteColor(if (emphasis) theme.COLOR_WHITE else theme.COLOR_TEXT_MUTED), font_size, row_clip);
-    queueText(state, .{
-        .x = rect.x + rect.w - theme.scaledUi(88.0),
-        .y = text_y,
-        .w = theme.scaledUi(78.0),
-        .h = font_size * 1.3,
-    }, "closed", paletteColor(theme.COLOR_TEXT_SUBTLE), theme.scaledUi(12.0), row_clip);
+    const prefix = "Reopen ";
+    var buf: [128]u8 = undefined;
+    const label = std.fmt.bufPrint(&buf, prefix ++ "{s}", .{state.project_controller.archived_projects.items[archived_index].label}) catch "Reopen workspace";
+    renderResultRow(state, row_index, rect, clip, .{
+        .leading = .{ .icon = LU_FOLDER },
+        .title = label,
+        .match_from = prefix.len,
+        .trailing = .{ .tag = "closed" },
+    });
 }
 
+fn statusTrailing(is_open: bool) RowTrailing {
+    return .{ .status = .{
+        .label = if (is_open) "open" else "saved",
+        .color = if (is_open) theme.success() else theme.COLOR_TEXT_SUBTLE,
+    } };
+}
+
+/// Secondary chat line: optional prefix, the workspace (only when results
+/// span workspaces), and a relative age, joined by middle dots.
+fn chatMeta(state: *runtime.AppState, buf: []u8, prefix: []const u8, workspace: []const u8, at: i64) []const u8 {
+    var age_buf: [32]u8 = undefined;
+    const show_workspace = state.command_controller.scope_project == null;
+    const parts = [_][]const u8{ prefix, if (show_workspace) workspace else "", formatAge(&age_buf, at) };
+    var len: usize = 0;
+    for (parts) |part| {
+        if (part.len == 0) continue;
+        if (len > 0) len += copyInto(buf[len..], " \u{00B7} ");
+        len += copyInto(buf[len..], part);
+    }
+    return buf[0..len];
+}
+
+/// Relative age for chat rows ("3h ago", "yesterday"); "" when unknown.
+fn formatAge(buf: []u8, timestamp: i64) []const u8 {
+    if (timestamp <= 0) return "";
+    return formatElapsed(buf, @max(unixTimestampSeconds() - timestamp, 0));
+}
+
+fn formatElapsed(buf: []u8, elapsed: i64) []const u8 {
+    const day: i64 = 86_400;
+    if (elapsed < 60) return "just now";
+    if (elapsed < 3600) return std.fmt.bufPrint(buf, "{d}m ago", .{@divFloor(elapsed, 60)}) catch "";
+    if (elapsed < day) return std.fmt.bufPrint(buf, "{d}h ago", .{@divFloor(elapsed, 3600)}) catch "";
+    if (elapsed < 2 * day) return "yesterday";
+    if (elapsed < 7 * day) return std.fmt.bufPrint(buf, "{d} days ago", .{@divFloor(elapsed, day)}) catch "";
+    if (elapsed < 14 * day) return "last week";
+    if (elapsed < 30 * day) return std.fmt.bufPrint(buf, "{d} weeks ago", .{@divFloor(elapsed, 7 * day)}) catch "";
+    if (elapsed < 60 * day) return "last month";
+    if (elapsed < 365 * day) return std.fmt.bufPrint(buf, "{d} months ago", .{@divFloor(elapsed, 30 * day)}) catch "";
+    return "over a year ago";
+}
+
+/// Tab submenu for a chat row, drawn with the shared context-menu chrome.
 fn renderActionMenu(state: *runtime.AppState) void {
     if (action_count == 0) return;
-    // Lightened from the dark background (a bit more than the modal panel's
-    // 0.04) so the submenu reads as a layer above it. Derived from background
-    // rather than COLOR_PANEL_ALT for the same readability reason as the modal.
-    queueRoundedRect(state, action_menu_rect, paletteColor(theme.raise(theme.background(), 0.07)), theme.scaledUi(10.0));
-    queueBorder(state, action_menu_rect, paletteColor(theme.COLOR_PANEL_MUTED), theme.scaledUi(10.0), theme.scaledUi(1.0));
-    const font_size = theme.scaledUi(13.0);
-    var i: usize = 0;
-    while (i < action_count) : (i += 1) {
-        const rect = action_rects[i];
+    const panel = context_menu.queuePanel(state, action_menu_rect);
+    for (0..action_count) |i| {
+        const row = action_rects[i];
         const selected = state.command_controller.action_selected == i;
-        if (selected and action_enabled[i]) {
-            queueRoundedRect(state, rect, paletteColor(theme.withAlpha(theme.COLOR_GREEN, 56)), theme.scaledUi(7.0));
-        }
-        const color = if (!action_enabled[i])
-            theme.COLOR_TEXT_SUBTLE
-        else if (selected)
-            theme.COLOR_WHITE
-        else
-            theme.COLOR_TEXT_MUTED;
-        queueText(state, .{
-            .x = rect.x + theme.scaledUi(10.0),
-            .y = rect.y + (rect.h - font_size * 1.3) * 0.5,
-            .w = rect.w - theme.scaledUi(16.0),
-            .h = font_size * 1.3,
-        }, action_labels[i], paletteColor(color), font_size, action_menu_rect);
+        if (selected and action_enabled[i]) context_menu.queueRowHighlight(state, row);
+        context_menu.queueLabel(state, row, action_labels[i], context_menu.labelColor(action_enabled[i], selected), 0.0, 0.0, panel);
     }
 }
 
+/// Key used in a footer hint: a Lucide glyph (↵, →) or a short word (esc).
+const FooterKey = union(enum) {
+    glyph: []const u8,
+    text: []const u8,
+};
+
+/// Footer key hints: ↵ Run, tab Thread actions, a scope hint when it fits,
+/// and esc Close pinned right.
 fn renderFooter(state: *runtime.AppState) void {
-    const font_size = theme.scaledUi(11.5);
-    const y = modal_rect.y + modal_rect.h - theme.scaledUi(FOOTER_H_CSS) + theme.scaledUi(6.0);
-    queueRect(state, .{
-        .x = modal_rect.x + theme.scaledUi(1.0),
-        .y = modal_rect.y + modal_rect.h - theme.scaledUi(FOOTER_H_CSS),
-        .w = modal_rect.w - theme.scaledUi(2.0),
-        .h = theme.scaledUi(1.0),
-    }, paletteColor(theme.borderMuted()));
-    queueText(state, .{
-        .x = modal_rect.x + theme.scaledUi(PAD_CSS),
-        .y = y,
-        .w = modal_rect.w - theme.scaledUi(PAD_CSS) * 2.0,
-        .h = font_size * 1.4,
-    }, "Enter New Pane    Ctrl+Enter Replace    Tab Actions    Esc Close", paletteColor(theme.COLOR_TEXT_SUBTLE), font_size, modal_rect);
+    queueDivider(state, footer_rect.y);
+    const font = designUi(FOOTER_FONT_CSS);
+    const cy = footer_rect.y + footer_rect.h * 0.5;
+    const color = paletteColor(theme.COLOR_TEXT_SUBTLE);
+    const pad_x = designUi(SEARCH_PAD_X_CSS);
+    const gap = designUi(FOOTER_GAP_CSS);
+    const clip = footer_rect;
+
+    const esc_key: FooterKey = .{ .text = "esc" };
+    const esc_x = footer_rect.x + footer_rect.w - pad_x - footerHintWidth(esc_key, "Close", font);
+    var x = footer_rect.x + pad_x;
+    x = queueFooterHint(state, x, cy, .{ .glyph = LU_CORNER_DOWN_LEFT }, "Run", font, color, clip) + gap;
+    x = queueFooterHint(state, x, cy, .{ .text = "tab" }, "Thread actions", font, color, clip) + gap;
+
+    if (state.command_controller.scope_project == null) {
+        // "Type history for this workspace" — the History command re-scopes.
+        const lead = "Type ";
+        const word = "history";
+        const tail = " for this workspace";
+        const lead_w = text_measure.textWidth(.ui, font, lead);
+        const word_w = text_measure.textWidth(.ui_medium, font, word);
+        const tail_w = text_measure.textWidth(.ui, font, tail);
+        if (x + lead_w + word_w + tail_w <= esc_x - gap) {
+            x = queueFooterText(state, x, cy, lead, .ui, font, color, clip);
+            x = queueFooterText(state, x, cy, word, .ui_medium, font, color, clip);
+            _ = queueFooterText(state, x, cy, tail, .ui, font, color, clip);
+        }
+    } else {
+        // Scoped history: the palette shortcut widens back to all workspaces.
+        const shortcut = commandPaletteShortcutHint(state);
+        const label = "All workspaces";
+        const key_gap = designUi(FOOTER_KEY_GAP_CSS);
+        const shortcut_w = shortcutHintWidth(shortcut, font);
+        if (shortcut.len > 0 and x + shortcut_w + key_gap + text_measure.textWidth(.ui, font, label) <= esc_x - gap) {
+            queueShortcutHint(state, x, cy, shortcut, color, font, clip);
+            _ = queueFooterText(state, x + shortcut_w + key_gap, cy, label, .ui, font, color, clip);
+        }
+    }
+    _ = queueFooterHint(state, esc_x, cy, esc_key, "Close", font, color, clip);
+}
+
+fn footerKeyWidth(key: FooterKey, font: f32) f32 {
+    return switch (key) {
+        .glyph => font,
+        .text => |value| text_measure.textWidth(.ui_medium, font, value),
+    };
+}
+
+fn footerHintWidth(key: FooterKey, label: []const u8, font: f32) f32 {
+    return footerKeyWidth(key, font) + designUi(FOOTER_KEY_GAP_CSS) + text_measure.textWidth(.ui, font, label);
+}
+
+/// Draws "<key> <label>" from `x`; returns the right edge.
+fn queueFooterHint(state: *runtime.AppState, x: f32, cy: f32, key: FooterKey, label: []const u8, font: f32, color: palette.Color, clip: palette.Rect) f32 {
+    const key_w = footerKeyWidth(key, font);
+    switch (key) {
+        .glyph => |glyph| queueLucide(state, .{ .x = x, .y = cy - font * 0.5, .w = font, .h = font }, glyph, font, color, clip),
+        .text => |value| _ = queueFooterText(state, x, cy, value, .ui_medium, font, color, clip),
+    }
+    return queueFooterText(state, x + key_w + designUi(FOOTER_KEY_GAP_CSS), cy, label, .ui, font, color, clip);
+}
+
+/// Draws one footer text run from `x`; returns the right edge.
+fn queueFooterText(state: *runtime.AppState, x: f32, cy: f32, value: []const u8, role: palette.FontRole, font: f32, color: palette.Color, clip: palette.Rect) f32 {
+    const w = text_measure.textWidth(role, font, value);
+    queueUiText(state, .{ .x = x, .y = @round(cy - font * 0.65), .w = w + theme.scaledUi(4.0), .h = font * 1.3 }, value, color, font, role, clip);
+    return x + w;
+}
+
+/// Thin neutral thumb on the list's right edge when results overflow.
+fn renderScrollbar(state: *runtime.AppState) void {
+    if (max_scroll_y <= 1.0 or list_rect.h <= designUi(32.0)) return;
+    const track: palette.Rect = .{
+        .x = modal_rect.x + modal_rect.w - designUi(6.0),
+        .y = list_rect.y + designUi(2.0),
+        .w = designUi(3.0),
+        .h = list_rect.h - designUi(4.0),
+    };
+    const thumb_h = @max(designUi(24.0), track.h * (track.h / (track.h + max_scroll_y)));
+    const thumb_y = track.y + (track.h - thumb_h) * (scroll_y / max_scroll_y);
+    queueRoundedRect(state, .{ .x = track.x, .y = thumb_y, .w = track.w, .h = thumb_h }, paletteColor(panelTint(SCROLL_THUMB_TINT)), track.w * 0.5);
+}
+
+// ---------------------------------------------------------------------------
+// Match highlighting + shortcut hints
+// ---------------------------------------------------------------------------
+
+/// Draws a single line vertically centred on `cy`, ellipsized to `max_w`,
+/// with the bytes matching `query` (from `match_from` on) in medium weight.
+/// An empty query draws plain ellipsized text.
+fn queueMatchText(
+    state: *runtime.AppState,
+    x: f32,
+    cy: f32,
+    max_w: f32,
+    full: []const u8,
+    match_from: usize,
+    query: []const u8,
+    color: palette.Color,
+    font_size: f32,
+    clip: palette.Rect,
+) void {
+    if (max_w <= 0.0 or full.len == 0) return;
+    const text = utf8Prefix(full, MAX_HIGHLIGHT_BYTES);
+    var mask: [MAX_HIGHLIGHT_BYTES]bool = @splat(false);
+    var any_match = false;
+    if (query.len > 0 and match_from < text.len) {
+        any_match = matchMask(text[match_from..], query, mask[match_from..text.len]);
+    }
+    // Keep multi-byte sequences in one run so no segment splits a codepoint.
+    for (1..text.len) |i| {
+        if ((text[i] & 0xC0) == 0x80) mask[i] = mask[i - 1];
+    }
+
+    var regular: [MAX_HIGHLIGHT_BYTES]f32 = undefined;
+    var medium: [MAX_HIGHLIGHT_BYTES]f32 = undefined;
+    text_measure.textGlyphAdvances(.ui, text, font_size, regular[0..text.len]);
+    if (any_match) text_measure.textGlyphAdvances(.ui_medium, text, font_size, medium[0..text.len]);
+    const advances = struct {
+        fn at(m: []const bool, r: []const f32, md: []const f32, i: usize) f32 {
+            return if (m[i]) md[i] else r[i];
+        }
+    };
+
+    var total: f32 = 0.0;
+    for (0..text.len) |i| total += advances.at(&mask, &regular, &medium, i);
+    var end = text.len;
+    const ellipsize = total > max_w or text.len < full.len;
+    if (ellipsize) {
+        const ellipsis_w = text_measure.textWidth(.ui, font_size, ELLIPSIS);
+        var acc: f32 = 0.0;
+        end = 0;
+        for (0..text.len) |i| {
+            acc += advances.at(&mask, &regular, &medium, i);
+            const boundary = i + 1 == text.len or (text[i + 1] & 0xC0) != 0x80;
+            if (!boundary) continue;
+            if (acc + ellipsis_w > max_w) break;
+            end = i + 1;
+        }
+    }
+
+    const line_h = font_size * 1.3;
+    const y = @round(cy - font_size * 0.65);
+    const text_clip = intersectRects(.{ .x = x, .y = clip.y, .w = max_w + theme.scaledUi(2.0), .h = clip.h }, clip);
+    if (text_clip.w <= 0.0 or text_clip.h <= 0.0) return;
+    var seg_x = x;
+    var i: usize = 0;
+    while (i < end) {
+        const emphasized = mask[i];
+        var j = i;
+        var seg_w: f32 = 0.0;
+        while (j < end and mask[j] == emphasized) : (j += 1) seg_w += advances.at(&mask, &regular, &medium, j);
+        queueUiText(state, .{ .x = seg_x, .y = y, .w = seg_w + theme.scaledUi(4.0), .h = line_h }, text[i..j], color, font_size, if (emphasized) .ui_medium else .ui, text_clip);
+        seg_x += seg_w;
+        i = j;
+    }
+    if (ellipsize) {
+        queueUiText(state, .{ .x = seg_x, .y = y, .w = font_size * 2.0, .h = line_h }, ELLIPSIS, color, font_size, .ui, text_clip);
+    }
+}
+
+/// Longest prefix of `value` no longer than `max_len` bytes that ends on a
+/// UTF-8 boundary.
+fn utf8Prefix(value: []const u8, max_len: usize) []const u8 {
+    if (value.len <= max_len) return value;
+    var end = max_len;
+    while (end > 0 and (value[end] & 0xC0) == 0x80) end -= 1;
+    return value[0..end];
+}
+
+/// Marks the haystack bytes `fuzzyScore` matches: the substring hit, else
+/// the greedy in-order subsequence. Leaves `mask` untouched and returns
+/// false when the query does not match.
+fn matchMask(haystack: []const u8, needle: []const u8, mask: []bool) bool {
+    std.debug.assert(mask.len == haystack.len);
+    if (needle.len == 0 or haystack.len == 0) return false;
+    if (asciiIndexOfIgnoreCase(haystack, needle)) |pos| {
+        @memset(mask[pos .. pos + needle.len], true);
+        return true;
+    }
+    var positions: [MAX_HIGHLIGHT_BYTES]usize = undefined;
+    if (needle.len > positions.len) return false;
+    var hi: usize = 0;
+    for (needle, 0..) |nb, ni| {
+        const nl = std.ascii.toLower(nb);
+        while (hi < haystack.len and std.ascii.toLower(haystack[hi]) != nl) : (hi += 1) {}
+        if (hi >= haystack.len) return false;
+        positions[ni] = hi;
+        hi += 1;
+    }
+    for (positions[0..needle.len]) |pos| mask[pos] = true;
+    return true;
+}
+
+/// A keybind hint split into leading macOS modifier symbols (⌃⌥⇧⌘, from
+/// `keybinds.formatKeybind`) mapped to Lucide glyphs, and the key text.
+/// Mirrors sidebar.zig's `renderShortcutHint` so hints share one look.
+const ShortcutParts = struct {
+    mods: [4][]const u8 = undefined,
+    mod_count: usize = 0,
+    key: []const u8 = "",
+};
+
+fn splitShortcut(hint: []const u8) ShortcutParts {
+    var parts: ShortcutParts = .{};
+    var rest = hint;
+    while (rest.len >= 3 and parts.mod_count < parts.mods.len) {
+        const lucide: ?[]const u8 = if (std.mem.startsWith(u8, rest, "\u{2303}"))
+            LU_CONTROL
+        else if (std.mem.startsWith(u8, rest, "\u{2325}"))
+            LU_OPTION
+        else if (std.mem.startsWith(u8, rest, "\u{21E7}"))
+            LU_SHIFT
+        else if (std.mem.startsWith(u8, rest, "\u{2318}"))
+            LU_COMMAND
+        else
+            null;
+        parts.mods[parts.mod_count] = lucide orelse break;
+        parts.mod_count += 1;
+        rest = rest[3..];
+    }
+    parts.key = rest;
+    return parts;
+}
+
+/// Modifier glyphs sit a touch smaller than the key text (11.5 vs 12 px).
+fn shortcutGlyphSize(font: f32) f32 {
+    return font * (11.5 / 12.0);
+}
+
+fn shortcutHintWidth(hint: []const u8, font: f32) f32 {
+    if (hint.len == 0) return 0.0;
+    const parts = splitShortcut(hint);
+    const mods_w = @as(f32, @floatFromInt(parts.mod_count)) * (shortcutGlyphSize(font) + designUi(1.0));
+    return mods_w + text_measure.textWidth(.ui, font, parts.key);
+}
+
+/// Draws a keybind hint starting at `x`, vertically centred on `cy`.
+fn queueShortcutHint(state: *runtime.AppState, x: f32, cy: f32, hint: []const u8, color: palette.Color, font: f32, clip: palette.Rect) void {
+    const parts = splitShortcut(hint);
+    const glyph = shortcutGlyphSize(font);
+    var cursor_x = x;
+    for (parts.mods[0..parts.mod_count]) |g| {
+        queueLucide(state, .{ .x = cursor_x, .y = cy - glyph * 0.5, .w = glyph, .h = glyph }, g, glyph, color, clip);
+        cursor_x += glyph + designUi(1.0);
+    }
+    if (parts.key.len == 0) return;
+    const key_w = text_measure.textWidth(.ui, font, parts.key);
+    queueUiText(state, .{ .x = cursor_x, .y = @round(cy - font * 0.65), .w = key_w + theme.scaledUi(4.0), .h = font * 1.3 }, parts.key, color, font, .ui, clip);
 }
 
 // ---------------------------------------------------------------------------
@@ -2060,6 +2530,23 @@ fn paletteColor(value: [4]f32) palette.Color {
     return .{ .r = value[0], .g = value[1], .b = value[2], .a = value[3] };
 }
 
+/// Neutral fill mixed from the dialog surface toward the text colour, so
+/// selection/hover/dividers read on light and dark themes alike.
+fn panelTint(amount: f32) [4]f32 {
+    return theme.mix(theme.COLOR_PANEL, theme.COLOR_WHITE, amount);
+}
+
+/// One device-pixel-or-more hairline width.
+fn hairline() f32 {
+    return @max(@round(theme.scaledUi(1.0)), 1.0);
+}
+
+/// Full-width divider inside the dialog border at `y`.
+fn queueDivider(state: *runtime.AppState, y: f32) void {
+    const inset = hairline();
+    queueRect(state, context_menu.snap(.{ .x = modal_rect.x + inset, .y = y, .w = modal_rect.w - inset * 2.0, .h = inset }), paletteColor(panelTint(DIVIDER_TINT)));
+}
+
 fn keymodBits(modifier_state: sdl.Keymod) u16 {
     return @as(*const u16, @ptrCast(&modifier_state)).*;
 }
@@ -2097,18 +2584,14 @@ fn intersectRects(a: palette.Rect, b: palette.Rect) palette.Rect {
     return .{ .x = x0, .y = y0, .w = @max(x1 - x0, 0.0), .h = @max(y1 - y0, 0.0) };
 }
 
-/// Leading Lucide glyph for action/workspace rows, centred in the row's
-/// glyph slot (the slot the old ">" text marker occupied).
-fn queueRowGlyph(state: *runtime.AppState, row: palette.Rect, glyph: []const u8, clip: palette.Rect) void {
+/// Lucide glyph centred in `rect`.
+fn queueLucide(state: *runtime.AppState, rect: palette.Rect, glyph: []const u8, size: f32, color: palette.Color, clip: palette.Rect) void {
     const stable_value = stableText(state, glyph) orelse return;
-    const size = theme.scaledUi(ROW_GLYPH_SIZE_CSS);
-    const slot_x = row.x + theme.scaledUi(ROW_GLYPH_X_CSS);
-    const slot_w = theme.scaledUi(ROW_GLYPH_SLOT_CSS);
     state.palette_overlay_batch.roleText(
         state.allocator,
-        .{ .x = slot_x + (slot_w - size) * 0.5, .y = row.y + (row.h - size) * 0.5, .w = size, .h = size },
+        context_menu.snap(.{ .x = rect.x + (rect.w - size) * 0.5, .y = rect.y + (rect.h - size) * 0.5, .w = size, .h = size }),
         stable_value,
-        paletteColor(theme.COLOR_GREEN),
+        color,
         size,
         .icon_alt,
         null,
@@ -2118,21 +2601,18 @@ fn queueRowGlyph(state: *runtime.AppState, row: palette.Rect, glyph: []const u8,
     };
 }
 
-fn queueText(state: *runtime.AppState, rect: palette.Rect, value: []const u8, color: palette.Color, font_size: f32, clip: ?palette.Rect) void {
+/// Single-line chrome text in an explicit role (a null role renders bold).
+fn queueUiText(state: *runtime.AppState, rect: palette.Rect, value: []const u8, color: palette.Color, font_size: f32, role: palette.FontRole, clip: palette.Rect) void {
     const stable_value = stableText(state, value) orelse return;
-    // Clip to the text rect horizontally so long values truncate instead of
-    // running under neighboring columns, but keep the caller's vertical clip
-    // (descenders need more height than the tight text-line rect).
-    const base = clip orelse rect;
-    const effective_clip = intersectRects(.{ .x = rect.x, .y = base.y, .w = rect.w, .h = base.h }, base);
-    if (effective_clip.w <= 0.0 or effective_clip.h <= 0.0) return;
-    state.palette_overlay_batch.fixedText(
+    state.palette_overlay_batch.fixedRoleText(
         state.allocator,
         rect,
         stable_value,
         color,
         font_size,
-        effective_clip,
+        role,
+        null,
+        clip,
         .{},
         font_size * 0.55,
         font_size * 1.25,
@@ -2142,6 +2622,8 @@ fn queueText(state: *runtime.AppState, rect: palette.Rect, value: []const u8, co
     };
 }
 
+/// Query-field text; `roleText` keeps glyph placement identical to the
+/// `paletteUiTextPrefixWidth` metrics the caret and selection use.
 fn queueRoleText(state: *runtime.AppState, rect: palette.Rect, value: []const u8, color: palette.Color, font_size: f32, clip: ?palette.Rect) void {
     const stable_value = stableText(state, value) orelse return;
     state.palette_overlay_batch.roleText(
@@ -2330,4 +2812,66 @@ test "indexed keybind hints follow loaded workspace bindings" {
     try std.testing.expectEqualStrings(if (mac) "\u{2303}1" else "Ctrl+1", indexedKeybindHint(&buf, &bindings, 0));
     try std.testing.expectEqualStrings(if (mac) "\u{2303}0" else "Ctrl+0", indexedKeybindHint(&buf, &bindings, 1));
     try std.testing.expectEqualStrings("", indexedKeybindHint(&buf, &bindings, 2));
+}
+
+test "matchMask marks substring hits, then in-order subsequences" {
+    var mask: [16]bool = @splat(false);
+    try std.testing.expect(matchMask("Split Chat Right", "chat", mask[0..16]));
+    for (mask[0..16], 0..) |marked, i| try std.testing.expectEqual(i >= 6 and i < 10, marked);
+
+    mask = @splat(false);
+    try std.testing.expect(matchMask("Split Chat Right", "scr", mask[0..16]));
+    try std.testing.expect(mask[0] and mask[6] and mask[11]);
+    var marked_count: usize = 0;
+    for (mask[0..16]) |marked| marked_count += @intFromBool(marked);
+    try std.testing.expectEqual(@as(usize, 3), marked_count);
+
+    // No match leaves the mask untouched, matching fuzzyScore's rejection.
+    mask = @splat(false);
+    try std.testing.expect(!matchMask("Split Chat Right", "browser", mask[0..16]));
+    for (mask[0..16]) |marked| try std.testing.expect(!marked);
+}
+
+test "ranked results group into sections ordered by their best match" {
+    result_count = 0;
+    defer result_count = 0;
+    const sorted = [_]Candidate{
+        .{ .ref = .{ .command = 0 }, .score = 900 },
+        .{ .ref = .{ .thread = .{ .project = 0, .thread = 0 } }, .score = 800 },
+        .{ .ref = .{ .command = 1 }, .score = 700 },
+        .{ .ref = .{ .closed_workspace = 0 }, .score = 600 },
+    };
+    appendGroupedCandidates(&sorted);
+    try std.testing.expectEqual(@as(usize, 7), result_count);
+    try std.testing.expectEqualStrings("Commands", results[0].ref.header);
+    try std.testing.expectEqual(@as(usize, 0), results[1].ref.command);
+    try std.testing.expectEqual(@as(usize, 1), results[2].ref.command);
+    try std.testing.expectEqualStrings("Recent chats", results[3].ref.header);
+    try std.testing.expect(results[4].ref == .thread);
+    try std.testing.expectEqualStrings("Workspaces", results[5].ref.header);
+    try std.testing.expect(results[6].ref == .closed_workspace);
+    try std.testing.expectEqual(@as(?usize, 1), firstSelectable());
+}
+
+test "chat ages read as short relative phrases" {
+    var buf: [32]u8 = undefined;
+    try std.testing.expectEqualStrings("just now", formatElapsed(&buf, 5));
+    try std.testing.expectEqualStrings("12m ago", formatElapsed(&buf, 12 * 60));
+    try std.testing.expectEqualStrings("3h ago", formatElapsed(&buf, 3 * 3600));
+    try std.testing.expectEqualStrings("yesterday", formatElapsed(&buf, 30 * 3600));
+    try std.testing.expectEqualStrings("4 days ago", formatElapsed(&buf, 4 * 86_400));
+    try std.testing.expectEqualStrings("last week", formatElapsed(&buf, 9 * 86_400));
+    try std.testing.expectEqualStrings("3 weeks ago", formatElapsed(&buf, 21 * 86_400));
+    try std.testing.expectEqualStrings("over a year ago", formatElapsed(&buf, 400 * 86_400));
+}
+
+test "shortcut hints split macOS modifier symbols from the key" {
+    const parts = splitShortcut("\u{21E7}\u{2318}P");
+    try std.testing.expectEqual(@as(usize, 2), parts.mod_count);
+    try std.testing.expectEqualStrings(LU_SHIFT, parts.mods[0]);
+    try std.testing.expectEqualStrings(LU_COMMAND, parts.mods[1]);
+    try std.testing.expectEqualStrings("P", parts.key);
+    const plain = splitShortcut("Ctrl+Shift+T");
+    try std.testing.expectEqual(@as(usize, 0), plain.mod_count);
+    try std.testing.expectEqualStrings("Ctrl+Shift+T", plain.key);
 }
