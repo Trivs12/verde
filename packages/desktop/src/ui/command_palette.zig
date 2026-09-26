@@ -88,7 +88,7 @@ const FOOTER_H_CSS: f32 = 40.0;
 const FOOTER_GAP_CSS: f32 = 16.0;
 const FOOTER_FONT_CSS: f32 = 12.0;
 const FOOTER_KEY_GAP_CSS: f32 = 5.0;
-// Action submenu (Tab on a chat row).
+// Action submenu (Right/Tab on a chat row).
 const ACTION_MENU_W_CSS: f32 = 200.0;
 // Neutral panel→text tints for fills (see `panelTint`).
 const SELECTED_TINT: f32 = 0.06;
@@ -318,7 +318,7 @@ var last_query: [256]u8 = undefined;
 var last_query_len: usize = 0;
 var last_scope: ?usize = null;
 
-/// Action submenu geometry (Tab on a thread row).
+/// Action submenu geometry (Tab or → on a thread row).
 const MAX_ACTIONS: usize = 6;
 const ThreadAction = enum { open_new, replace, open_tui, sync, handoff, archive };
 const ThreadOpenIntent = enum { new_pane, replace };
@@ -422,8 +422,16 @@ pub fn updateHover(state: *runtime.AppState, x: f32, y: f32) void {
     while (i > 0) {
         i -= 1;
         const hit = state.palette_modal_hits.items[i];
-        if (hit.action != .command_palette_row) continue;
+        if (hit.action != .command_palette_row and hit.action != .command_palette_action_row) continue;
         if (!rectContainsPoint(hit.rect, x, y)) continue;
+        if (hit.action == .command_palette_action_row) {
+            // Pointer over the submenu moves its selection like ↑/↓ do.
+            if (state.command_controller.action_selected != hit.index) {
+                state.command_controller.action_selected = hit.index;
+                state.markDirty();
+            }
+            break;
+        }
         new_hover = hit.index;
         break;
     }
@@ -479,6 +487,20 @@ pub fn handleKeyDown(state: *runtime.AppState, event: *const sdl.KeyboardEvent) 
             toggleActionMenu(state);
             return true;
         },
+        .right => {
+            // → opens the chat row's actions once the caret is at the end of
+            // the query; otherwise it stays a caret movement.
+            if (state.command_controller.action_menu_open) return true;
+            if (!rightArrowOpensActions(state, event.mod)) return false;
+            toggleActionMenu(state);
+            return true;
+        },
+        .left => {
+            if (!state.command_controller.action_menu_open) return false;
+            state.command_controller.action_menu_open = false;
+            state.markDirty();
+            return true;
+        },
         .@"return", .kp_enter => {
             if (state.command_controller.action_menu_open) {
                 runActionRow(state, state.command_controller.action_selected);
@@ -504,6 +526,21 @@ pub fn handleKeyDown(state: *runtime.AppState, event: *const sdl.KeyboardEvent) 
         },
         else => return false,
     }
+}
+
+/// True when an unmodified → should open the selected chat row's actions:
+/// the caret sits at the end of the query with no selection to extend.
+fn rightArrowOpensActions(state: *runtime.AppState, mod: sdl.Keymod) bool {
+    const modifiers = sdl.Keymod.shift | sdl.Keymod.ctrl | sdl.Keymod.alt | sdl.Keymod.gui;
+    if ((keymodBits(mod) & modifiers) != 0) return false;
+    const selected = state.command_controller.selected;
+    if (selected >= result_count or results[selected].ref != .thread) return false;
+    const query_len = state.commandPaletteQuery().len;
+    if (state.command_controller.cursor < query_len) return false;
+    if (state.modal_text_selection_anchor) |anchor| {
+        if (anchor != state.command_controller.cursor) return false;
+    }
+    return true;
 }
 
 /// Default activation for a result row (click or Enter). The primary modifier
@@ -547,7 +584,7 @@ pub fn activateRow(state: *runtime.AppState, row_index: usize, replace: bool) vo
     }
 }
 
-/// Runs a row from the Tab action submenu against the selected thread.
+/// Runs a row from the Tab/→ action submenu against the selected thread.
 pub fn runActionRow(state: *runtime.AppState, action_index: usize) void {
     if (action_index >= action_count) return;
     const selected = state.command_controller.selected;
@@ -1136,8 +1173,8 @@ fn moveActionSelection(state: *runtime.AppState, delta: i32) void {
     state.markDirty();
 }
 
-/// Tab on a thread row opens the secondary action submenu; non-thread rows
-/// have a single behavior so Tab is a no-op for them.
+/// Tab (or → at the end of the query) on a thread row opens the secondary
+/// action submenu; non-thread rows have a single behavior so it is a no-op.
 fn toggleActionMenu(state: *runtime.AppState) void {
     if (state.command_controller.action_menu_open) {
         state.command_controller.action_menu_open = false;
@@ -2172,7 +2209,7 @@ fn formatElapsed(buf: []u8, elapsed: i64) []const u8 {
     return "over a year ago";
 }
 
-/// Tab submenu for a chat row, drawn with the shared context-menu chrome.
+/// Tab/→ submenu for a chat row, drawn with the shared context-menu chrome.
 fn renderActionMenu(state: *runtime.AppState) void {
     if (action_count == 0) return;
     const panel = context_menu.queuePanel(state, action_menu_rect);
@@ -2190,7 +2227,7 @@ const FooterKey = union(enum) {
     text: []const u8,
 };
 
-/// Footer key hints: ↵ Run, tab Thread actions, a scope hint when it fits,
+/// Footer key hints: ↵ Run, → Thread actions, a scope hint when it fits,
 /// and esc Close pinned right.
 fn renderFooter(state: *runtime.AppState) void {
     queueDivider(state, footer_rect.y);
@@ -2205,7 +2242,7 @@ fn renderFooter(state: *runtime.AppState) void {
     const esc_x = footer_rect.x + footer_rect.w - pad_x - footerHintWidth(esc_key, "Close", font);
     var x = footer_rect.x + pad_x;
     x = queueFooterHint(state, x, cy, .{ .glyph = LU_CORNER_DOWN_LEFT }, "Run", font, color, clip) + gap;
-    x = queueFooterHint(state, x, cy, .{ .text = "tab" }, "Thread actions", font, color, clip) + gap;
+    x = queueFooterHint(state, x, cy, .{ .glyph = LU_ARROW_RIGHT }, "Thread actions", font, color, clip) + gap;
 
     if (state.command_controller.scope_project == null) {
         // "Type history for this workspace" — the History command re-scopes.
