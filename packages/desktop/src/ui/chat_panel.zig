@@ -96,8 +96,9 @@ const NF_COD_LAYERS = "\u{EBD2}";
 const NF_COD_DEVICE_DESKTOP = "\u{EA7A}";
 /// Shared max width for the chat content column. The composer card and the
 /// transcript bubble column both clamp to this (via `chatContentColumn`) so
-/// they always stay vertically aligned at the same width.
-const CHAT_CONTENT_MAX_WIDTH: f32 = 900.0;
+/// they always stay vertically aligned at the same width. The design's 720px
+/// column at the app's type scale (× 18/15).
+const CHAT_CONTENT_MAX_WIDTH: f32 = 864.0;
 const TRANSCRIPT_LINE_HEIGHT: f32 = 22.0;
 /// Bubble body text matches the composer's input text exactly (same CSS units,
 /// same `uiScaleFactor()`), so reading the thread and typing a prompt share one
