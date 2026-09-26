@@ -24,9 +24,12 @@ pub const CHECK_SLOT_UI: f32 = 18.0;
 /// Room reserved at a row's trailing edge for a submenu chevron.
 pub const CHEVRON_SLOT_UI: f32 = 22.0;
 
-const ICON_SIZE_UI: f32 = 12.0;
-const NF_COD_CHEVRON_RIGHT = "\u{EAB6}";
-const NF_COD_CHECK = "\u{EAB2}";
+/// Lucide glyphs carry more internal padding than the Codicons they
+/// replaced, so the menu icon size is bumped to match optically.
+const ICON_SIZE_UI: f32 = 13.0;
+// Lucide (ISC) glyphs drawn through the `icon_alt` role.
+const LU_CHEVRON_RIGHT = "\u{E06F}";
+const LU_CHECK = "\u{E06C}";
 
 /// Rounds a rect onto the framebuffer pixel grid.
 pub fn snap(rect: palette.Rect) palette.Rect {
@@ -92,7 +95,7 @@ pub fn queueChevron(state: *runtime.AppState, row: palette.Rect, icon_color: [4]
         .y = row.y + (row.h - size) * 0.5,
         .w = size,
         .h = size,
-    }, NF_COD_CHEVRON_RIGHT, icon_color, size, .icon, clip);
+    }, LU_CHEVRON_RIGHT, icon_color, size, .icon_alt, clip);
 }
 
 /// Selection check mark inside the row's leading `CHECK_SLOT_UI`.
@@ -103,7 +106,7 @@ pub fn queueCheck(state: *runtime.AppState, row: palette.Rect, icon_color: [4]f3
         .y = row.y + (row.h - size) * 0.5,
         .w = size,
         .h = size,
-    }, NF_COD_CHECK, icon_color, size, .icon, clip);
+    }, LU_CHECK, icon_color, size, .icon_alt, clip);
 }
 
 /// Hairline rule centred in a `SEPARATOR_HEIGHT_UI` band starting at `y`.

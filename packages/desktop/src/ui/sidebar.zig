@@ -1895,21 +1895,21 @@ fn renderPaletteCollapsedSidebar(state: *runtime.AppState, rect: palette.Rect) v
     renderPaletteSidebarToggle(state, expand_rect, false);
     y += step;
     const add_top_rect: palette.Rect = .{ .x = x, .y = y, .w = button, .h = button };
-    renderPaletteSidebarActionIcon(state, add_top_rect, NF_COD_ADD, null, rect);
+    renderPaletteSidebarActionIcon(state, add_top_rect, LU_PLUS, null, rect);
     addPaletteHit(add_top_rect, .add_workspace, 0, 0);
     y += step;
     const new_rect: palette.Rect = .{ .x = x, .y = y, .w = button, .h = button };
-    renderPaletteSidebarActionIcon(state, new_rect, NF_COD_EDIT, null, rect);
+    renderPaletteSidebarActionIcon(state, new_rect, LU_SQUARE_PEN, null, rect);
     addPaletteHit(new_rect, .new_thread, state.project_controller.selected_index, 0);
     y += step;
     const terminal_rect: palette.Rect = .{ .x = x, .y = y, .w = button, .h = button };
-    renderPaletteSidebarActionIcon(state, terminal_rect, NF_COD_TERMINAL, null, rect);
+    renderPaletteSidebarActionIcon(state, terminal_rect, LU_SQUARE_TERMINAL, null, rect);
     addPaletteHit(terminal_rect, .new_terminal, state.project_controller.selected_index, 0);
     y += step;
     // Palette trigger parity with the expanded rail's search pill, so the
     // collapsed rail keeps a visible route to search/history too.
     const search_rect: palette.Rect = .{ .x = x, .y = y, .w = button, .h = button };
-    renderPaletteSidebarActionIcon(state, search_rect, NF_COD_SEARCH, null, rect);
+    renderPaletteSidebarActionIcon(state, search_rect, LU_SEARCH, null, rect);
     addPaletteHit(search_rect, .command_palette, 0, 0);
     y += button + theme.scaledUi(8.0);
 
@@ -2030,13 +2030,8 @@ fn renderPaletteSidebarActionIcon(state: *runtime.AppState, rect: palette.Rect, 
         queuePaletteRoundedRect(state, rect, paletteColor(sidebarTint(SIDEBAR_ICON_HOVER_TINT)), theme.scaledUi(8.0));
     }
     const fg = if (hovered) theme.COLOR_WHITE else theme.COLOR_TEXT_MUTED;
-    const icon_font = theme.scaledUi(17.0);
-    queuePaletteIcon(state, .{
-        .x = rect.x + (rect.w - icon_font) * 0.5,
-        .y = rect.y + (rect.h - icon_font) * 0.5,
-        .w = icon_font,
-        .h = icon_font,
-    }, glyph, icon_font, paletteColor(fg), clip);
+    // Lucide runs optically smaller than the Codicons it replaced (17px).
+    queuePaletteLucideIcon(state, rect, glyph, theme.scaledUi(18.0), paletteColor(fg), clip);
 }
 
 /// Compact hover action on a workspace row (new chat, "…"): a 14px glyph in a
@@ -2873,13 +2868,6 @@ fn queuePaletteFolderIcon(state: *runtime.AppState, x: f32, center_y: f32, width
     }
 }
 
-// Nerd Font Symbols codicon glyphs used throughout the sidebar. Codepoints
-// confirmed against SymbolsNerdFontMono-Regular.ttf's cmap.
-const NF_COD_CHEVRON_RIGHT = "\u{EAB6}";
-const NF_COD_CHEVRON_DOWN = "\u{EAB4}";
-const NF_COD_ADD = "\u{EA60}";
-const NF_COD_EDIT = "\u{EA73}";
-const NF_COD_ELLIPSIS = "\u{EA7C}";
 // Lucide (ISC) glyphs drawn through the `icon_alt` role; see
 // `queuePaletteLucideIcon`.
 const LU_SQUARE_PEN = "\u{E172}";
@@ -2895,20 +2883,14 @@ const LU_COMMAND = "\u{E09A}";
 const LU_SHIFT = "\u{E1E4}";
 const LU_OPTION = "\u{E1F8}";
 const LU_CONTROL = "\u{E070}";
-const NF_COD_GEAR = "\u{EB51}";
-const NF_COD_TERMINAL = "\u{EA85}";
-const NF_COD_HISTORY = "\u{EA82}";
-const NF_COD_SEARCH = "\u{EA6D}";
+const LU_SQUARE_TERMINAL = "\u{E20A}";
+const LU_CHEVRON_RIGHT = "\u{E06F}";
+const LU_CHEVRON_DOWN = "\u{E06D}";
 // Font Awesome's overlapping-window mark. It badges floating panes without
-// replacing the pane-kind/provider glyph users already recognize.
+// replacing the pane-kind/provider glyph users already recognize; at its 8px
+// badge size Lucide's strokes would not read, so it stays on the icon font.
 const NF_FA_WINDOW_RESTORE = "\u{F2D2}";
-// Panel-style sidebar toggle (VS Code's layout-sidebar-left): filled left pane
-// while the rail is expanded, hollow "off" variant while collapsed.
-const NF_COD_LAYOUT_SIDEBAR_LEFT = "\u{EBF3}";
-const NF_COD_LAYOUT_SIDEBAR_LEFT_OFF = "\u{EC02}";
 
-/// Renders a centered codicon glyph through the icon font. Replaces the
-/// hand-drawn shapes / PNGs we used before.
 /// Lucide stroke icon (the `icon_alt` face), centred in `rect`.
 fn queuePaletteLucideIcon(state: *runtime.AppState, rect: palette.Rect, glyph: []const u8, size: f32, color: palette.Color, clip: ?palette.Rect) void {
     const stable_value = stablePaletteText(state, glyph) catch return;
@@ -2946,9 +2928,9 @@ fn queuePaletteIcon(state: *runtime.AppState, rect: palette.Rect, glyph: []const
 }
 
 fn queuePaletteChevron(state: *runtime.AppState, x: f32, center_y: f32, color: [4]f32, collapsed: bool) void {
-    const font_size = theme.scaledUi(13.0);
-    const glyph = if (collapsed) NF_COD_CHEVRON_RIGHT else NF_COD_CHEVRON_DOWN;
-    queuePaletteIcon(state, .{
+    const font_size = theme.scaledUi(14.0);
+    const glyph = if (collapsed) LU_CHEVRON_RIGHT else LU_CHEVRON_DOWN;
+    queuePaletteLucideIcon(state, .{
         .x = x - theme.scaledUi(4.0),
         .y = center_y - font_size * 0.5,
         .w = theme.scaledUi(14.0),
