@@ -1946,10 +1946,11 @@ fn transcriptSelectableBodyRect(
     height: f32,
     role: app_state.ChatRole,
     author: []const u8,
+    labeled: bool,
     body: []const u8,
 ) ?palette.Rect {
     if (childNotification(role, body)) |notification| {
-        return transcriptSelectableBodyRect(column, y, height, .assistant, "Child chat", notification.body);
+        return transcriptSelectableBodyRect(column, y, height, .assistant, "Child chat", true, notification.body);
     }
     if (role == .system and isSlashCommandResultMessage(author, body)) {
         const pad = theme.scaledUi(16.0);
@@ -1971,11 +1972,12 @@ fn transcriptSelectableBodyRect(
     }
     const bubble_width = if (role == .user) column.w * 0.62 else column.w;
     const bubble_x = if (role == .user) column.x + column.w - bubble_width else column.x;
+    const label_cut = transcriptLabelRowCut(labeled);
     return .{
         .x = bubble_x + theme.scaledUi(14.0),
-        .y = y + theme.scaledUi(34.0),
+        .y = y + theme.scaledUi(34.0) - label_cut,
         .w = bubble_width - theme.scaledUi(28.0),
-        .h = height - theme.scaledUi(42.0),
+        .h = height - theme.scaledUi(42.0) + label_cut,
     };
 }
 
@@ -2001,6 +2003,7 @@ fn transcriptSelectableBodyHit(
     height: f32,
     role: app_state.ChatRole,
     author: []const u8,
+    labeled: bool,
     body_raw: []const u8,
     muted_body: bool,
     assistant_plain_layout: bool,
@@ -2010,7 +2013,7 @@ fn transcriptSelectableBodyHit(
     mouse_y: f32,
 ) ?TranscriptMarkdownHit {
     const kind = transcriptSelectableBodyKind(role, author, body_raw, muted_body, assistant_plain_layout) orelse return null;
-    const body_rect = transcriptSelectableBodyRect(column, y, height, role, author, body_raw) orelse return null;
+    const body_rect = transcriptSelectableBodyRect(column, y, height, role, author, labeled, body_raw) orelse return null;
     if (!rectContains(body_rect, mouse_x, mouse_y)) return null;
 
     const body_text = std.mem.trim(u8, transcriptDisplayBody(role, body_raw), "\n\r\t ");
@@ -2036,6 +2039,7 @@ fn assistantTranscriptMarkdownLinkHit(
     height: f32,
     role: app_state.ChatRole,
     author: []const u8,
+    labeled: bool,
     body_raw: []const u8,
     muted_body: bool,
     assistant_plain_layout: bool,
@@ -2045,7 +2049,7 @@ fn assistantTranscriptMarkdownLinkHit(
 ) ?TranscriptMarkdownLinkHit {
     const kind = transcriptSelectableBodyKind(role, author, body_raw, muted_body, assistant_plain_layout) orelse return null;
     if (kind != .markdown) return null;
-    const body_rect = transcriptSelectableBodyRect(column, y, height, role, author, body_raw) orelse return null;
+    const body_rect = transcriptSelectableBodyRect(column, y, height, role, author, labeled, body_raw) orelse return null;
     if (!rectContains(body_rect, mouse_x, mouse_y)) return null;
 
     const body_text = std.mem.trim(u8, body_raw, "\n\r\t ");
@@ -2092,7 +2096,7 @@ fn transcriptMarkdownBubbleHit(
             const message = thread.messages.items[item.message_index];
             const content_y = column.y - scroll_y + estimated_height + item.top;
             if (!(message.role == .system and shouldRenderPaletteCommandRow(message.author, message.body))) {
-                if (transcriptSelectableBodyHit(state, column, content_y, item.height, message.role, message.author, message.body, false, false, false, item.message_index, mouse_x, mouse_y)) |hit| {
+                if (transcriptSelectableBodyHit(state, column, content_y, item.height, message.role, message.author, transcriptRowLabeled(state, message.role, message.author), message.body, false, false, false, item.message_index, mouse_x, mouse_y)) |hit| {
                     return hit;
                 }
             }
@@ -2120,14 +2124,14 @@ fn transcriptMarkdownBubbleHit(
             continue;
         }
         const pending_msg_idx = base_idx + pi;
-        const item_h = transcriptMessageHeight(null, null, event.body, event.role, column.w, event.author, false) +
+        const item_h = transcriptMessageHeight(null, null, event.body, event.role, column.w, event.author, transcriptRowLabeled(state, event.role, event.author), false) +
             transcriptImageBlockHeightFor(event.role, event.images.items.len, column.w);
         if (event.role == .system and shouldRenderPaletteCommandRow(event.author, event.body)) {
             content_y += item_h + theme.scaledUi(12.0);
             pi += 1;
             continue;
         }
-        if (transcriptSelectableBodyHit(state, column, content_y, item_h, event.role, event.author, event.body, false, false, false, pending_msg_idx, mouse_x, mouse_y)) |hit| {
+        if (transcriptSelectableBodyHit(state, column, content_y, item_h, event.role, event.author, transcriptRowLabeled(state, event.role, event.author), event.body, false, false, false, pending_msg_idx, mouse_x, mouse_y)) |hit| {
             return hit;
         }
         content_y += item_h + theme.scaledUi(12.0);
@@ -2137,9 +2141,9 @@ fn transcriptMarkdownBubbleHit(
     const stream_text: []const u8 = send_state.streamRevealedText();
     const body: []const u8 = if (stream_text.len > 0) stream_text else "Waiting for streamed output...";
     const stream_plain = false; // item 4: stream renders as markdown in place
-    const assistant_h = transcriptMessageHeightStream(null, null, body, .assistant, column.w, "", stream_plain, stream_text.len > 0);
+    const assistant_h = transcriptMessageHeightStream(null, null, body, .assistant, column.w, "", true, stream_plain, stream_text.len > 0);
     const stream_idx = base_idx + send_state.pending_events.items.len;
-    return transcriptSelectableBodyHit(state, column, content_y, assistant_h, .assistant, "", body, stream_text.len == 0, stream_plain, true, stream_idx, mouse_x, mouse_y);
+    return transcriptSelectableBodyHit(state, column, content_y, assistant_h, .assistant, "", true, body, stream_text.len == 0, stream_plain, true, stream_idx, mouse_x, mouse_y);
 }
 
 fn transcriptMarkdownBubbleLinkHit(
@@ -2162,7 +2166,7 @@ fn transcriptMarkdownBubbleLinkHit(
             const message = thread.messages.items[item.message_index];
             const content_y = column.y - scroll_y + estimated_height + item.top;
             if (!(message.role == .system and shouldRenderPaletteCommandRow(message.author, message.body))) {
-                if (assistantTranscriptMarkdownLinkHit(state, column, content_y, item.height, message.role, message.author, message.body, false, false, false, mouse_x, mouse_y)) |hit| {
+                if (assistantTranscriptMarkdownLinkHit(state, column, content_y, item.height, message.role, message.author, transcriptRowLabeled(state, message.role, message.author), message.body, false, false, false, mouse_x, mouse_y)) |hit| {
                     return hit;
                 }
             }
@@ -2188,14 +2192,14 @@ fn transcriptMarkdownBubbleLinkHit(
             pi = group_end;
             continue;
         }
-        const item_h = transcriptMessageHeight(null, null, event.body, event.role, column.w, event.author, false) +
+        const item_h = transcriptMessageHeight(null, null, event.body, event.role, column.w, event.author, transcriptRowLabeled(state, event.role, event.author), false) +
             transcriptImageBlockHeightFor(event.role, event.images.items.len, column.w);
         if (event.role == .system and shouldRenderPaletteCommandRow(event.author, event.body)) {
             content_y += item_h + theme.scaledUi(12.0);
             pi += 1;
             continue;
         }
-        if (assistantTranscriptMarkdownLinkHit(state, column, content_y, item_h, event.role, event.author, event.body, false, false, false, mouse_x, mouse_y)) |hit| {
+        if (assistantTranscriptMarkdownLinkHit(state, column, content_y, item_h, event.role, event.author, transcriptRowLabeled(state, event.role, event.author), event.body, false, false, false, mouse_x, mouse_y)) |hit| {
             return hit;
         }
         content_y += item_h + theme.scaledUi(12.0);
@@ -2205,8 +2209,8 @@ fn transcriptMarkdownBubbleLinkHit(
     const stream_text: []const u8 = send_state.streamRevealedText();
     const body: []const u8 = if (stream_text.len > 0) stream_text else "Waiting for streamed output...";
     const stream_plain = false; // item 4: stream renders as markdown in place
-    const assistant_h = transcriptMessageHeightStream(null, null, body, .assistant, column.w, "", stream_plain, stream_text.len > 0);
-    return assistantTranscriptMarkdownLinkHit(state, column, content_y, assistant_h, .assistant, "", body, stream_text.len == 0, stream_plain, true, mouse_x, mouse_y);
+    const assistant_h = transcriptMessageHeightStream(null, null, body, .assistant, column.w, "", true, stream_plain, stream_text.len > 0);
+    return assistantTranscriptMarkdownLinkHit(state, column, content_y, assistant_h, .assistant, "", true, body, stream_text.len == 0, stream_plain, true, mouse_x, mouse_y);
 }
 
 pub const TranscriptLinkKind = enum {
@@ -2554,7 +2558,7 @@ fn transcriptMarkdownMessageSnapshot(state: *app_state.AppState, message_index: 
         if (m.role == .system and shouldHideCursorLifecycleSystemEvent(thread, m.author, m.body)) return null;
         const kind = transcriptSelectableBodyKind(m.role, m.author, m.body, false, false) orelse return null;
         const body_trim = std.mem.trim(u8, transcriptDisplayBody(m.role, m.body), "\n\r\t ");
-        const body_rect = transcriptSelectableBodyRect(column, 0.0, 100000.0, m.role, m.author, m.body) orelse return null;
+        const body_rect = transcriptSelectableBodyRect(column, 0.0, 100000.0, m.role, m.author, transcriptRowLabeled(state, m.role, m.author), m.body) orelse return null;
         return .{ .body_trim = body_trim, .body_inner_w = @max(body_rect.w, theme.scaledUi(80.0)), .kind = kind, .streaming = false };
     }
 
@@ -2568,7 +2572,7 @@ fn transcriptMarkdownMessageSnapshot(state: *app_state.AppState, message_index: 
         if (ev.role == .system and shouldSkipPendingTranscriptEvent(thread, ev.author, ev.body)) return null;
         const kind = transcriptSelectableBodyKind(ev.role, ev.author, ev.body, false, false) orelse return null;
         const body_trim = std.mem.trim(u8, transcriptDisplayBody(ev.role, ev.body), "\n\r\t ");
-        const body_rect = transcriptSelectableBodyRect(column, 0.0, 100000.0, ev.role, ev.author, ev.body) orelse return null;
+        const body_rect = transcriptSelectableBodyRect(column, 0.0, 100000.0, ev.role, ev.author, transcriptRowLabeled(state, ev.role, ev.author), ev.body) orelse return null;
         return .{ .body_trim = body_trim, .body_inner_w = @max(body_rect.w, theme.scaledUi(80.0)), .kind = kind, .streaming = false };
     }
     if (pi != send_state.pending_events.items.len) return null;
@@ -3910,6 +3914,10 @@ test "materializing older rows keeps a manual upward scroll on the same content"
 
 fn transcriptLayoutVariantHash(state: *app_state.AppState) u64 {
     var hasher = std.hash.Wyhash.init(0x7A4E_5C81_91D2_0B33);
+    // Assistant author labels show only when the author differs from the
+    // thread's provider, so a provider switch changes row heights.
+    const thread_provider = state.currentThread().provider;
+    hasher.update(std.mem.asBytes(&thread_provider));
     const tool_group_preference: u8 = @intFromEnum(state.app_config.tool_call_group_preference);
     const diff_layout_preference: u8 = @intFromEnum(state.app_config.diff_layout_preference);
     hasher.update(std.mem.asBytes(&tool_group_preference));
@@ -4619,7 +4627,7 @@ fn pendingSingleRowHeight(
         event.body,
     );
     if (event.measured_row_height >= 0.0 and event.measured_row_key == key) return event.measured_row_height;
-    const height = transcriptMessageHeight(state, msg_idx, event.body, event.role, column_width, event.author, false) +
+    const height = transcriptMessageHeight(state, msg_idx, event.body, event.role, column_width, event.author, transcriptRowLabeled(state, event.role, event.author), false) +
         transcriptImageBlockHeightFor(event.role, event.images.items.len, column_width);
     event.measured_row_height = height;
     event.measured_row_key = key;
@@ -4688,7 +4696,7 @@ fn pendingStreamBodyHeight(
     );
     if (send_state.stream_measured_height >= 0.0 and send_state.stream_measured_key == key) return send_state.stream_measured_height;
     const stream_plain = false; // item 4: stream renders as markdown in place
-    const height = transcriptMessageHeightStream(state, stream_msg_idx, body, .assistant, column_width, "", stream_plain, stream_text.len > 0);
+    const height = transcriptMessageHeightStream(state, stream_msg_idx, body, .assistant, column_width, "", true, stream_plain, stream_text.len > 0);
     send_state.stream_measured_height = height;
     send_state.stream_measured_key = key;
     return height;
@@ -4795,11 +4803,7 @@ fn renderPendingTranscriptStream(state: *app_state.AppState, thread: *const app_
                 renderTodoCard(state, column, y, item_h, event.body, clip);
             }
         } else {
-            const role_label: []const u8 = switch (event.role) {
-                .user => "You",
-                .assistant => if (event.author.len > 0) event.author else "Assistant",
-                .system => if (event.author.len > 0) event.author else "System",
-            };
+            const role_label = transcriptRowLabel(state, event.role, event.author);
             if (y + item_h >= column.y and y <= column.y + column.h) {
                 renderTranscriptBubbleFromParts(state, column, y, item_h, event.role, role_label, event.body, false, false, clip, msg_idx, false, false);
                 const first_image: ?app_state.ChatImageAttachment = if (event.images.items.len > 0) event.images.items[0] else null;
@@ -5750,16 +5754,20 @@ fn transcriptCommittedMessageHeight(state: *app_state.AppState, message_index: u
     // effect immediately.
     const has_dynamic_collapse = message.role == .system and
         (shouldRenderPaletteCommandRow(message.author, message.body) or isDiffSummaryMessage(message.author, message.body) or isUsageSummaryMessage(message.author, message.body));
+    // The cache keys on the author; an unlabeled assistant row keys on ""
+    // instead so a thread provider switch (which flips the label) re-measures.
+    const labeled = transcriptRowLabeled(state, message.role, message.author);
+    const cache_author = if (labeled) message.author else "";
     if (!has_dynamic_collapse) {
-        if (state.cachedTranscriptMessageHeight(message_index, column_width, message.body, message.role, message.author, false, image_present)) |height| {
+        if (state.cachedTranscriptMessageHeight(message_index, column_width, message.body, message.role, cache_author, false, image_present)) |height| {
             return height;
         }
     }
 
-    var height = transcriptMessageHeight(state, message_index, message.body, message.role, column_width, message.author, false);
+    var height = transcriptMessageHeight(state, message_index, message.body, message.role, column_width, message.author, labeled, false);
     height += transcriptImageBlockHeight(message, column_width);
     if (!has_dynamic_collapse) {
-        state.putTranscriptMessageHeight(message_index, column_width, message.body, message.role, message.author, false, image_present, height);
+        state.putTranscriptMessageHeight(message_index, column_width, message.body, message.role, cache_author, false, image_present, height);
     }
     return height;
 }
@@ -5788,9 +5796,10 @@ fn transcriptMessageHeight(
     role: app_state.ChatRole,
     column_width: f32,
     message_author: []const u8,
+    labeled: bool,
     assistant_plain_layout: bool,
 ) f32 {
-    return transcriptMessageHeightStream(state, message_index, body_raw, role, column_width, message_author, assistant_plain_layout, false);
+    return transcriptMessageHeightStream(state, message_index, body_raw, role, column_width, message_author, labeled, assistant_plain_layout, false);
 }
 
 fn transcriptMessageHeightStream(
@@ -5800,11 +5809,12 @@ fn transcriptMessageHeightStream(
     role: app_state.ChatRole,
     column_width: f32,
     message_author: []const u8,
+    labeled: bool,
     assistant_plain_layout: bool,
     streaming: bool,
 ) f32 {
     if (childNotification(role, body_raw)) |notification| {
-        return transcriptMessageHeightStream(state, message_index, notification.body, .assistant, column_width, "Child chat", true, streaming);
+        return transcriptMessageHeightStream(state, message_index, notification.body, .assistant, column_width, "Child chat", true, true, streaming);
     }
     if (role == .system and isSlashCommandResultMessage(message_author, body_raw)) {
         return slashCommandResultHeight(state, message_index, body_raw, column_width);
@@ -5826,6 +5836,8 @@ fn transcriptMessageHeightStream(
     }
     const body = std.mem.trim(u8, body_raw, "\n\r\t ");
     const font_size = theme.scaledUi(TRANSCRIPT_MARKDOWN_FONT_SIZE);
+    // Rows without the small author label reclaim its reserved strip.
+    const label_cut = transcriptLabelRowCut(labeled);
     const body_width = if (role == .user) column_width * 0.62 else column_width;
     const body_inner_width = @max(body_width - theme.scaledUi(28.0), theme.scaledUi(80.0));
     if (role == .assistant and !assistant_plain_layout) {
@@ -5834,7 +5846,7 @@ fn transcriptMessageHeightStream(
                 if (message_index) |index| {
                     if (app.transcriptMarkdownBodyView(index, body)) |view| {
                         const measured = chat_markdown.measureBodyHeight(view.*, body_inner_width, markdownOptions(font_size));
-                        return theme.scaledUi(44.0) + measured;
+                        return theme.scaledUi(44.0) - label_cut + measured;
                     }
                 }
             }
@@ -5843,7 +5855,7 @@ fn transcriptMessageHeightStream(
             if (state) |app| {
                 if (app.pendingTranscriptBodyEntry(body, .markdown_streaming)) |entry| {
                     const measured = chat_markdown.measureBodyHeight(entry.view, body_inner_width, markdownOptions(font_size));
-                    return theme.scaledUi(46.0) + measured;
+                    return theme.scaledUi(46.0) - label_cut + measured;
                 }
             }
         }
@@ -5853,11 +5865,11 @@ fn transcriptMessageHeightStream(
             chat_markdown.buildBodyView(std.heap.page_allocator, body)) catch {
             const chars_per_line = @max(@as(usize, @intFromFloat(body_inner_width / (font_size * 0.52))), 1);
             const line_count = wrappedLineCount(body, chars_per_line);
-            return theme.scaledUi(46.0) + @as(f32, @floatFromInt(line_count)) * font_size * 1.38;
+            return theme.scaledUi(46.0) - label_cut + @as(f32, @floatFromInt(line_count)) * font_size * 1.38;
         };
         defer view.deinit(std.heap.page_allocator);
         const measured = chat_markdown.measureBodyHeight(view, body_inner_width, markdownOptions(font_size));
-        return theme.scaledUi(46.0) + measured;
+        return theme.scaledUi(46.0) - label_cut + measured;
     }
     if (state) |app| {
         if (message_index) |index| {
@@ -5866,17 +5878,60 @@ fn transcriptMessageHeightStream(
             else
                 app.transcriptPlainBodyEntry(index, body);
             if (cached) |entry| {
-                return theme.scaledUi(46.0) + chat_markdown.measureBodyHeight(entry.view, body_inner_width, transcriptPlainTextOptions(theme.COLOR_WHITE));
+                return theme.scaledUi(46.0) - label_cut + chat_markdown.measureBodyHeight(entry.view, body_inner_width, transcriptPlainTextOptions(theme.COLOR_WHITE));
             }
         }
     }
     var plain_view = chat_markdown.buildPlainBodyView(std.heap.page_allocator, body) catch {
         const chars_per_line = @max(@as(usize, @intFromFloat(body_inner_width / (font_size * 0.52))), 1);
         const line_count = wrappedLineCount(body, chars_per_line);
-        return theme.scaledUi(46.0) + @as(f32, @floatFromInt(line_count)) * font_size * 1.38;
+        return theme.scaledUi(46.0) - label_cut + @as(f32, @floatFromInt(line_count)) * font_size * 1.38;
     };
     defer plain_view.deinit(std.heap.page_allocator);
-    return theme.scaledUi(46.0) + chat_markdown.measureBodyHeight(plain_view, body_inner_width, transcriptPlainTextOptions(theme.COLOR_WHITE));
+    return theme.scaledUi(46.0) - label_cut + chat_markdown.measureBodyHeight(plain_view, body_inner_width, transcriptPlainTextOptions(theme.COLOR_WHITE));
+}
+
+/// Vertical strip reserved for a transcript row's small author label; rows
+/// drawn without the label start their body this much higher.
+const TRANSCRIPT_LABEL_ROW_CUT: f32 = 26.0;
+
+fn transcriptLabelRowCut(labeled: bool) f32 {
+    return if (labeled) 0.0 else theme.scaledUi(TRANSCRIPT_LABEL_ROW_CUT);
+}
+
+/// Ordinary assistant replies carry no author label: the thread's provider
+/// is implied. The label stays when it tells authors apart, i.e. the reply
+/// came from a different provider than the thread's current one (the model
+/// picker can switch providers mid-thread). Generic "Assistant" authors and
+/// empty authors never distinguish anything. User and system rows keep their
+/// labels.
+fn assistantAuthorLabelShown(author: []const u8, thread_provider_label: []const u8) bool {
+    const name = std.mem.trim(u8, author, " \t");
+    if (name.len == 0 or std.ascii.eqlIgnoreCase(name, "Assistant")) return false;
+    return !std.ascii.eqlIgnoreCase(name, thread_provider_label);
+}
+
+fn transcriptRowLabeled(state: *app_state.AppState, role: app_state.ChatRole, author: []const u8) bool {
+    if (role != .assistant) return true;
+    return assistantAuthorLabelShown(author, utils.providerLabel(state.currentThread().provider));
+}
+
+/// Label drawn above a transcript bubble, or null when the row has none.
+fn transcriptRowLabel(state: *app_state.AppState, role: app_state.ChatRole, author: []const u8) ?[]const u8 {
+    if (!transcriptRowLabeled(state, role, author)) return null;
+    return switch (role) {
+        .user => "You",
+        .assistant => author,
+        .system => if (author.len > 0) author else "System",
+    };
+}
+
+test "assistant author label shows only when it distinguishes authors" {
+    try std.testing.expect(!assistantAuthorLabelShown("Cursor", "Cursor"));
+    try std.testing.expect(!assistantAuthorLabelShown("cursor", "Cursor"));
+    try std.testing.expect(!assistantAuthorLabelShown("", "Cursor"));
+    try std.testing.expect(!assistantAuthorLabelShown("Assistant", "Codex"));
+    try std.testing.expect(assistantAuthorLabelShown("Claude", "Cursor"));
 }
 
 /// Corner radius for transcript bubbles (user / assistant / system) and shell command rows.
@@ -5942,11 +5997,7 @@ fn renderTranscriptMessage(state: *app_state.AppState, thread: *const app_state.
             return;
         }
     }
-    const role_label = switch (message.role) {
-        .user => "You",
-        .assistant => if (message.author.len > 0) message.author else "Assistant",
-        .system => if (message.author.len > 0) message.author else "System",
-    };
+    const role_label = transcriptRowLabel(state, message.role, message.author);
     renderTranscriptBubbleFromParts(state, column, y, height, message.role, role_label, message.body, false, false, clip, message_index, false, false);
     renderTranscriptImages(state, column, y, height, message, clip);
 }
@@ -8540,7 +8591,8 @@ fn renderTranscriptBubbleFromParts(
     y: f32,
     height: f32,
     role: app_state.ChatRole,
-    role_label: []const u8,
+    /// Small author label above the body; null for ordinary assistant replies.
+    role_label: ?[]const u8,
     body_raw: []const u8,
     muted_body: bool,
     assistant_plain_layout: bool,
@@ -8612,7 +8664,7 @@ fn renderTranscriptBubbleFromParts(
     }
 
     var label_x = bubble.x + theme.scaledUi(14.0);
-    if (active) {
+    if (active and role_label != null) {
         const core_d = theme.scaledUi(5.5);
         const halo_d = core_d + theme.scaledUi(5.0) * activity;
         const center_x = label_x + halo_d * 0.5;
@@ -8631,17 +8683,20 @@ fn renderTranscriptBubbleFromParts(
         }, paletteColor(theme.withAlpha(theme.COLOR_GREEN, @intFromFloat(180.0 + activity * 75.0))), core_d * 0.5, clip);
         label_x += halo_d + theme.scaledUi(6.0);
     }
-    queueText(state, snapRect(.{
-        .x = label_x,
-        .y = bubble.y + theme.scaledUi(9.0),
-        .w = @max(bubble.x + bubble.w - theme.scaledUi(14.0) - label_x, theme.scaledUi(20.0)),
-        .h = theme.scaledUi(20.0),
-    }), role_label, paletteColor(if (active) theme.COLOR_GREEN else theme.COLOR_TEXT_MUTED), theme.scaledUi(13.0), clip);
+    if (role_label) |label| {
+        queueRoleLabel(state, .{
+            .x = label_x,
+            .y = bubble.y + theme.scaledUi(9.0),
+            .w = @max(bubble.x + bubble.w - theme.scaledUi(14.0) - label_x, theme.scaledUi(20.0)),
+            .h = theme.scaledUi(20.0),
+        }, label, paletteColor(if (active) theme.COLOR_GREEN else theme.COLOR_TEXT_MUTED), theme.scaledUi(13.0), .ui_medium, clip);
+    }
+    const label_cut = transcriptLabelRowCut(role_label != null);
     const body_rect = palette.Rect{
         .x = bubble.x + theme.scaledUi(14.0),
-        .y = bubble.y + theme.scaledUi(34.0),
+        .y = bubble.y + theme.scaledUi(34.0) - label_cut,
         .w = bubble.w - theme.scaledUi(28.0),
-        .h = bubble.h - theme.scaledUi(42.0),
+        .h = bubble.h - theme.scaledUi(42.0) + label_cut,
     };
     const body_text = std.mem.trim(u8, body_raw, "\n\r\t ");
     last_body_tail = null;
