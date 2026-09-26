@@ -10,25 +10,27 @@ const colors = @import("colors.zig");
 const context_menu = @import("context_menu.zig");
 const theme = @import("theme.zig");
 
-// Nerd Font Symbols codicon glyphs. Codepoints match the Microsoft Codicons
-// table (https://microsoft.github.io/vscode-codicons/dist/codicon.html) and
-// are present in SymbolsNerdFontMono-Regular.ttf.
-const NF_COD_ARROW_LEFT = "\u{EA9B}";
-const NF_COD_ARROW_RIGHT = "\u{EA9C}";
-const NF_COD_REFRESH = "\u{EB37}";
-const NF_COD_INSPECT = "\u{EBD1}";
-const NF_COD_CHEVRON_DOWN = "\u{EAB4}";
-const NF_COD_CLOSE = "\u{EA76}";
-const NF_COD_ADD = "\u{EA60}";
-const NF_COD_COPY = "\u{EBCC}";
-const NF_COD_ELLIPSIS = "\u{EA7C}";
-const NF_COD_LOADING = "\u{EB19}";
-const NF_COD_ERROR = "\u{EA87}";
-const NF_COD_PINNED = "\u{EB2B}";
-const NF_COD_LOCK = "\u{EA75}";
-const NF_COD_WARNING = "\u{EA6C}";
-const NF_COD_LINK_EXTERNAL = "\u{EB14}";
-const NF_COD_GLOBE = "\u{EB01}";
+// Lucide (ISC) glyphs drawn through Palette's `icon_alt` role. Codepoints come
+// from the bundled Lucide font's codepoints table.
+const LU_ARROW_LEFT = "\u{E048}";
+const LU_ARROW_RIGHT = "\u{E049}";
+const LU_ROTATE_CW = "\u{E149}";
+const LU_SQUARE_MOUSE_POINTER = "\u{E202}";
+const LU_CHEVRON_DOWN = "\u{E06D}";
+const LU_X = "\u{E1B2}";
+const LU_PLUS = "\u{E13D}";
+const LU_COPY = "\u{E09E}";
+const LU_ELLIPSIS = "\u{E0B6}";
+const LU_LOADER_CIRCLE = "\u{E10A}";
+const LU_CIRCLE_X = "\u{E084}";
+const LU_PIN = "\u{E259}";
+const LU_LOCK = "\u{E10B}";
+const LU_TRIANGLE_ALERT = "\u{E193}";
+const LU_EXTERNAL_LINK = "\u{E0B9}";
+const LU_GLOBE = "\u{E0E8}";
+/// Lucide draws with more internal padding than the Codicons these icons
+/// replaced; this optical bump keeps them the same apparent size.
+const LUCIDE_OPTICAL_SCALE: f32 = 1.08;
 
 const TAB_ROW_HEIGHT: f32 = 36.0;
 const NAV_ROW_HEIGHT: f32 = 44.0;
@@ -782,13 +784,23 @@ fn queuePaletteIcon(
         app_state.log.warn("failed to retain browser palette icon: {s}", .{@errorName(err)});
         return;
     };
+    // Grow the glyph about the caller's center so hit rects stay unchanged.
+    const optical_size = font_size * LUCIDE_OPTICAL_SCALE;
+    const grow_w = rect.w * (LUCIDE_OPTICAL_SCALE - 1.0);
+    const grow_h = rect.h * (LUCIDE_OPTICAL_SCALE - 1.0);
+    const optical_rect: palette.Rect = .{
+        .x = rect.x - grow_w * 0.5,
+        .y = rect.y - grow_h * 0.5,
+        .w = rect.w + grow_w,
+        .h = rect.h + grow_h,
+    };
     state.palette_overlay_batch.roleText(
         state.allocator,
-        snapRect(rect),
+        snapRect(optical_rect),
         stable_value,
         color,
-        font_size,
-        .icon,
+        optical_size,
+        .icon_alt,
         null,
         null,
     ) catch |err| {
@@ -861,9 +873,9 @@ fn renderTabIndicator(state: *app_state.AppState, tab_index: usize, tab_rect: pa
         .h = theme.scaledUi(14.0),
     };
     const glyph = switch (indicator) {
-        .loading => NF_COD_LOADING,
-        .failed => NF_COD_ERROR,
-        .none => NF_COD_PINNED,
+        .loading => LU_LOADER_CIRCLE,
+        .failed => LU_CIRCLE_X,
+        .none => LU_PIN,
     };
     const color = if (indicator == .failed) theme.danger() else if (indicator == .loading) theme.accent() else theme.COLOR_TEXT_MUTED;
     queuePaletteIcon(state, rect, glyph, rect.w, paletteColor(color));
@@ -936,9 +948,9 @@ fn renderInspectorSplitButton(
     }), paletteColor(theme.withAlpha(theme.background(), 70)));
 
     const icon_size = theme.scaledUi(TOOLBAR_ICON_SIZE);
-    queuePaletteIcon(state, iconRectForButton(inspect_rect, icon_size), NF_COD_INSPECT, icon_size, paletteColor(icon_color));
+    queuePaletteIcon(state, iconRectForButton(inspect_rect, icon_size), LU_SQUARE_MOUSE_POINTER, icon_size, paletteColor(icon_color));
     const chevron_size = theme.scaledUi(TOOLBAR_CHEVRON_SIZE);
-    queuePaletteIcon(state, iconRectForButton(dropdown_rect, chevron_size), NF_COD_CHEVRON_DOWN, chevron_size, paletteColor(icon_color));
+    queuePaletteIcon(state, iconRectForButton(dropdown_rect, chevron_size), LU_CHEVRON_DOWN, chevron_size, paletteColor(icon_color));
 }
 
 /// Renders the compact browser toolbar with URL entry and primary actions.
@@ -957,12 +969,12 @@ fn renderToolbar(state: *app_state.AppState, dock_rect: palette.Rect, right_rese
     const tab_count = state.browserTabCount();
     const row_y = dock_rect.y + (tab_row_height - button_size) * 0.5;
     const new_tab_rect: palette.Rect = .{ .x = dock_rect.x + pad_x, .y = row_y, .w = button_size, .h = button_size };
-    renderCompactIconButton(state, new_tab_rect, NF_COD_ADD, rectHovered(new_tab_rect), false);
+    renderCompactIconButton(state, new_tab_rect, LU_PLUS, rectHovered(new_tab_rect), false);
     addPaletteHit(new_tab_rect, .new_tab);
 
     const row_right = dock_rect.x + dock_rect.w - pad_x;
     const close_pane_rect: palette.Rect = .{ .x = row_right - button_size, .y = row_y, .w = button_size, .h = button_size };
-    renderCompactIconButton(state, close_pane_rect, NF_COD_CLOSE, rectHovered(close_pane_rect), false);
+    renderCompactIconButton(state, close_pane_rect, LU_X, rectHovered(close_pane_rect), false);
     addPaletteHit(close_pane_rect, .close);
     const overflow_rect: palette.Rect = .{
         .x = close_pane_rect.x - right_reserve - gap - button_size,
@@ -970,7 +982,7 @@ fn renderToolbar(state: *app_state.AppState, dock_rect: palette.Rect, right_rese
         .w = button_size,
         .h = button_size,
     };
-    renderCompactIconButton(state, overflow_rect, NF_COD_ELLIPSIS, rectHovered(overflow_rect) or toolbar_overflow_open, false);
+    renderCompactIconButton(state, overflow_rect, LU_ELLIPSIS, rectHovered(overflow_rect) or toolbar_overflow_open, false);
     addPaletteHit(overflow_rect, .overflow);
 
     const tabs_x = new_tab_rect.x + new_tab_rect.w + gap;
@@ -999,7 +1011,7 @@ fn renderToolbar(state: *app_state.AppState, dock_rect: palette.Rect, right_rese
             .w = @max(tab_close_rect.x - tab_rect.x - theme.scaledUi(10.0) - leading, 1.0),
             .h = theme.scaledUi(18.0),
         }, state.browserTabTitle(0), paletteColor(theme.COLOR_TEXT_MUTED), theme.scaledUi(13.0));
-        renderCompactIconButton(state, tab_close_rect, NF_COD_CLOSE, rectHovered(tab_close_rect), false);
+        renderCompactIconButton(state, tab_close_rect, LU_X, rectHovered(tab_close_rect), false);
         palette_tab_hits[palette_tab_hit_count] = .{ .rect = tab_close_rect, .index = 0, .kind = .close };
         palette_tab_hit_count += 1;
     } else if (tabs_w >= theme.scaledUi(40.0)) {
@@ -1042,7 +1054,7 @@ fn renderToolbar(state: *app_state.AppState, dock_rect: palette.Rect, right_rese
                 .w = @max(tab_close_rect.x - tab_rect.x - theme.scaledUi(12.0) - leading, 1.0),
                 .h = theme.scaledUi(18.0),
             }, state.browserTabTitle(tab_index), paletteColor(if (tab_index == state.activeBrowserTabIndex()) theme.COLOR_WHITE else theme.COLOR_TEXT_MUTED), theme.scaledUi(12.0));
-            renderCompactIconButton(state, tab_close_rect, NF_COD_CLOSE, rectHovered(tab_close_rect), false);
+            renderCompactIconButton(state, tab_close_rect, LU_X, rectHovered(tab_close_rect), false);
             palette_tab_hits[palette_tab_hit_count] = .{ .rect = tab_rect, .index = tab_index, .kind = .select };
             palette_tab_hit_count += 1;
             palette_tab_hits[palette_tab_hit_count] = .{ .rect = tab_close_rect, .index = tab_index, .kind = .close };
@@ -1070,36 +1082,36 @@ fn renderToolbar(state: *app_state.AppState, dock_rect: palette.Rect, right_rese
         .h = button_size,
     };
     const back_rect: palette.Rect = .{ .x = cursor_x, .y = nav_y, .w = button_size, .h = button_size };
-    renderCompactIconButton(state, back_rect, NF_COD_ARROW_LEFT, rectHovered(back_rect), !state.browserCanGoBack());
+    renderCompactIconButton(state, back_rect, LU_ARROW_LEFT, rectHovered(back_rect), !state.browserCanGoBack());
     addPaletteHit(back_rect, .back);
     cursor_x += button_size + gap;
     const forward_rect: palette.Rect = .{ .x = cursor_x, .y = nav_y, .w = button_size, .h = button_size };
-    renderCompactIconButton(state, forward_rect, NF_COD_ARROW_RIGHT, rectHovered(forward_rect), !state.browserCanGoForward());
+    renderCompactIconButton(state, forward_rect, LU_ARROW_RIGHT, rectHovered(forward_rect), !state.browserCanGoForward());
     addPaletteHit(forward_rect, .forward);
     addPaletteHit(address_rect, .address);
     renderPaletteAddressField(state, address_rect);
 
     cursor_x = address_rect.x + address_rect.w + gap;
     const navigate_rect: palette.Rect = .{ .x = cursor_x, .y = nav_y, .w = button_size, .h = button_size };
-    renderCompactIconButton(state, navigate_rect, NF_COD_REFRESH, rectHovered(navigate_rect), false);
+    renderCompactIconButton(state, navigate_rect, LU_ROTATE_CW, rectHovered(navigate_rect), false);
     addPaletteHit(navigate_rect, .navigate);
     cursor_x += button_size + gap;
     if (show_copy) {
         const copy_rect: palette.Rect = .{ .x = cursor_x, .y = nav_y, .w = button_size, .h = button_size };
-        renderCompactIconButton(state, copy_rect, NF_COD_COPY, rectHovered(copy_rect), state.browserState().current_url == null);
+        renderCompactIconButton(state, copy_rect, LU_COPY, rectHovered(copy_rect), state.browserState().current_url == null);
         addPaletteHit(copy_rect, .copy_url);
         cursor_x += button_size + gap;
     }
     if (show_external) {
         const external_rect: palette.Rect = .{ .x = cursor_x, .y = nav_y, .w = button_size, .h = button_size };
-        renderCompactIconButton(state, external_rect, NF_COD_LINK_EXTERNAL, rectHovered(external_rect), state.browserState().current_url == null);
+        renderCompactIconButton(state, external_rect, LU_EXTERNAL_LINK, rectHovered(external_rect), state.browserState().current_url == null);
         addPaletteHit(external_rect, .open_external);
         cursor_x += button_size + gap;
     }
     if (show_inspector) {
         const inspector_active = state.isBrowserInspectorEnabled();
         const inspect_rect: palette.Rect = .{ .x = cursor_x, .y = nav_y, .w = button_size, .h = button_size };
-        renderInspectorIconButton(state, inspect_rect, NF_COD_INSPECT, rectHovered(inspect_rect), !state.canUseBrowserInspector(), inspector_active);
+        renderInspectorIconButton(state, inspect_rect, LU_SQUARE_MOUSE_POINTER, rectHovered(inspect_rect), !state.canUseBrowserInspector(), inspector_active);
         addPaletteHit(inspect_rect, .inspect_toggle);
         const dropdown_width = theme.scaledUi(20.0);
         const inspect_menu_rect: palette.Rect = .{
@@ -1108,7 +1120,7 @@ fn renderToolbar(state: *app_state.AppState, dock_rect: palette.Rect, right_rese
             .w = dropdown_width,
             .h = button_size,
         };
-        renderInspectorIconButton(state, inspect_menu_rect, NF_COD_CHEVRON_DOWN, rectHovered(inspect_menu_rect), !state.canUseBrowserInspector(), inspector_active);
+        renderInspectorIconButton(state, inspect_menu_rect, LU_CHEVRON_DOWN, rectHovered(inspect_menu_rect), !state.canUseBrowserInspector(), inspector_active);
         addPaletteHit(inspect_menu_rect, .inspect_mode_menu);
         if (!state.canUseBrowserInspector()) state.browser_controller.inspector_menu_open = false;
         if (state.browser_controller.inspector_menu_open) {
@@ -1626,9 +1638,9 @@ fn renderPaletteAddressField(state: *app_state.AppState, rect: palette.Rect) voi
         .h = theme.scaledUi(14.0),
     };
     const security_glyph = switch (security) {
-        .secure => NF_COD_LOCK,
-        .insecure => NF_COD_WARNING,
-        .local, .internal, .unknown => NF_COD_GLOBE,
+        .secure => LU_LOCK,
+        .insecure => LU_TRIANGLE_ALERT,
+        .local, .internal, .unknown => LU_GLOBE,
     };
     const security_color = switch (security) {
         .secure => theme.success(),
