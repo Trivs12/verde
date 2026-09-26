@@ -2099,6 +2099,7 @@ pub const FastMode = provider_models.FastMode;
 pub const AccessMode = provider_models.AccessMode;
 pub const ChatRole = provider_models.ChatRole;
 pub const Provider = provider_models.Provider;
+pub const ContextUsage = chat_types.ContextUsage;
 pub const AgentTuiProvider = stack_config.AgentProvider;
 pub const AgentTuiHistoryProvider = terminal_controller.AgentTuiProvider;
 pub const Harness = provider_models.Harness;
@@ -2305,6 +2306,24 @@ pub const COMPOSER_DESIGN_SCALE: f32 = PALETTE_COMPOSER_FONT_SIZE / 15.0;
 /// matches the round stop button instead of filling the bar edge to edge.
 const COMPOSER_ATTACH_DESIGN_PX: f32 = 38.0;
 const COMPOSER_ATTACH_GAP_DESIGN_PX: f32 = 8.0;
+/// Context ring on the composer strip: 16px ring, 6px gap to its 12px label.
+pub const COMPOSER_CONTEXT_RING_DESIGN_PX: f32 = 16.0;
+const COMPOSER_CONTEXT_GAP_DESIGN_PX: f32 = 6.0;
+pub const PALETTE_COMPOSER_CONTEXT_FONT_SIZE: f32 = 12.0 * COMPOSER_DESIGN_SCALE;
+pub const COMPOSER_CONTEXT_LABEL_CAPACITY = 24;
+
+/// Formats the composer's context label ("38% context"); empty without data.
+pub fn composerContextLabel(buffer: []u8, usage: ?chat_types.ContextUsage) []const u8 {
+    const value = usage orelse return "";
+    return std.fmt.bufPrint(buffer, "{d}% context", .{value.percent()}) catch "";
+}
+
+test "composer context label formats percent and hides without data" {
+    var buffer: [COMPOSER_CONTEXT_LABEL_CAPACITY]u8 = undefined;
+    try std.testing.expectEqualStrings("", composerContextLabel(&buffer, null));
+    try std.testing.expectEqualStrings("38% context", composerContextLabel(&buffer, .{ .used_tokens = 76_000, .window_tokens = 200_000 }));
+    try std.testing.expectEqualStrings("100% context", composerContextLabel(&buffer, .{ .used_tokens = 250_000, .window_tokens = 200_000 }));
+}
 
 fn paletteColor(color: [4]f32) palette.Color {
     return .{ .r = color[0], .g = color[1], .b = color[2], .a = color[3] };
@@ -2461,6 +2480,11 @@ pub const PaletteComposerPrompt = palette.composerPrompt(.{
     .strip_icon_reserve = 14.0,
     .strip_icon_gap = 5.0,
     .strip_chevron = false,
+    // Context ring + "NN% context": the design's 16px ring, 6px gap and
+    // 12px label, host-drawn in `contextCells()`.
+    .context_icon_reserve = COMPOSER_CONTEXT_RING_DESIGN_PX * COMPOSER_DESIGN_SCALE,
+    .context_icon_gap = COMPOSER_CONTEXT_GAP_DESIGN_PX * COMPOSER_DESIGN_SCALE,
+    .context_font_size = PALETTE_COMPOSER_CONTEXT_FONT_SIZE,
     // Leading "+" attach button (host-drawn in `attachRect`).
     .attach_size = COMPOSER_ATTACH_DESIGN_PX * COMPOSER_DESIGN_SCALE,
     .attach_gap = COMPOSER_ATTACH_GAP_DESIGN_PX * COMPOSER_DESIGN_SCALE,
@@ -9842,6 +9866,12 @@ pub const AppState = struct {
         return self.composer_controller.git_branches.branchFor(self.currentThreadEffectiveCwd(), unixTimestampMs());
     }
 
+    /// "NN% context" for the current thread's context ring, or empty when
+    /// its provider has not reported usage (the composer then hides it).
+    pub fn currentComposerContextLabel(self: *AppState, buffer: []u8) []const u8 {
+        return composerContextLabel(buffer, self.currentThread().contextUsage());
+    }
+
     /// Opens the native image picker behind the composer's "+" button.
     /// Picks arrive through `composerAttachDialogCallback` and are attached
     /// by `pollComposerAttachDialog`.
@@ -12588,6 +12618,10 @@ pub const AppState = struct {
         };
         self.composer_controller.composer.setAccessChipLabel(self.allocator, self.currentComposerAccessLabel()) catch |err| {
             log.warn("failed to sync palette composer access label: {s}", .{@errorName(err)});
+        };
+        var context_buffer: [COMPOSER_CONTEXT_LABEL_CAPACITY]u8 = undefined;
+        self.composer_controller.composer.setContextLabel(self.allocator, self.currentComposerContextLabel(&context_buffer)) catch |err| {
+            log.warn("failed to sync palette composer context label: {s}", .{@errorName(err)});
         };
         if (show_directory) {
             const directory_label = self.directoryPillLabel(self.currentThreadEffectiveCwd());

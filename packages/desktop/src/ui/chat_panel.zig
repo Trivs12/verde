@@ -9360,6 +9360,9 @@ fn renderInactiveComposer(state: *app_state.AppState, rect: palette.Rect) void {
     const runtime_label = state.currentRuntimePickerLabel();
     const branch_label = state.currentComposerBranchLabel();
     const access_label = state.currentComposerAccessLabel();
+    var context_buffer: [app_state.COMPOSER_CONTEXT_LABEL_CAPACITY]u8 = undefined;
+    const context_usage = thread.contextUsage();
+    const context_label = app_state.composerContextLabel(&context_buffer, context_usage);
     // The label carries no detail words (run settings live in the model &
     // settings menu), and the stop button only shows for this pane's own
     // running turn.
@@ -9370,6 +9373,7 @@ fn renderInactiveComposer(state: *app_state.AppState, rect: palette.Rect) void {
         .branch = branch_label,
         .access_chip = access_label,
         .runtime = runtime_label,
+        .context = context_label,
         .send_state = if (thread.isSendPendingForUi()) .stop else .send,
     });
     queuePanel(
@@ -9431,9 +9435,74 @@ fn renderInactiveComposer(state: *app_state.AppState, rect: palette.Rect) void {
         queueIconText(state, snapIconRectOrigin(layout.runtime_icon), NF_COD_DEVICE_DESKTOP, chip_color, layout.runtime_icon.w, layout.runtime);
         queueInactiveComposerLabel(state, layout.runtime_text, runtime_label, chip_color, chip_font);
     }
+    if (layout.context.w > 0.0) {
+        renderComposerContextIndicator(state, .{ .chip = layout.context, .icon = layout.context_icon, .text = layout.context_text }, context_usage, context_label);
+    }
     if (layout.attach.w > 0.0) renderComposerAttachButton(state, layout.attach, false, false);
 
     renderInactiveComposerSubmit(state, layout.send);
+}
+
+/// Arc colour steps for the context ring: amber past this share of the
+/// window, red once the provider is about to compact or refuse.
+const CONTEXT_RING_WARNING_PERCENT: u8 = 80;
+const CONTEXT_RING_DANGER_PERCENT: u8 = 95;
+/// Design ring: 5-unit stroke centred on a 36-unit viewBox.
+const CONTEXT_RING_VIEWBOX: f32 = 36.0;
+const CONTEXT_RING_STROKE: f32 = 5.0;
+
+// Context indicator on the composer strip: a usage ring (track plus a
+// clockwise arc from twelve o'clock) and its "NN% context" label. Shared by
+// the live composer and the unfocused-pane preview.
+fn renderComposerContextIndicator(
+    state: *app_state.AppState,
+    cells: palette.ComposerPromptContextCells,
+    usage: ?app_state.ContextUsage,
+    label: []const u8,
+) void {
+    const value = usage orelse return;
+    if (cells.chip.w <= 0.0) return;
+    const percent = value.percent();
+    const arc_color = if (percent > CONTEXT_RING_DANGER_PERCENT)
+        paletteColor(theme.danger())
+    else if (percent > CONTEXT_RING_WARNING_PERCENT)
+        paletteColor(theme.warning())
+    else
+        paletteColor(theme.COLOR_TEXT_MUTED);
+    renderContextRing(state, cells.icon, @as(f32, @floatFromInt(percent)) / 100.0, paletteColor(theme.restingEdge()), arc_color, cells.chip);
+    queueInactiveComposerLabel(state, cells.text, label, paletteColor(theme.COLOR_TEXT_SUBTLE), theme.scaledUi(app_state.PALETTE_COMPOSER_CONTEXT_FONT_SIZE));
+}
+
+// Track ring through the anti-aliased rect-border path; the arc is a run of
+// overlapping stroke-wide discs so it keeps edge AA and round caps, which
+// the plain triangle primitive cannot give a stroke this thin.
+fn renderContextRing(state: *app_state.AppState, cell: palette.Rect, fraction: f32, track: palette.Color, arc: palette.Color, clip: palette.Rect) void {
+    const size = @min(cell.w, cell.h);
+    if (size <= 0.0) return;
+    const stroke = size * CONTEXT_RING_STROKE / CONTEXT_RING_VIEWBOX;
+    const center_x = cell.x + cell.w * 0.5;
+    const center_y = cell.y + cell.h * 0.5;
+    const radius = (size - stroke) * 0.5;
+    const outer: palette.Rect = .{ .x = center_x - size * 0.5, .y = center_y - size * 0.5, .w = size, .h = size };
+    state.palette_overlay_batch.rectBorderClipped(state.allocator, outer, track, size * 0.5, stroke, clip) catch {};
+
+    const sweep = std.math.clamp(fraction, 0.0, 1.0) * std.math.tau;
+    if (sweep <= 0.0) return;
+    // Disc spacing of a third of the stroke keeps the scalloped edge below
+    // a pixel at any display scale.
+    const arc_length = sweep * radius;
+    const steps: usize = @intFromFloat(@max(@ceil(arc_length / @max(stroke / 3.0, 0.25)), 1.0));
+    var index: usize = 0;
+    while (index <= steps) : (index += 1) {
+        const angle = -std.math.pi / 2.0 + sweep * @as(f32, @floatFromInt(index)) / @as(f32, @floatFromInt(steps));
+        const disc: palette.Rect = .{
+            .x = center_x + @cos(angle) * radius - stroke * 0.5,
+            .y = center_y + @sin(angle) * radius - stroke * 0.5,
+            .w = stroke,
+            .h = stroke,
+        };
+        state.palette_overlay_batch.roundedRectClipped(state.allocator, disc, arc, stroke * 0.5, clip) catch {};
+    }
 }
 
 // Draws one vertically centred `.ui` label clipped to its preview cell.
@@ -10195,6 +10264,12 @@ fn renderComposerToolbarIcons(state: *app_state.AppState) void {
     if (access_chip_rect.w > 0.0) {
         const access_slot = composer.leadingIconRect(.access_chip);
         queueLucideIcon(state, snapIconRectOrigin(access_slot), composerAccessGlyph(state), icon_color, access_slot.w, access_chip_rect);
+    }
+    const context_cells = composer.contextCells();
+    if (context_cells.chip.w > 0.0) {
+        var context_buffer: [app_state.COMPOSER_CONTEXT_LABEL_CAPACITY]u8 = undefined;
+        const context_usage = state.currentThread().contextUsage();
+        renderComposerContextIndicator(state, context_cells, context_usage, app_state.composerContextLabel(&context_buffer, context_usage));
     }
     const attach_rect = composer.attachRect();
     if (attach_rect.w > 0.0) renderComposerAttachButton(state, attach_rect, composer.hovered_part == .attach, true);
