@@ -9072,6 +9072,8 @@ fn renderInactiveComposer(state: *app_state.AppState, rect: palette.Rect) void {
     const model_label = state.currentComposerModelLabel();
     const directory_label = state.directoryPillLabel(state.currentThreadEffectiveCwd());
     const runtime_label = state.currentRuntimePickerLabel();
+    const branch_label = state.currentComposerBranchLabel();
+    const access_label = state.currentComposerAccessLabel();
     // The label carries no detail words (run settings live in the model &
     // settings menu), and the stop button only shows for this pane's own
     // running turn.
@@ -9079,6 +9081,8 @@ fn renderInactiveComposer(state: *app_state.AppState, rect: palette.Rect) void {
         .model = model_label,
         .detail = "",
         .directory = directory_label,
+        .branch = branch_label,
+        .access_chip = access_label,
         .runtime = runtime_label,
         .send_state = if (thread.isSendPendingForUi()) .stop else .send,
     });
@@ -9128,10 +9132,19 @@ fn renderInactiveComposer(state: *app_state.AppState, rect: palette.Rect) void {
         queueIconText(state, snapIconRectOrigin(layout.directory_icon), directory_glyph, chip_color, layout.directory_icon.w, layout.directory);
         queueInactiveComposerLabel(state, layout.directory_text, directory_label, chip_color, chip_font);
     }
+    if (layout.branch.w > 0.0) {
+        queueLucideIcon(state, snapIconRectOrigin(layout.branch_icon), LU_GIT_BRANCH, chip_color, layout.branch_icon.w, layout.branch);
+        queueInactiveComposerLabel(state, layout.branch_text, branch_label, chip_color, chip_font);
+    }
+    if (layout.access_chip.w > 0.0) {
+        queueLucideIcon(state, snapIconRectOrigin(layout.access_chip_icon), composerAccessGlyph(state), chip_color, layout.access_chip_icon.w, layout.access_chip);
+        queueInactiveComposerLabel(state, layout.access_chip_text, access_label, chip_color, chip_font);
+    }
     if (layout.runtime.w > 0.0 and state.composer_controller.composer.showRuntimeToggle()) {
         queueIconText(state, snapIconRectOrigin(layout.runtime_icon), NF_COD_DEVICE_DESKTOP, chip_color, layout.runtime_icon.w, layout.runtime);
         queueInactiveComposerLabel(state, layout.runtime_text, runtime_label, chip_color, chip_font);
     }
+    if (layout.attach.w > 0.0) renderComposerAttachButton(state, layout.attach, false, false);
 
     renderInactiveComposerSubmit(state, layout.send);
 }
@@ -9812,6 +9825,43 @@ fn snapIconRectOrigin(rect: palette.Rect) palette.Rect {
     };
 }
 
+// Lucide (ISC) glyphs for the composer's attach button and strip chips.
+const LU_PLUS = "\u{E13D}";
+const LU_GIT_BRANCH = "\u{E0E2}";
+const LU_LOCK = "\u{E10B}";
+const LU_LOCK_OPEN = "\u{E10C}";
+/// The design draws a 17px plus in its 38px attach circle; the glyph keeps
+/// that ratio at whatever size the composer lays the circle out.
+const COMPOSER_ATTACH_GLYPH_RATIO: f32 = 17.0 / 38.0;
+/// Attach circle fill: a faint lift of the text color (the design's #F0F0ED
+/// on a white bar) that follows light and dark themes; hover deepens it.
+const COMPOSER_ATTACH_FILL_ALPHA: u8 = 15;
+const COMPOSER_ATTACH_HOVER_ALPHA: u8 = 28;
+
+// Composer "+" button: neutral circle with a centred Lucide plus. `enabled`
+// is false for the read-only split-pane preview, which never shows hover.
+fn renderComposerAttachButton(state: *app_state.AppState, rect: palette.Rect, hovered: bool, enabled: bool) void {
+    const size = @min(rect.w, rect.h);
+    if (size <= 0.0) return;
+    const alpha = if (hovered) COMPOSER_ATTACH_HOVER_ALPHA else COMPOSER_ATTACH_FILL_ALPHA;
+    queueRounded(state, rect, paletteColor(theme.withAlpha(theme.COLOR_WHITE, alpha)), size * 0.5);
+    const glyph = @round(size * COMPOSER_ATTACH_GLYPH_RATIO);
+    const color = if (enabled) theme.COLOR_TEXT_MUTED else theme.withAlpha(theme.COLOR_TEXT_MUTED, 160);
+    queueLucideIcon(state, snapIconRectOrigin(.{
+        .x = rect.x + (rect.w - glyph) * 0.5,
+        .y = rect.y + (rect.h - glyph) * 0.5,
+        .w = glyph,
+        .h = glyph,
+    }), LU_PLUS, paletteColor(color), glyph, rect);
+}
+
+fn composerAccessGlyph(state: *const app_state.AppState) []const u8 {
+    return switch (state.currentThread().access_mode) {
+        .full_access => LU_LOCK_OPEN,
+        .supervised => LU_LOCK,
+    };
+}
+
 fn renderComposerToolbarIcons(state: *app_state.AppState) void {
     const previous_z = state.palette_overlay_batch.setZIndex(COMPOSER_TOOLBAR_OVERLAY_Z);
     defer state.palette_overlay_batch.restoreZIndex(previous_z);
@@ -9849,6 +9899,18 @@ fn renderComposerToolbarIcons(state: *app_state.AppState) void {
         const runtime_slot = composer.leadingIconRect(.runtime);
         queueIconText(state, snapIconRectOrigin(runtime_slot), NF_COD_DEVICE_DESKTOP, icon_color, runtime_slot.w, runtime_rect);
     }
+    const branch_rect = composer.branchRect();
+    if (branch_rect.w > 0.0) {
+        const branch_slot = composer.leadingIconRect(.branch);
+        queueLucideIcon(state, snapIconRectOrigin(branch_slot), LU_GIT_BRANCH, icon_color, branch_slot.w, branch_rect);
+    }
+    const access_chip_rect = composer.accessChipRect();
+    if (access_chip_rect.w > 0.0) {
+        const access_slot = composer.leadingIconRect(.access_chip);
+        queueLucideIcon(state, snapIconRectOrigin(access_slot), composerAccessGlyph(state), icon_color, access_slot.w, access_chip_rect);
+    }
+    const attach_rect = composer.attachRect();
+    if (attach_rect.w > 0.0) renderComposerAttachButton(state, attach_rect, composer.hovered_part == .attach, true);
 
     if (state.composer_controller.composer.showFastToggle()) {
         const fast_icon_rect = snapIconRectOrigin(palette.Rect{
@@ -9911,6 +9973,8 @@ fn renderComposerShortcutHints(state: *app_state.AppState, directory_rect: palet
         renderComposerSelectorTooltip(state, model_rect, "Model & settings", keybinds.formatFirstKeybind(&shortcut_buf, config.chat_run_config));
     } else if (state.composer_controller.composer.showReasoningToggle() and run_rect.contains(point)) {
         renderComposerSelectorTooltip(state, run_rect, "Run settings", keybinds.formatFirstKeybind(&shortcut_buf, config.chat_run_config));
+    } else if (state.composer_controller.composer.attachRect().contains(point) and state.composer_controller.composer.showAttach()) {
+        renderComposerSelectorTooltip(state, state.composer_controller.composer.attachRect(), "Attach image", "");
     }
 }
 
