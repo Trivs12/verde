@@ -158,8 +158,15 @@ const TITLE_MENU_MAX_ROWS: usize = 6;
 const COMPANION_CHARACTER_OPTIONS = [_]app_config.CompanionCharacter{ .sprout, .moss, .vireo };
 const COMPANION_CHARACTER_LABELS = [_][]const u8{ "Sprout", "Moss", "Vireo" };
 const UI_FONT_FAMILY_OPTIONS = std.enums.values(app_config.UiFontFamily);
-const NF_COD_CHEVRON_DOWN = "\u{EAB4}";
-const NF_COD_CHEVRON_UP = "\u{EAB7}";
+// Lucide (ISC) glyphs drawn through the `icon_alt` role.
+const LU_CHEVRON_DOWN = "\u{E06D}";
+const LU_CHEVRON_UP = "\u{E070}";
+const LU_X = "\u{E1B2}";
+const LU_PLUS = "\u{E13D}";
+const LU_MINUS = "\u{E11C}";
+/// Lucide has more internal padding than the Codicons it replaced; icons
+/// are drawn this much larger about their slot's centre.
+const LUCIDE_OPTICAL_SCALE: f32 = 1.08;
 
 const Metrics = struct {
     modal_pad: f32,
@@ -2653,7 +2660,7 @@ fn drawHeaderBar(state: *runtime.AppState, layout: SettingsLayout) void {
         .h = title_h,
     }, "Settings", paletteColor(theme.COLOR_WHITE), theme.scaledUi(15.0), .ui_medium, layout.modal);
 
-    drawIconButton(state, layout.close, "×", state.settings_controller.close_hovered);
+    drawIconButton(state, layout.close, LU_X, state.settings_controller.close_hovered);
 }
 
 const PROVIDERS_RECHECK_LABEL = "Check again";
@@ -3397,7 +3404,7 @@ fn drawThemeDropdown(state: *runtime.AppState, layout: SettingsLayout) void {
         .y = rect.y + (rect.h - chevron_size) * 0.5,
         .w = chevron_size,
         .h = chevron_size,
-    }, if (state.settings_controller.theme_dropdown_open) NF_COD_CHEVRON_UP else NF_COD_CHEVRON_DOWN, paletteColor(textLabel()), chevron_size, layout.body_clip);
+    }, if (state.settings_controller.theme_dropdown_open) LU_CHEVRON_UP else LU_CHEVRON_DOWN, paletteColor(textLabel()), chevron_size, layout.body_clip);
 }
 
 // Appearance Default companion selector control.
@@ -3426,7 +3433,7 @@ fn drawCompanionCharacterDropdown(state: *runtime.AppState, layout: SettingsLayo
         .y = rect.y + (rect.h - chevron_size) * 0.5,
         .w = chevron_size,
         .h = chevron_size,
-    }, if (state.settings_controller.companion_character_dropdown_open) NF_COD_CHEVRON_UP else NF_COD_CHEVRON_DOWN, paletteColor(textLabel()), chevron_size, layout.body_clip);
+    }, if (state.settings_controller.companion_character_dropdown_open) LU_CHEVRON_UP else LU_CHEVRON_DOWN, paletteColor(textLabel()), chevron_size, layout.body_clip);
 }
 
 // Appearance Default companion selector popup rows.
@@ -3489,7 +3496,7 @@ fn drawUiFontFamilyDropdown(state: *runtime.AppState, layout: SettingsLayout) vo
         .y = rect.y + (rect.h - chevron_size) * 0.5,
         .w = chevron_size,
         .h = chevron_size,
-    }, if (open) NF_COD_CHEVRON_UP else NF_COD_CHEVRON_DOWN, paletteColor(textLabel()), chevron_size, layout.body_clip);
+    }, if (open) LU_CHEVRON_UP else LU_CHEVRON_DOWN, paletteColor(textLabel()), chevron_size, layout.body_clip);
 }
 
 // Appearance UI font family selector popup rows.
@@ -3606,7 +3613,7 @@ fn drawChatTitleDropdown(
         .y = rect.y + (rect.h - chevron_size) * 0.5,
         .w = chevron_size,
         .h = chevron_size,
-    }, if (open) NF_COD_CHEVRON_UP else NF_COD_CHEVRON_DOWN, paletteColor(textLabel()), chevron_size, clip);
+    }, if (open) LU_CHEVRON_UP else LU_CHEVRON_DOWN, paletteColor(textLabel()), chevron_size, clip);
 }
 
 // Chat title provider/model popup rows.
@@ -4025,23 +4032,33 @@ fn drawStepperRow(
 
     const at_min = value <= min_value;
     const at_max = value >= max_value;
-    drawStepButton(state, dec_rect, "−", !at_min, isControlHovered(state, dec_control), clip);
-    drawStepButton(state, inc_rect, "+", !at_max, isControlHovered(state, inc_control), clip);
+    drawStepButton(state, dec_rect, LU_MINUS, !at_min, isControlHovered(state, dec_control), clip);
+    drawStepButton(state, inc_rect, LU_PLUS, !at_max, isControlHovered(state, inc_control), clip);
 }
 
-fn drawStepButton(state: *runtime.AppState, rect: palette.Rect, label: []const u8, enabled: bool, hovered: bool, clip: palette.Rect) void {
+fn drawStepButton(state: *runtime.AppState, rect: palette.Rect, glyph: []const u8, enabled: bool, hovered: bool, clip: palette.Rect) void {
     if (hovered and enabled) {
         queueRoundedRectClipped(state, rect, paletteColor(controlHoverSurface()), theme.scaledUi(5.0), clip);
     }
     const text_color = if (enabled) theme.COLOR_WHITE else textHint();
-    queueCenteredText(state, rect, label, paletteColor(text_color), theme.scaledUi(15.0), clip);
+    queueCenteredIcon(state, rect, glyph, paletteColor(text_color), theme.scaledUi(13.0), clip);
 }
 
-fn drawIconButton(state: *runtime.AppState, rect: palette.Rect, label: []const u8, hovered: bool) void {
+fn drawIconButton(state: *runtime.AppState, rect: palette.Rect, glyph: []const u8, hovered: bool) void {
     if (hovered) {
         queueRoundedRect(state, rect, paletteColor(controlHoverSurface()), radiusSm());
     }
-    queueCenteredText(state, rect, label, paletteColor(if (hovered) theme.COLOR_WHITE else textHint()), theme.scaledUi(16.0), rect);
+    queueCenteredIcon(state, rect, glyph, paletteColor(if (hovered) theme.COLOR_WHITE else textHint()), theme.scaledUi(15.0), rect);
+}
+
+/// Lucide glyph centred in `rect` (sizes are pre-optical-bump).
+fn queueCenteredIcon(state: *runtime.AppState, rect: palette.Rect, glyph: []const u8, color: palette.Color, size: f32, clip: ?palette.Rect) void {
+    queueIconText(state, .{
+        .x = rect.x + (rect.w - size) * 0.5,
+        .y = rect.y + (rect.h - size) * 0.5,
+        .w = size,
+        .h = size,
+    }, glyph, color, size, clip);
 }
 
 fn drawHairline(state: *runtime.AppState, x: f32, y: f32, w: f32) void {
@@ -4157,13 +4174,16 @@ fn queueIconText(state: *runtime.AppState, rect: palette.Rect, value: []const u8
         log.warn("failed to retain settings icon: {s}", .{@errorName(err)});
         return;
     };
+    // Grow the glyph about the caller's centre so layout is unchanged.
+    const grow_w = rect.w * (LUCIDE_OPTICAL_SCALE - 1.0);
+    const grow_h = rect.h * (LUCIDE_OPTICAL_SCALE - 1.0);
     state.palette_overlay_batch.roleText(
         state.allocator,
-        rect,
+        .{ .x = rect.x - grow_w * 0.5, .y = rect.y - grow_h * 0.5, .w = rect.w + grow_w, .h = rect.h + grow_h },
         stable_value,
         color,
-        font_size,
-        .icon,
+        font_size * LUCIDE_OPTICAL_SCALE,
+        .icon_alt,
         null,
         clip,
     ) catch |err| {

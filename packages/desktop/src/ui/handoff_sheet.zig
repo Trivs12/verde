@@ -28,6 +28,10 @@ const Menu = handoff_controller.Menu;
 const HANDOFF_SHEET_Z: i32 = 300;
 
 const PROVIDERS = handoff_controller.TARGET_PROVIDERS;
+// Lucide (ISC) glyphs drawn through the `icon_alt` role.
+const LU_CHEVRON_DOWN = "\u{E06D}";
+const LU_CHEVRON_UP = "\u{E070}";
+const LU_CHECK = "\u{E06C}";
 const SURFACE_LABELS = [2][]const u8{ "Chat", "Terminal" };
 const CONTEXT_LABELS = [3][]const u8{ "Summary", "Recent messages", "Full transcript" };
 const NEW_THREAD_LABEL = "New thread";
@@ -573,13 +577,11 @@ fn queueImage(state: *runtime.AppState, rect: palette.Rect, texture: runtime.Cac
     };
 }
 
-// Small chevron drawn from two rotated bars is not available in the batch;
-// use the glyph so it inherits the UI face's hinting.
+// Select caret: Lucide chevron centred in the caret slot.
 fn drawCaret(state: *runtime.AppState, rect: palette.Rect, open: bool, color: [4]f32, clip: palette.Rect) void {
-    const glyph = if (open) "▴" else "▾";
-    const size = theme.scaledUi(11.0);
-    const w = text_measure.textWidth(.ui, size, glyph);
-    labelText(state, .{ .x = rect.x + (rect.w - w) * 0.5, .y = rect.y + (rect.h - size * 1.25) * 0.5, .w = w + theme.scaledUi(2.0), .h = size * 1.25 }, glyph, color, size, .ui, clip);
+    const glyph = if (open) LU_CHEVRON_UP else LU_CHEVRON_DOWN;
+    const size = theme.scaledUi(13.0);
+    labelText(state, .{ .x = rect.x + (rect.w - size) * 0.5, .y = rect.y + (rect.h - size) * 0.5, .w = size, .h = size }, glyph, color, size, .icon_alt, clip);
 }
 
 fn drawMenu(state: *runtime.AppState, menu: *const MenuLayout, pane_clip: palette.Rect) void {
@@ -603,9 +605,8 @@ fn drawMenu(state: *runtime.AppState, menu: *const MenuLayout, pane_clip: palett
             roundedRect(state, item, theme.withAlpha(theme.accent(), 40), theme.scaledUi(5.0), pane_clip);
         }
         if (is_selected) {
-            const mark = "✓";
-            const mark_size = theme.scaledUi(11.0);
-            labelText(state, .{ .x = item.x + pad_x, .y = item.y + (item.h - mark_size * 1.25) * 0.5, .w = mark_w, .h = mark_size * 1.25 }, mark, theme.accent(), mark_size, .ui, pane_clip);
+            const mark_size = theme.scaledUi(13.0);
+            labelText(state, .{ .x = item.x + pad_x, .y = item.y + (item.h - mark_size) * 0.5, .w = mark_size, .h = mark_size }, LU_CHECK, theme.accent(), mark_size, .icon_alt, pane_clip);
         }
         var label_buf: [256]u8 = undefined;
         const raw = menuOptionLabel(state, menu.kind, index, &label_buf);

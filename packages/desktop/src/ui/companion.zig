@@ -15,6 +15,12 @@ test {
 
 const log = std.log.scoped(.companion_ui);
 
+// Lucide (ISC) glyphs drawn through the `icon_alt` role.
+const LU_X = "\u{E1B2}";
+const LU_MINUS = "\u{E11C}";
+const LU_LAYOUT_GRID = "\u{E0FF}";
+const LU_SHIELD_ALERT = "\u{E1FE}";
+
 pub const Geometry = struct {
     window: palette.Rect,
     chip: palette.Rect,
@@ -666,7 +672,7 @@ fn renderMissionControlHeader(state: *runtime.AppState, geometry: MissionControl
         "Ready";
     queueMonoText(state, .{ .x = title_x + companionScaled(124.0), .y = geometry.header.y + companionScaled(13.0), .w = @max(geometry.close_button.x - title_x - companionScaled(136.0), 0.0), .h = companionScaled(16.0) }, summary, color(if (frame.has_failure) chrome.danger else chrome.text_subtle), companionScaled(10.5), geometry.header);
     queuePanel(state, geometry.close_button, color(chrome.surface), color(chrome.border), companionScaled(6.0), companionScaled(1.0));
-    queueCenteredText(state, geometry.close_button, "×", color(chrome.text_muted), companionScaled(12.0), .ui_bold, geometry.close_button);
+    queueCenteredIcon(state, geometry.close_button, LU_X, color(chrome.text_muted), companionScaled(13.0), geometry.close_button);
     queueRect(state, .{ .x = 0.0, .y = geometry.header.y + geometry.header.h - companionScaled(1.0), .w = geometry.header.w, .h = companionScaled(1.0) }, color(chrome.hairline));
 }
 
@@ -846,14 +852,14 @@ fn renderHeader(state: *runtime.AppState, geometry: Geometry) void {
     queueMonoText(state, .{ .x = title_x + 52.0 * scale, .y = geometry.header.y + 13.0 * scale, .w = @max(geometry.mission_control_button.x - title_x - 57.0 * scale, 0.0), .h = 16.0 * scale }, status, color(chrome.text_subtle), 10.5 * scale, geometry.header);
     if (geometry.mission_control_button.w >= 92.0 * scale) {
         queuePanel(state, geometry.mission_control_button, color(chrome.surface_deep), color(chrome.border), 6.0 * scale, 1.0 * scale);
-        queueText(state, .{ .x = geometry.mission_control_button.x + 8.0 * scale, .y = geometry.mission_control_button.y + 6.0 * scale, .w = 13.0 * scale, .h = 15.0 * scale }, "▦", color(chrome.accent), 10.0 * scale, geometry.mission_control_button);
+        queueCenteredIcon(state, .{ .x = geometry.mission_control_button.x + 8.0 * scale, .y = geometry.mission_control_button.y + 6.0 * scale, .w = 13.0 * scale, .h = 15.0 * scale }, LU_LAYOUT_GRID, color(chrome.accent), 11.0 * scale, geometry.mission_control_button);
         queueBoldText(state, .{ .x = geometry.mission_control_button.x + 24.0 * scale, .y = geometry.mission_control_button.y + 5.0 * scale, .w = @max(geometry.mission_control_button.w - 30.0 * scale, 0.0), .h = 16.0 * scale }, "Mission Control", color(chrome.text), 9.5 * scale, geometry.mission_control_button);
     }
     // The collapse affordance fills with the header surface it sits on: border
     // commands without a real fill halo white at every anti-aliased corner
     // because the SDF shader composites border fringes toward the fill color.
     queuePanel(state, geometry.close_button, color(surface()), color(hairline()), 6.0 * scale, 1.0 * scale);
-    queueCenteredText(state, geometry.close_button, "−", color(chrome.text_muted), 12.0 * scale, .mono, geometry.close_button);
+    queueCenteredIcon(state, geometry.close_button, LU_MINUS, color(chrome.text_muted), 13.0 * scale, geometry.close_button);
     // The divider stops short of the sidecar stroke so it cannot notch the
     // panel's side borders.
     const divider_inset = snappedStroke(1.0 * scale);
@@ -1260,7 +1266,7 @@ fn renderApproval(state: *runtime.AppState, body: palette.Rect, y: *f32, title: 
     const card_stroke = opaqueOver(card_fill, chrome.approval_border);
     queuePanelClipped(state, card, color(card_fill), color(card_stroke), 10.0 * scale, 1.0 * scale, body);
     queueRoundedRectClipped(state, .{ .x = card.x, .y = card.y, .w = 3.0 * scale, .h = card.h }, color(chrome.warning), 1.5 * scale, body);
-    queueText(state, .{ .x = card.x + 12.0 * scale, .y = card.y + 10.0 * scale, .w = 16.0 * scale, .h = 18.0 * scale }, "◆", color(chrome.warning), 11.0 * scale, body);
+    queueCenteredIcon(state, .{ .x = card.x + 12.0 * scale, .y = card.y + 10.0 * scale, .w = 16.0 * scale, .h = 18.0 * scale }, LU_SHIELD_ALERT, color(chrome.warning), 14.0 * scale, body);
     queueBoldText(state, .{ .x = card.x + 31.0 * scale, .y = card.y + 9.0 * scale, .w = @max(card.w - 43.0 * scale, 0.0), .h = 18.0 * scale }, if (title.len > 0) title else "Permission required", color(chrome.approval_title), 12.0 * scale, body);
     queueText(state, .{ .x = card.x + 12.0 * scale, .y = card.y + 34.0 * scale, .w = @max(card.w - 24.0 * scale, 0.0), .h = 34.0 * scale }, if (detail.len > 0) detail else "Sprout is waiting for your decision before continuing.", color(chrome.approval_body), 12.0 * scale, body);
     const buttons = approvalButtonRects(body, state.companion_controller.currentScrollY());
@@ -2477,6 +2483,12 @@ fn queueCenteredText(state: *runtime.AppState, rect: palette.Rect, value: []cons
         .h = @min(text_h, rect.h),
     };
     state.palette_overlay_batch.roleText(state.allocator, nonNegativeRect(centered), value, fill, font_size, role, null, nonNegativeRect(clip)) catch |err| log.warn("failed to queue centered text: {s}", .{@errorName(err)});
+}
+
+/// Lucide glyph centred in `rect`.
+fn queueCenteredIcon(state: *runtime.AppState, rect: palette.Rect, glyph: []const u8, fill: palette.Color, size: f32, clip: palette.Rect) void {
+    const centered: palette.Rect = .{ .x = rect.x + (rect.w - size) * 0.5, .y = rect.y + (rect.h - size) * 0.5, .w = size, .h = size };
+    state.palette_overlay_batch.roleText(state.allocator, nonNegativeRect(centered), glyph, fill, size, .icon_alt, null, nonNegativeRect(clip)) catch |err| log.warn("failed to queue icon: {s}", .{@errorName(err)});
 }
 
 fn queueTriangle(state: *runtime.AppState, p0: palette.draw.Vec2, p1: palette.draw.Vec2, p2: palette.draw.Vec2, fill: palette.Color) void {

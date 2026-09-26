@@ -36,6 +36,9 @@ pub const TAB_PAD_X_UI: f32 = 12.0;
 /// so the glyph has a comfortable hit target without reading as a label tab.
 pub const PLUS_TAB_WIDTH_UI: f32 = 30.0;
 const LABEL_FONT_UI: f32 = 13.0;
+/// Lucide `plus` for the trailing new-tab button (icon_alt role).
+const LU_PLUS = "\u{E13D}";
+const PLUS_ICON_SIZE_UI: f32 = 15.0;
 const TAB_RADIUS_UI: f32 = 3.0;
 /// Ctrl-reveal key tip: same square badge the sidebar pane rows draw so the
 /// Ctrl+N ordinal reads identically in both places.
@@ -191,9 +194,8 @@ pub fn render(state: *runtime.AppState, strip: palette.Rect) void {
     const plus_rect = plusTabRect(strip, x);
     const plus_hovered = hovered_hit == strip_hit_count;
     renderTab(state, plus_rect, strip, false, plus_hovered);
-    const plus_w_text = runtime.paletteUiTextPrefixWidth("+", font_size, 1);
     const plus_color = if (plus_hovered) theme.COLOR_WHITE else theme.COLOR_TEXT_MUTED;
-    queueCenteredText(state, plus_rect, "+", plus_w_text, paletteColor(plus_color), font_size, strip);
+    queueCenteredIcon(state, plus_rect, LU_PLUS, paletteColor(plus_color), theme.scaledUi(PLUS_ICON_SIZE_UI), strip);
     addHit(plus_rect, .add_tab, project_index, 0);
 }
 
@@ -338,6 +340,23 @@ fn queueCenteredText(state: *runtime.AppState, tab: palette.Rect, value: []const
     const text_x = tab.x + @max((tab.w - text_w) * 0.5, 0.0);
     const text_y = tab.y + @max((tab.h - line_h) * 0.5, 0.0);
     queueText(state, .{ .x = text_x, .y = text_y, .w = @max(tab.x + tab.w - text_x, 0.0), .h = line_h }, value, color, font_size, clip);
+}
+
+/// Lucide glyph centred in `tab`.
+fn queueCenteredIcon(state: *runtime.AppState, tab: palette.Rect, glyph: []const u8, color: palette.Color, size: f32, clip: palette.Rect) void {
+    const stable_value = state.palette_frame_text_arena.allocator().dupe(u8, glyph) catch return;
+    state.palette_overlay_batch.roleText(
+        state.allocator,
+        .{ .x = tab.x + (tab.w - size) * 0.5, .y = tab.y + (tab.h - size) * 0.5, .w = size, .h = size },
+        stable_value,
+        color,
+        size,
+        .icon_alt,
+        null,
+        clip,
+    ) catch |err| {
+        runtime.log.warn("failed to queue workspace strip icon: {s}", .{@errorName(err)});
+    };
 }
 
 fn queueText(state: *runtime.AppState, rect: palette.Rect, value: []const u8, color: palette.Color, font_size: f32, clip: palette.Rect) void {

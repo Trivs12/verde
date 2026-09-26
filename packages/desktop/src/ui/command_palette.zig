@@ -36,6 +36,15 @@ const INPUT_H_CSS: f32 = 38.0;
 const FOOTER_H_CSS: f32 = 30.0;
 const PAD_CSS: f32 = 14.0;
 
+// Lucide (ISC) row glyphs drawn through the `icon_alt` role.
+const LU_CHEVRON_RIGHT = "\u{E06F}";
+const LU_FOLDER = "\u{E0D7}";
+const LU_ARCHIVE_RESTORE = "\u{E2CD}";
+/// Leading glyph slot shared by action/workspace rows (UI units).
+const ROW_GLYPH_X_CSS: f32 = 12.0;
+const ROW_GLYPH_SLOT_CSS: f32 = 16.0;
+const ROW_GLYPH_SIZE_CSS: f32 = 15.0;
+
 const Section = enum { threads, panes, workspaces, app };
 
 fn sectionName(section: Section) []const u8 {
@@ -1708,8 +1717,8 @@ fn renderCommandRow(state: *runtime.AppState, row_index: usize, command_index: u
     const font_size = theme.scaledUi(13.5);
     const text_y = rect.y + (rect.h - font_size * 1.3) * 0.5;
 
-    // ">" glyph marks action rows apart from thread rows at a glance.
-    queueText(state, .{ .x = rect.x + theme.scaledUi(12.0), .y = text_y, .w = theme.scaledUi(16.0), .h = font_size * 1.3 }, ">", paletteColor(theme.COLOR_GREEN), font_size, row_clip);
+    // Chevron glyph marks action rows apart from thread rows at a glance.
+    queueRowGlyph(state, rect, LU_CHEVRON_RIGHT, row_clip);
 
     const hint = keybindHintFor(state, command.keybind);
     const hint_w = if (hint.len > 0) theme.scaledUi(110.0) else theme.scaledUi(0.0);
@@ -1875,7 +1884,7 @@ fn renderWorkspaceRow(state: *runtime.AppState, row_index: usize, project_index:
     const text_y = rect.y + (rect.h - font_size * 1.3) * 0.5;
     var buf: [96]u8 = undefined;
     const label = std.fmt.bufPrint(&buf, "Switch to {s}", .{state.project_controller.projects.items[project_index].label}) catch "Switch workspace";
-    queueText(state, .{ .x = rect.x + theme.scaledUi(12.0), .y = text_y, .w = theme.scaledUi(16.0), .h = font_size * 1.3 }, ">", paletteColor(theme.COLOR_GREEN), font_size, row_clip);
+    queueRowGlyph(state, rect, LU_FOLDER, row_clip);
     var hint_buf_local: [32]u8 = undefined;
     const hint = workspaceSelectHintFor(state, &hint_buf_local, project_index);
     const hint_w = if (hint.len > 0) theme.scaledUi(110.0) else theme.scaledUi(0.0);
@@ -1903,7 +1912,7 @@ fn renderClosedWorkspaceRow(state: *runtime.AppState, row_index: usize, archived
     const text_y = rect.y + (rect.h - font_size * 1.3) * 0.5;
     var buf: [96]u8 = undefined;
     const label = std.fmt.bufPrint(&buf, "Reopen {s}", .{state.project_controller.archived_projects.items[archived_index].label}) catch "Reopen workspace";
-    queueText(state, .{ .x = rect.x + theme.scaledUi(12.0), .y = text_y, .w = theme.scaledUi(16.0), .h = font_size * 1.3 }, ">", paletteColor(theme.COLOR_GREEN), font_size, row_clip);
+    queueRowGlyph(state, rect, LU_ARCHIVE_RESTORE, row_clip);
     queueText(state, .{
         .x = rect.x + theme.scaledUi(34.0),
         .y = text_y,
@@ -2086,6 +2095,27 @@ fn intersectRects(a: palette.Rect, b: palette.Rect) palette.Rect {
     const x1 = @min(a.x + a.w, b.x + b.w);
     const y1 = @min(a.y + a.h, b.y + b.h);
     return .{ .x = x0, .y = y0, .w = @max(x1 - x0, 0.0), .h = @max(y1 - y0, 0.0) };
+}
+
+/// Leading Lucide glyph for action/workspace rows, centred in the row's
+/// glyph slot (the slot the old ">" text marker occupied).
+fn queueRowGlyph(state: *runtime.AppState, row: palette.Rect, glyph: []const u8, clip: palette.Rect) void {
+    const stable_value = stableText(state, glyph) orelse return;
+    const size = theme.scaledUi(ROW_GLYPH_SIZE_CSS);
+    const slot_x = row.x + theme.scaledUi(ROW_GLYPH_X_CSS);
+    const slot_w = theme.scaledUi(ROW_GLYPH_SLOT_CSS);
+    state.palette_overlay_batch.roleText(
+        state.allocator,
+        .{ .x = slot_x + (slot_w - size) * 0.5, .y = row.y + (row.h - size) * 0.5, .w = size, .h = size },
+        stable_value,
+        paletteColor(theme.COLOR_GREEN),
+        size,
+        .icon_alt,
+        null,
+        clip,
+    ) catch |err| {
+        log.warn("failed to queue command palette glyph: {s}", .{@errorName(err)});
+    };
 }
 
 fn queueText(state: *runtime.AppState, rect: palette.Rect, value: []const u8, color: palette.Color, font_size: f32, clip: ?palette.Rect) void {
