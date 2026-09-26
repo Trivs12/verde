@@ -65,20 +65,17 @@ const SCROLLING_EDGE_BUTTON_INSET_CSS: f32 = 6.0;
 const SCROLLING_EDGE_HOVER_PAD_CSS: f32 = 14.0;
 const SCROLLING_EDGE_CONTROL_Z: i32 = 170;
 
-// Font Awesome glyphs bundled in SymbolsNerdFontMono and rendered with Palette's icon role.
-const NF_FA_EXPAND = "\u{F065}";
 // Lucide (ISC) glyphs drawn through the `icon_alt` role.
 const LU_MAXIMIZE = "\u{E113}";
 const LU_MINIMIZE = "\u{E11B}";
 const LU_COLUMNS = "\u{E098}";
-const NF_FA_COMPRESS = "\u{F066}";
-const NF_COD_CHEVRON_DOWN = "\u{EAB4}";
-const NF_COD_CHEVRON_LEFT = "\u{EAB5}";
-const NF_COD_CHEVRON_RIGHT = "\u{EAB6}";
-const NF_COD_CHEVRON_UP = "\u{EAB7}";
-const NF_COD_EDIT = "\u{EA73}";
-const NF_COD_HISTORY = "\u{EA82}";
-const NF_COD_TERMINAL = "\u{EA85}";
+const LU_CHEVRON_DOWN = "\u{E06D}";
+const LU_CHEVRON_LEFT = "\u{E06E}";
+const LU_CHEVRON_RIGHT = "\u{E06F}";
+const LU_CHEVRON_UP = "\u{E070}";
+const LU_SQUARE_PEN = "\u{E172}";
+const LU_HISTORY = "\u{E1F5}";
+const LU_SQUARE_TERMINAL = "\u{E20A}";
 
 fn nowMs() i64 {
     return @intCast(@divTrunc(profiler.nowNs(), std.time.ns_per_ms));
@@ -1084,11 +1081,11 @@ fn renderEmptyWorkspace(state: *runtime.AppState, rect: palette.Rect) void {
     const history_hint = if (config) |loaded| firstKeybindHint(&history_hint_buf, loaded.command_palette) else "Ctrl+Shift+P";
     const terminal_hint = if (config) |loaded| firstKeybindHint(&terminal_hint_buf, loaded.workspace_split_terminal_horizontal) else "Ctrl+Shift+T";
     const button_x = rect.x + (rect.w - button_w) * 0.5;
-    renderEmptyWorkspaceAction(state, .{ .x = button_x, .y = y, .w = button_w, .h = button_h }, NF_COD_EDIT, "New chat", new_chat_hint, .new_chat_thread, true, empty_workspace_selected_action == 0);
+    renderEmptyWorkspaceAction(state, .{ .x = button_x, .y = y, .w = button_w, .h = button_h }, LU_SQUARE_PEN, "New chat", new_chat_hint, .new_chat_thread, true, empty_workspace_selected_action == 0);
     y += button_h + theme.scaledUi(8.0);
-    renderEmptyWorkspaceAction(state, .{ .x = button_x, .y = y, .w = button_w, .h = button_h }, NF_COD_HISTORY, "Open previous chat", history_hint, .open_chat_history, false, empty_workspace_selected_action == 1);
+    renderEmptyWorkspaceAction(state, .{ .x = button_x, .y = y, .w = button_w, .h = button_h }, LU_HISTORY, "Open previous chat", history_hint, .open_chat_history, false, empty_workspace_selected_action == 1);
     y += button_h + theme.scaledUi(8.0);
-    renderEmptyWorkspaceAction(state, .{ .x = button_x, .y = y, .w = button_w, .h = button_h }, NF_COD_TERMINAL, "Open terminal pane", terminal_hint, .open_terminal, false, empty_workspace_selected_action == 2);
+    renderEmptyWorkspaceAction(state, .{ .x = button_x, .y = y, .w = button_w, .h = button_h }, LU_SQUARE_TERMINAL, "Open terminal pane", terminal_hint, .open_terminal, false, empty_workspace_selected_action == 2);
 }
 
 fn firstKeybindHint(buf: []u8, bindings: []const keybinds.Keybind) []const u8 {
@@ -1122,8 +1119,16 @@ fn renderEmptyWorkspaceAction(
 
     const font_size = theme.scaledUi(14.0);
     const icon_size = theme.scaledUi(15.0);
+    // Lucide is optically smaller than the Codicons it replaced; draw it a
+    // little larger about the original 15px slot's centre.
+    const lucide_size = theme.scaledUi(16.0);
     const left = rect.x + theme.scaledUi(13.0);
-    queueIcon(state, .{ .x = left, .y = rect.y + (rect.h - icon_size) * 0.5, .w = icon_size, .h = icon_size }, icon, paletteColor(theme.COLOR_WHITE), icon_size, rect);
+    queueLucideIcon(state, .{
+        .x = left + (icon_size - lucide_size) * 0.5,
+        .y = rect.y + (rect.h - lucide_size) * 0.5,
+        .w = lucide_size,
+        .h = lucide_size,
+    }, icon, paletteColor(theme.COLOR_WHITE), lucide_size, rect);
     const label_w = runtime.paletteUiTextPrefixWidth(label, font_size, label.len);
     queueText(state, .{ .x = left + theme.scaledUi(24.0), .y = rect.y + (rect.h - font_size * 1.25) * 0.5, .w = @min(label_w, rect.w * 0.58), .h = font_size * 1.25 }, label, paletteColor(theme.COLOR_WHITE), font_size, rect);
     if (shortcut.len > 0) {
@@ -2142,7 +2147,7 @@ fn renderScrollingEdgeControl(
     queueRounded(state, rects.button, paletteColor(theme.withAlpha(theme.COLOR_PANEL_ALT, 232)), theme.scaledUi(9.0));
     queueBorder(state, rects.button, paletteColor(theme.withAlpha(theme.accent(), 190)), theme.scaledUi(9.0), theme.scaledUi(1.5));
 
-    const icon_size = theme.scaledUi(18.0);
+    const icon_size = theme.scaledUi(19.0);
     const icon_rect: palette.Rect = .{
         .x = rects.button.x + (rects.button.w - icon_size) * 0.5,
         .y = rects.button.y + (rects.button.h - icon_size) * 0.5,
@@ -2150,10 +2155,10 @@ fn renderScrollingEdgeControl(
         .h = icon_size,
     };
     const glyph = switch (direction) {
-        .horizontal => if (edge == .previous) NF_COD_CHEVRON_LEFT else NF_COD_CHEVRON_RIGHT,
-        .vertical => if (edge == .previous) NF_COD_CHEVRON_UP else NF_COD_CHEVRON_DOWN,
+        .horizontal => if (edge == .previous) LU_CHEVRON_LEFT else LU_CHEVRON_RIGHT,
+        .vertical => if (edge == .previous) LU_CHEVRON_UP else LU_CHEVRON_DOWN,
     };
-    queueIcon(state, icon_rect, glyph, paletteColor(theme.COLOR_WHITE), icon_size, workspace);
+    queueLucideIcon(state, icon_rect, glyph, paletteColor(theme.COLOR_WHITE), icon_size, workspace);
     appendHit(.{
         .action = if (edge == .previous) .scrolling_previous else .scrolling_next,
         .rect = rects.button,
@@ -3480,19 +3485,6 @@ fn queueText(state: *runtime.AppState, rect: palette.Rect, value: []const u8, co
 /// Lucide stroke icon (the `icon_alt` face).
 fn queueLucideIcon(state: *runtime.AppState, rect: palette.Rect, glyph: []const u8, color: palette.Color, font_size: f32, clip: palette.Rect) void {
     state.palette_overlay_batch.roleText(state.allocator, rect, stableText(state, glyph), color, font_size, .icon_alt, null, clip) catch {};
-}
-
-fn queueIcon(state: *runtime.AppState, rect: palette.Rect, glyph: []const u8, color: palette.Color, font_size: f32, clip: palette.Rect) void {
-    state.palette_overlay_batch.roleText(
-        state.allocator,
-        rect,
-        stableText(state, glyph),
-        color,
-        font_size,
-        .icon,
-        null,
-        clip,
-    ) catch {};
 }
 
 fn paletteColor(color: [4]f32) palette.Color {
