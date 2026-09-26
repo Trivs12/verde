@@ -59,6 +59,18 @@ pub const ComposerPromptConfig = struct {
     strip_icon_reserve: ?f32 = null,
     strip_icon_gap: ?f32 = null,
     strip_chevron: bool = true,
+    /// Caps for the optional read-only branch chip and the access chip that
+    /// follow the directory chip on the outside strip (see `setBranchLabel`
+    /// and `setShowAccessChip`).
+    branch_max_width: f32 = 160.0,
+    access_chip_max_width: f32 = 160.0,
+    /// Circular attach button at the leading edge of an `inline_toolbar`
+    /// frame, shown once the host calls `setShowAttach`. The host draws the
+    /// circle and glyph in `attachRect()`. The slim bar's prompt text starts
+    /// after it; in the stacked layout it leads the toolbar row. The size is
+    /// clamped to `toolbar_height` so it never outgrows the send button row.
+    attach_size: f32 = 32.0,
+    attach_gap: f32 = 8.0,
     /// `running_only` hides the send button while idle (Enter still
     /// submits) and shows it only as the stop / pending control; the
     /// toolbar reclaims its width.
@@ -195,7 +207,11 @@ pub const ComposerPromptStyle = struct {
 
 pub const ComposerPromptPart = enum {
     directory,
+    /// Read-only strip chip; laid out and host-iconed but never hit-tested.
+    branch,
+    access_chip,
     runtime,
+    attach,
     model,
     reasoning,
     fast,
@@ -254,15 +270,21 @@ pub const ComposerPromptGeometry = struct {
     toolbar: draw.Rect,
     strip: draw.Rect,
     directory: draw.Rect,
+    branch: draw.Rect,
+    access_chip: draw.Rect,
     runtime: draw.Rect,
     model: draw.Rect,
     reasoning: draw.Rect,
     fast: draw.Rect,
     access: draw.Rect,
     send: draw.Rect,
-    /// Host-drawn leading icon cells (provider logo, folder, runtime).
+    attach: draw.Rect,
+    /// Host-drawn leading icon cells (provider logo, folder, branch, access,
+    /// runtime).
     model_icon: draw.Rect,
     directory_icon: draw.Rect,
+    branch_icon: draw.Rect,
+    access_chip_icon: draw.Rect,
     runtime_icon: draw.Rect,
     /// Label cells: merged model name / detail words / chevron, and the
     /// strip chip labels. Zero width outside the matching mode.
@@ -270,6 +292,8 @@ pub const ComposerPromptGeometry = struct {
     detail_text: draw.Rect,
     chevron: draw.Rect,
     directory_text: draw.Rect,
+    branch_text: draw.Rect,
+    access_chip_text: draw.Rect,
     runtime_text: draw.Rect,
     corner_radius: f32,
     inline_active: bool,
@@ -281,6 +305,9 @@ pub const ComposerPromptPreviewLabels = struct {
     model: ?[]const u8 = null,
     detail: ?[]const u8 = null,
     directory: ?[]const u8 = null,
+    /// Empty hides the branch chip, as with `setBranchLabel`.
+    branch: ?[]const u8 = null,
+    access_chip: ?[]const u8 = null,
     runtime: ?[]const u8 = null,
     /// The preview's own send state, so a `running_only` send button
     /// matches that pane's turn instead of the live composer's.
@@ -386,6 +413,8 @@ pub const ComposerPromptEvent = union(enum) {
     submitted: []const u8,
     directory_clicked,
     runtime_clicked,
+    access_chip_clicked,
+    attach_clicked,
     model_clicked,
     model_changed: usize,
     reasoning_clicked,
@@ -435,6 +464,8 @@ pub fn ComposerPrompt(comptime config: ComposerPromptConfig) type {
         placeholder_buffer: std.ArrayList(u8) = .empty,
         directory_label_buffer: std.ArrayList(u8) = .empty,
         runtime_label_buffer: std.ArrayList(u8) = .empty,
+        branch_label_buffer: std.ArrayList(u8) = .empty,
+        access_chip_label_buffer: std.ArrayList(u8) = .empty,
         model_label_buffer: std.ArrayList(u8) = .empty,
         /// Muted variant words after the model name in the merged label.
         model_detail_label_buffer: std.ArrayList(u8) = .empty,
@@ -454,6 +485,8 @@ pub fn ComposerPrompt(comptime config: ComposerPromptConfig) type {
         focused: bool = false,
         show_directory_toggle: bool = false,
         show_runtime_toggle: bool = false,
+        show_access_chip: bool = false,
+        show_attach: bool = false,
         show_fast_toggle: bool = true,
         show_reasoning_toggle: bool = true,
         show_access_toggle: bool = true,
@@ -587,6 +620,32 @@ pub fn ComposerPrompt(comptime config: ComposerPromptConfig) type {
             return self.show_runtime_toggle;
         }
 
+        /// Access chip on the outside strip, after the branch chip; clicks
+        /// emit `access_chip_clicked`.
+        pub fn setShowAccessChip(self: *Component, show: bool) void {
+            self.show_access_chip = show;
+            if (!show) {
+                self.hovered_part = if (self.hovered_part == .access_chip) null else self.hovered_part;
+            }
+        }
+
+        pub fn showAccessChip(self: *const Component) bool {
+            return self.show_access_chip;
+        }
+
+        /// Leading attach button of an `inline_toolbar` frame; clicks emit
+        /// `attach_clicked`.
+        pub fn setShowAttach(self: *Component, show: bool) void {
+            self.show_attach = show;
+            if (!show) {
+                self.hovered_part = if (self.hovered_part == .attach) null else self.hovered_part;
+            }
+        }
+
+        pub fn showAttach(self: *const Component) bool {
+            return config.inline_toolbar and self.show_attach;
+        }
+
         pub fn setShowFastToggle(self: *Component, show: bool) void {
             self.show_fast_toggle = show;
             if (!show) {
@@ -672,6 +731,8 @@ pub fn ComposerPrompt(comptime config: ComposerPromptConfig) type {
             self.fast_label_buffer.deinit(allocator);
             self.directory_label_buffer.deinit(allocator);
             self.runtime_label_buffer.deinit(allocator);
+            self.branch_label_buffer.deinit(allocator);
+            self.access_chip_label_buffer.deinit(allocator);
             self.access_label_buffer.deinit(allocator);
             self.clearEditHistory(allocator);
             self.undo_stack.deinit(allocator);
@@ -765,6 +826,15 @@ pub fn ComposerPrompt(comptime config: ComposerPromptConfig) type {
 
         pub fn setRuntimeLabel(self: *Component, allocator: std.mem.Allocator, value: []const u8) !void {
             try setOwnedString(allocator, &self.runtime_label_buffer, value);
+        }
+
+        /// Read-only branch chip label on the outside strip; empty hides it.
+        pub fn setBranchLabel(self: *Component, allocator: std.mem.Allocator, value: []const u8) !void {
+            try setOwnedString(allocator, &self.branch_label_buffer, value);
+        }
+
+        pub fn setAccessChipLabel(self: *Component, allocator: std.mem.Allocator, value: []const u8) !void {
+            try setOwnedString(allocator, &self.access_chip_label_buffer, value);
         }
 
         pub fn setModelLabel(self: *Component, allocator: std.mem.Allocator, value: []const u8) !void {
@@ -905,6 +975,8 @@ pub fn ComposerPrompt(comptime config: ComposerPromptConfig) type {
         pub fn hitTest(self: *const Component, point: draw.Vec2) ?ComposerPromptPart {
             const geometry = self.toolbarGeometry();
             if (geometry.send.w > 0.0 and geometry.send.contains(point)) return .send;
+            if (geometry.attach.w > 0.0 and geometry.attach.contains(point)) return .attach;
+            if (geometry.access_chip.w > 0.0 and geometry.access_chip.contains(point)) return .access_chip;
             if (self.show_directory_toggle and geometry.directory.w > 0.0 and geometry.directory.contains(point)) return .directory;
             if (geometry.runtime.w > 0.0 and geometry.runtime.contains(point)) return .runtime;
             if (geometry.model.contains(point)) return .model;
@@ -1033,19 +1105,26 @@ pub fn ComposerPrompt(comptime config: ComposerPromptConfig) type {
                 .toolbar = toolbar.toolbar,
                 .strip = self.directoryStripRect(),
                 .directory = toolbar.directory,
+                .branch = toolbar.branch,
+                .access_chip = toolbar.access_chip,
                 .runtime = toolbar.runtime,
                 .model = toolbar.model,
                 .reasoning = toolbar.reasoning,
                 .fast = toolbar.fast,
                 .access = toolbar.access,
                 .send = toolbar.send,
+                .attach = toolbar.attach,
                 .model_icon = self.leadingIconCell(.model, toolbar.model),
                 .directory_icon = self.leadingIconCell(.directory, toolbar.directory),
+                .branch_icon = self.leadingIconCell(.branch, toolbar.branch),
+                .access_chip_icon = self.leadingIconCell(.access_chip, toolbar.access_chip),
                 .runtime_icon = self.leadingIconCell(.runtime, toolbar.runtime),
                 .model_text = merged.name,
                 .detail_text = merged.detail,
                 .chevron = merged.chevron,
                 .directory_text = if (chips) self.stripChipTextRect(toolbar.directory) else zero,
+                .branch_text = if (chips) self.stripChipTextRect(toolbar.branch) else zero,
+                .access_chip_text = if (chips) self.stripChipTextRect(toolbar.access_chip) else zero,
                 .runtime_text = if (chips) self.stripChipTextRect(toolbar.runtime) else zero,
                 .corner_radius = self.cornerRadius(),
                 .inline_active = config.inline_toolbar and self.inlineActive(),
@@ -1058,18 +1137,25 @@ pub fn ComposerPrompt(comptime config: ComposerPromptConfig) type {
             const toolbar = self.toolbarGeometry();
             const rect = switch (part) {
                 .directory => toolbar.directory,
+                .branch => toolbar.branch,
+                .access_chip => toolbar.access_chip,
                 .runtime => toolbar.runtime,
                 .model => toolbar.model,
                 .reasoning => toolbar.reasoning,
                 .fast => toolbar.fast,
                 .access => toolbar.access,
                 .send => toolbar.send,
+                .attach => toolbar.attach,
             };
             return self.leadingIconCell(part, rect);
         }
 
         fn leadingIconCell(self: *const Component, part: ComposerPromptPart, rect: draw.Rect) draw.Rect {
-            const chip = config.strip_chips and self.directoryOutside() and (part == .directory or part == .runtime);
+            const strip_part = switch (part) {
+                .directory, .branch, .access_chip, .runtime => true,
+                else => false,
+            };
+            const chip = config.strip_chips and self.directoryOutside() and strip_part;
             const merged = config.merged_model_label and part == .model;
             const pad = if (chip) self.stripPadX() else self.scaled(config.pill_padding_x);
             const reserve = if (chip) self.stripIconReserve() else if (merged) self.mergedIconReserve() else self.scaled(config.pill_overlay_icon_reserve);
@@ -1143,12 +1229,13 @@ pub fn ComposerPrompt(comptime config: ComposerPromptConfig) type {
             const toolbar_h = self.scaled(config.toolbar_height);
             const inset = self.controlInset();
             const line_h = self.textMetrics().line_height;
+            const lead = self.leadingInset();
             if (inline_mode) {
                 const cluster_w = self.inlineClusterWidth();
-                const text_w = frame.w - pad_x - self.scaled(config.control_gap) - cluster_w - inset;
+                const text_w = frame.w - lead - self.scaled(config.control_gap) - cluster_w - inset;
                 return .{
                     .text = snapRect(.{
-                        .x = frame.x + pad_x,
+                        .x = frame.x + lead,
                         .y = frame.y + (frame.h - line_h) * 0.5,
                         .w = @max(text_w, 0.0),
                         .h = line_h,
@@ -1171,12 +1258,24 @@ pub fn ComposerPrompt(comptime config: ComposerPromptConfig) type {
                     .h = @max(toolbar_y - self.scaled(config.toolbar_gap) - text_y, 0.0),
                 }),
                 .toolbar = snapRect(.{
-                    .x = frame.x + pad_x,
+                    .x = frame.x + lead,
                     .y = toolbar_y,
-                    .w = @max(frame.w - pad_x - inset, 0.0),
+                    .w = @max(frame.w - lead - inset, 0.0),
                     .h = toolbar_h,
                 }),
             };
+        }
+
+        /// Left edge of the slim bar's text column and of the stacked
+        /// toolbar row: past the attach button and its gap when shown,
+        /// otherwise `padding_x`.
+        fn leadingInset(self: *const Component) f32 {
+            if (!self.showAttach()) return self.scaled(config.padding_x);
+            return self.controlInset() + self.attachSize() + self.scaled(config.attach_gap);
+        }
+
+        fn attachSize(self: *const Component) f32 {
+            return @round(@min(self.scaled(config.attach_size), self.scaled(config.toolbar_height)));
         }
 
         /// Whether `value` fits the inline text column of a `width`-wide
@@ -1212,7 +1311,9 @@ pub fn ComposerPrompt(comptime config: ComposerPromptConfig) type {
             const text_rect = self.textRect();
             if (!(config.inline_toolbar and self.inlineActive())) return text_rect;
             const frame = self.frameRect();
-            return .{ .x = frame.x, .y = frame.y, .w = @max(text_rect.x + text_rect.w - frame.x, 0.0), .h = frame.h };
+            // Starts right of the attach button so its clicks stay its own.
+            const left = if (self.showAttach()) frame.x + self.controlInset() + self.attachSize() else frame.x;
+            return .{ .x = left, .y = frame.y, .w = @max(text_rect.x + text_rect.w - left, 0.0), .h = frame.h };
         }
 
         pub fn sendButtonRect(self: *const Component) draw.Rect {
@@ -1231,6 +1332,21 @@ pub fn ComposerPrompt(comptime config: ComposerPromptConfig) type {
         /// directory strip.
         pub fn runtimeRect(self: *const Component) draw.Rect {
             return self.toolbarGeometry().runtime;
+        }
+
+        /// Read-only branch chip on the outside strip; zero width when hidden.
+        pub fn branchRect(self: *const Component) draw.Rect {
+            return self.toolbarGeometry().branch;
+        }
+
+        /// Access chip on the outside strip; zero width when hidden.
+        pub fn accessChipRect(self: *const Component) draw.Rect {
+            return self.toolbarGeometry().access_chip;
+        }
+
+        /// Leading attach button; zero width unless `showAttach`.
+        pub fn attachRect(self: *const Component) draw.Rect {
+            return self.toolbarGeometry().attach;
         }
 
         pub fn reasoningRect(self: *const Component) draw.Rect {
@@ -1304,6 +1420,10 @@ pub fn ComposerPrompt(comptime config: ComposerPromptConfig) type {
                 } else {
                     try self.renderPill(allocator, batch, true, &.{}, geometry.directory, config.directory_icon, self.directoryLabel(), config.chevron_icon, self.hovered_part == .directory);
                 }
+            }
+            if (strip_chips) {
+                try self.renderStripChip(allocator, batch, geometry.branch, self.branchLabel(), false);
+                try self.renderStripChip(allocator, batch, geometry.access_chip, self.accessChipLabel(), self.hovered_part == .access_chip);
             }
             if (geometry.runtime.w > 0.0) {
                 if (strip_chips) {
@@ -1804,6 +1924,10 @@ pub fn ComposerPrompt(comptime config: ComposerPromptConfig) type {
                 switch (part) {
                     .directory => self.emit(.directory_clicked),
                     .runtime => self.emit(.runtime_clicked),
+                    .access_chip => self.emit(.access_chip_clicked),
+                    .attach => self.emit(.attach_clicked),
+                    // Never returned by `hitTest`.
+                    .branch => {},
                     .model => {
                         if (!self.external_model_menu) self.toggleMenu(.model);
                         self.emit(.model_clicked);
@@ -2127,6 +2251,14 @@ pub fn ComposerPrompt(comptime config: ComposerPromptConfig) type {
             return if (self.runtime_label_buffer.items.len > 0) self.runtime_label_buffer.items else config.runtime_label;
         }
 
+        fn branchLabel(self: *const Component) []const u8 {
+            return self.preview_labels.branch orelse self.branch_label_buffer.items;
+        }
+
+        fn accessChipLabel(self: *const Component) []const u8 {
+            return self.preview_labels.access_chip orelse self.access_chip_label_buffer.items;
+        }
+
         fn modelLabel(self: *const Component) []const u8 {
             if (self.preview_labels.model) |label| return label;
             return if (self.model_label_buffer.items.len > 0) self.model_label_buffer.items else config.model_label;
@@ -2388,7 +2520,10 @@ pub fn ComposerPrompt(comptime config: ComposerPromptConfig) type {
         const ToolbarGeometry = struct {
             toolbar: draw.Rect,
             directory: draw.Rect,
+            branch: draw.Rect,
+            access_chip: draw.Rect,
             runtime: draw.Rect,
+            attach: draw.Rect,
             model: draw.Rect,
             reasoning: draw.Rect,
             fast: draw.Rect,
@@ -2411,7 +2546,18 @@ pub fn ComposerPrompt(comptime config: ComposerPromptConfig) type {
                 .w = send_w,
                 .h = send_size,
             });
-            if (config.merged_model_label) return self.mergedToolbarGeometry(toolbar, y, control_h, send);
+            // The attach button sits at the frame's leading edge, level with
+            // the toolbar row in both the slim bar and the stacked layout.
+            const attach: draw.Rect = if (self.showAttach()) attach: {
+                const size = self.attachSize();
+                break :attach snapRect(.{
+                    .x = self.frameRect().x + self.controlInset(),
+                    .y = toolbar.y + (toolbar.h - size) * 0.5,
+                    .w = size,
+                    .h = size,
+                });
+            } else snapRect(.{ .x = toolbar.x, .y = y, .w = 0.0, .h = control_h });
+            if (config.merged_model_label) return self.mergedToolbarGeometry(toolbar, y, control_h, send, attach);
             // Extra air before the send control so the rightmost pill is not visually glued to the button.
             const max_x = if (send.w > 0.0) send.x - self.scaled(config.control_gap) * 2.0 else send.x;
             const avail_total = @max(max_x - toolbar.x, 0.0);
@@ -2453,9 +2599,13 @@ pub fn ComposerPrompt(comptime config: ComposerPromptConfig) type {
             var x = toolbar.x;
             var directory: draw.Rect = undefined;
             var runtime: draw.Rect = snapRect(.{ .x = toolbar.x + toolbar.w, .y = y, .w = 0.0, .h = control_h });
+            var branch = runtime;
+            var access_chip = runtime;
             if (directory_outside) {
                 const strip = self.stripRects(directory_w);
                 directory = strip.directory;
+                branch = strip.branch;
+                access_chip = strip.access_chip;
                 runtime = strip.runtime;
             } else if (self.show_directory_toggle) {
                 directory = snapRect(.{ .x = x, .y = y, .w = directory_w, .h = control_h });
@@ -2487,7 +2637,10 @@ pub fn ComposerPrompt(comptime config: ComposerPromptConfig) type {
             return .{
                 .toolbar = toolbar,
                 .directory = directory,
+                .branch = branch,
+                .access_chip = access_chip,
                 .runtime = runtime,
+                .attach = attach,
                 .model = model,
                 .reasoning = reasoning,
                 .fast = fast,
@@ -2496,13 +2649,17 @@ pub fn ComposerPrompt(comptime config: ComposerPromptConfig) type {
             };
         }
 
-        const StripRects = struct { directory: draw.Rect, runtime: draw.Rect };
+        const StripRects = struct { directory: draw.Rect, branch: draw.Rect, access_chip: draw.Rect, runtime: draw.Rect };
 
         /// Controls on the strip under the frame: the directory control
-        /// leads at its natural width and the runtime control trails at the
-        /// far edge; the directory control yields first if both cannot fit.
+        /// leads at its natural width, followed by the optional branch and
+        /// access chips, and the runtime control trails at the far edge.
+        /// When space runs out the branch chip shrinks toward a short floor,
+        /// then the access and branch chips drop, and only then does the
+        /// directory control yield.
         fn stripRects(self: *const Component, pill_directory_w: f32) StripRects {
             const strip = self.directoryStripRect();
+            const gap = self.scaled(config.control_gap);
             const strip_control_h = @round(@min(strip.h, self.scaled(34.0)));
             const strip_y = @round(strip.y + (strip.h - strip_control_h) * 0.5);
             const directory_w = if (config.strip_chips)
@@ -2514,11 +2671,29 @@ pub fn ComposerPrompt(comptime config: ComposerPromptConfig) type {
             else
                 self.pillWidth(true, 0.0, config.runtime_icon, self.runtimeLabel(), config.chevron_icon, config.runtime_min_width, config.runtime_max_width);
             var runtime_w: f32 = if (self.show_runtime_toggle) @min(natural_runtime_w, strip.w) else 0.0;
-            const runtime_span = if (self.show_runtime_toggle) runtime_w + self.scaled(config.control_gap) else 0.0;
-            const strip_directory_w = @min(directory_w, @max(strip.w - runtime_span, 0.0));
+            const runtime_span = if (self.show_runtime_toggle) runtime_w + gap else 0.0;
+            const avail = @max(strip.w - runtime_span, 0.0);
+
+            var branch_w: f32 = if (config.strip_chips and self.branchLabel().len > 0)
+                @min(self.stripChipWidth(self.branchLabel()), self.scaled(config.branch_max_width))
+            else
+                0.0;
+            var access_w: f32 = if (config.strip_chips and self.show_access_chip and self.accessChipLabel().len > 0)
+                @min(self.stripChipWidth(self.accessChipLabel()), self.scaled(config.access_chip_max_width))
+            else
+                0.0;
+            const overflow = stripLeadSpan(directory_w, branch_w, access_w, gap) - avail;
+            if (overflow > 0.0 and branch_w > 0.0) {
+                const floor = @min(branch_w, self.stripChipWidth("") + self.stripMetrics().font_size * 3.0);
+                branch_w = @max(branch_w - overflow, floor);
+            }
+            if (stripLeadSpan(directory_w, branch_w, access_w, gap) > avail) access_w = 0.0;
+            if (stripLeadSpan(directory_w, branch_w, access_w, gap) > avail) branch_w = 0.0;
+            const strip_directory_w = @min(directory_w, avail);
+
             var runtime: draw.Rect = snapRect(.{ .x = strip.x + strip.w, .y = strip_y, .w = 0.0, .h = strip_control_h });
             if (self.show_runtime_toggle) {
-                runtime_w = @min(runtime_w, @max(strip.w - strip_directory_w - self.scaled(config.control_gap), 0.0));
+                runtime_w = @min(runtime_w, @max(strip.w - stripLeadSpan(strip_directory_w, branch_w, access_w, gap) - gap, 0.0));
                 runtime = snapRect(.{
                     .x = strip.x + strip.w - runtime_w,
                     .y = strip_y,
@@ -2526,10 +2701,26 @@ pub fn ComposerPrompt(comptime config: ComposerPromptConfig) type {
                     .h = strip_control_h,
                 });
             }
+            const directory = snapRect(.{ .x = strip.x, .y = strip_y, .w = strip_directory_w, .h = strip_control_h });
+            var x = directory.x + directory.w;
+            const branch = snapRect(.{ .x = if (branch_w > 0.0) x + gap else x, .y = strip_y, .w = branch_w, .h = strip_control_h });
+            if (branch_w > 0.0) x = branch.x + branch.w;
+            const access_chip = snapRect(.{ .x = if (access_w > 0.0) x + gap else x, .y = strip_y, .w = access_w, .h = strip_control_h });
             return .{
-                .directory = snapRect(.{ .x = strip.x, .y = strip_y, .w = strip_directory_w, .h = strip_control_h }),
+                .directory = directory,
+                .branch = branch,
+                .access_chip = access_chip,
                 .runtime = runtime,
             };
+        }
+
+        /// Width of the strip's leading chip group; hidden chips (zero
+        /// width) take no gap.
+        fn stripLeadSpan(directory_w: f32, branch_w: f32, access_w: f32, gap: f32) f32 {
+            var span = directory_w;
+            if (branch_w > 0.0) span += gap + branch_w;
+            if (access_w > 0.0) span += gap + access_w;
+            return span;
         }
 
         /// Toolbar layout for `merged_model_label`: an optional inline
@@ -2537,17 +2728,21 @@ pub fn ComposerPrompt(comptime config: ComposerPromptConfig) type {
         /// send button (or the toolbar edge while it is hidden) on the right,
         /// split into the `.model` (logo + name)
         /// and `.reasoning` (detail + chevron) hit halves.
-        fn mergedToolbarGeometry(self: *const Component, toolbar: draw.Rect, y: f32, control_h: f32, send: draw.Rect) ToolbarGeometry {
+        fn mergedToolbarGeometry(self: *const Component, toolbar: draw.Rect, y: f32, control_h: f32, send: draw.Rect, attach: draw.Rect) ToolbarGeometry {
             const gap = self.scaled(config.control_gap);
             const label_right_edge = if (send.w > 0.0) send.x - gap else send.x;
             var left = toolbar.x;
             var directory: draw.Rect = snapRect(.{ .x = toolbar.x, .y = y, .w = 0.0, .h = control_h });
             var runtime: draw.Rect = snapRect(.{ .x = toolbar.x + toolbar.w, .y = y, .w = 0.0, .h = control_h });
+            var branch = runtime;
+            var access_chip = runtime;
             if (self.show_directory_toggle) {
                 const directory_w = self.pillWidth(true, 0.0, config.directory_icon, self.directoryLabel(), config.chevron_icon, config.directory_min_width, config.directory_max_width);
                 if (self.directoryOutside()) {
                     const strip = self.stripRects(directory_w);
                     directory = strip.directory;
+                    branch = strip.branch;
+                    access_chip = strip.access_chip;
                     runtime = strip.runtime;
                 } else {
                     directory.w = @round(@min(directory_w, @max(send.x - gap - toolbar.x, 0.0)));
@@ -2563,7 +2758,10 @@ pub fn ComposerPrompt(comptime config: ComposerPromptConfig) type {
             return .{
                 .toolbar = toolbar,
                 .directory = directory,
+                .branch = branch,
+                .access_chip = access_chip,
                 .runtime = runtime,
+                .attach = attach,
                 .model = snapRect(.{ .x = label_x, .y = y, .w = split_x - label_x, .h = control_h }),
                 .reasoning = snapRect(.{ .x = split_x, .y = y, .w = label_right - split_x, .h = control_h }),
                 .fast = rest,
@@ -2842,6 +3040,7 @@ const ComposerProbe = struct {
     fast_changed: usize = 0,
     access_changed: usize = 0,
     send_clicked: usize = 0,
+    attach_clicked: usize = 0,
     clipboard: std.ArrayList(u8) = .empty,
 };
 
@@ -2856,6 +3055,7 @@ fn probeComposerEvent(context: ?*anyopaque, event: ComposerPromptEvent) void {
         .fast_changed => probe.fast_changed += 1,
         .access_changed => probe.access_changed += 1,
         .send_clicked => probe.send_clicked += 1,
+        .attach_clicked => probe.attach_clicked += 1,
         else => {},
     }
 }
@@ -3468,4 +3668,79 @@ test "composer prompt running-only send button hides while idle without overlap"
         if (command.kind == .rect and command.rect.x == idle.model.x and command.rect.w == idle.model.w and command.rect.y == idle.model.y) label_fills += 1;
     }
     try std.testing.expect(label_fills >= 1);
+}
+
+test "composer prompt attach button leads the slim bar and the stacked toolbar row" {
+    var prompt = InlineTestPrompt.init();
+    defer prompt.deinit(std.testing.allocator);
+    try initInlineTestPrompt(&prompt);
+    const text_without_attach = prompt.textRect();
+    try std.testing.expectEqual(@as(f32, 0.0), prompt.attachRect().w);
+
+    prompt.setShowAttach(true);
+    const frame = prompt.frameRect();
+    const attach = prompt.attachRect();
+    try std.testing.expect(attach.w > 0.0 and attach.w == attach.h);
+    try expectRectInside(attach, frame);
+    const text = prompt.textRect();
+    try std.testing.expect(text.x >= attach.x + attach.w);
+    try std.testing.expect(text.x > text_without_attach.x);
+    const center: draw.Vec2 = .{ .x = attach.x + attach.w * 0.5, .y = attach.y + attach.h * 0.5 };
+    try std.testing.expectEqual(@as(?ComposerPromptPart, .attach), prompt.hitTest(center));
+
+    var probe: ComposerProbe = .{};
+    prompt.setCallbacks(.{ .context = &probe, .on_event = probeComposerEvent });
+    try std.testing.expect(try prompt.handleInput(std.testing.allocator, .{ .mouse_down = center }));
+    try std.testing.expect(!prompt.focused);
+    try std.testing.expectEqual(@as(usize, 1), probe.attach_clicked);
+
+    // Stacked: the button stays at the leading edge, level with the toolbar.
+    try setTestRepeated(&prompt, 'x', 200);
+    prompt.setBounds(.{ .x = 0, .y = 0, .w = 600, .h = prompt.preferredHeight(600, false, 1, 10) });
+    try std.testing.expect(!prompt.inlineActive());
+    const stacked = prompt.attachRect();
+    const toolbar = prompt.toolbarRect();
+    try std.testing.expectEqual(attach.x, stacked.x);
+    try std.testing.expect(toolbar.x >= stacked.x + stacked.w);
+    try std.testing.expect(stacked.y >= toolbar.y and stacked.y + stacked.h <= toolbar.y + toolbar.h);
+}
+
+test "composer prompt strip lays branch and access chips after the directory" {
+    var prompt = InlineTestPrompt.init();
+    defer prompt.deinit(std.testing.allocator);
+    try initInlineTestPrompt(&prompt);
+    try prompt.setDirectoryLabel(std.testing.allocator, "verde");
+    try std.testing.expectEqual(@as(f32, 0.0), prompt.branchRect().w);
+    try std.testing.expectEqual(@as(f32, 0.0), prompt.accessChipRect().w);
+
+    try prompt.setBranchLabel(std.testing.allocator, "main");
+    try prompt.setAccessChipLabel(std.testing.allocator, "Full access");
+    prompt.setShowAccessChip(true);
+    const directory = prompt.directoryRect();
+    const branch = prompt.branchRect();
+    const access = prompt.accessChipRect();
+    const runtime = prompt.runtimeRect();
+    try std.testing.expect(branch.w > 0.0 and access.w > 0.0);
+    try std.testing.expect(branch.x >= directory.x + directory.w);
+    try std.testing.expect(access.x >= branch.x + branch.w);
+    try std.testing.expect(runtime.x >= access.x + access.w);
+    try std.testing.expectEqual(directory.y, branch.y);
+    // The branch chip is read-only; the access chip is a click target.
+    try std.testing.expectEqual(@as(?ComposerPromptPart, null), prompt.hitTest(.{ .x = branch.x + 2, .y = branch.y + 2 }));
+    try std.testing.expectEqual(@as(?ComposerPromptPart, .access_chip), prompt.hitTest(.{ .x = access.x + 2, .y = access.y + 2 }));
+
+    // Narrow strips drop the access chip, then the branch chip, before the
+    // directory chip yields.
+    prompt.setBounds(.{ .x = 0, .y = 0, .w = 200, .h = prompt.preferredHeight(200, false, 1, 10) });
+    try std.testing.expectEqual(@as(f32, 0.0), prompt.accessChipRect().w);
+    const narrow_directory = prompt.directoryRect();
+    try std.testing.expect(narrow_directory.w > 0.0);
+    const strip = prompt.directoryStripRect();
+    try std.testing.expect(prompt.runtimeRect().x + prompt.runtimeRect().w <= strip.x + strip.w + 0.5);
+
+    // Preview labels override the live ones; an empty branch hides the chip.
+    prompt.setBounds(.{ .x = 0, .y = 0, .w = 600, .h = prompt.preferredHeight(600, false, 1, 10) });
+    const preview = prompt.previewGeometry(prompt.bounds(), .{ .branch = "" });
+    try std.testing.expectEqual(@as(f32, 0.0), preview.branch.w);
+    try std.testing.expect(preview.access_chip.w > 0.0);
 }

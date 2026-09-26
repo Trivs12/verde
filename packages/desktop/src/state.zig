@@ -2297,9 +2297,71 @@ pub const PALETTE_COMPOSER_TOOLBAR_FONT_SIZE: f32 = 16.0;
 pub const PALETTE_COMPOSER_STRIP_FONT_SIZE: f32 = 13.0;
 const PALETTE_COMPOSER_ICON_FONT_SIZE: f32 = 18.0;
 const PALETTE_COMPOSER_TEXT_ADVANCE_SCALE: f32 = 1.0;
+/// Design px to composer UI units: the design's 15px body text is the
+/// composer's 18-unit text (`PALETTE_COMPOSER_FONT_SIZE`), so 1 px = 1.2.
+pub const COMPOSER_DESIGN_SCALE: f32 = PALETTE_COMPOSER_FONT_SIZE / 15.0;
+/// The design's 38px "+" circle and its 8px gap to the prompt text. The
+/// composer clamps the circle to `toolbar_height`, so in the slim bar it
+/// matches the round stop button instead of filling the bar edge to edge.
+const COMPOSER_ATTACH_DESIGN_PX: f32 = 38.0;
+const COMPOSER_ATTACH_GAP_DESIGN_PX: f32 = 8.0;
 
 fn paletteColor(color: [4]f32) palette.Color {
     return .{ .r = color[0], .g = color[1], .b = color[2], .a = color[3] };
+}
+
+/// SDL3 file dialog entry points; zsdl does not wrap them.
+const SDL_DialogFileFilter = extern struct {
+    name: [*:0]const u8,
+    pattern: [*:0]const u8,
+};
+const SDL_DialogFileCallback = *const fn (userdata: ?*anyopaque, filelist: ?[*]const ?[*:0]const u8, filter: c_int) callconv(.c) void;
+extern fn SDL_ShowOpenFileDialog(
+    callback: SDL_DialogFileCallback,
+    userdata: ?*anyopaque,
+    window: ?*sdl.Window,
+    filters: [*]const SDL_DialogFileFilter,
+    nfilters: c_int,
+    default_location: ?[*:0]const u8,
+    allow_many: bool,
+) void;
+extern fn SDL_GetKeyboardFocus() ?*sdl.Window;
+
+/// Image types the composer can send; mirrors `composerAttachImageMime`.
+const COMPOSER_ATTACH_DIALOG_FILTERS = [_]SDL_DialogFileFilter{
+    .{ .name = "Images", .pattern = "png;jpg;jpeg;gif;webp;bmp" },
+};
+
+/// SDL dialog callback; may run off the main thread, so it only queues the
+/// picked paths for `pollComposerAttachDialog` and wakes the frame loop. A
+/// null list is an error, an empty list a cancel.
+fn composerAttachDialogCallback(userdata: ?*anyopaque, filelist: ?[*]const ?[*:0]const u8, _: c_int) callconv(.c) void {
+    const inbox: *composer_controller.AttachInbox = @ptrCast(@alignCast(userdata orelse return));
+    defer loop_wakeup.notify();
+    const list = filelist orelse {
+        inbox.markFailed();
+        return;
+    };
+    var index: usize = 0;
+    while (list[index]) |path| : (index += 1) inbox.push(std.mem.span(path));
+}
+
+/// Image MIME type from a picked file's extension; null for anything the
+/// providers cannot take as an image.
+fn composerAttachImageMime(path: []const u8) ?[]const u8 {
+    const ext = std.fs.path.extension(path);
+    const table = [_]struct { ext: []const u8, mime: []const u8 }{
+        .{ .ext = ".png", .mime = "image/png" },
+        .{ .ext = ".jpg", .mime = "image/jpeg" },
+        .{ .ext = ".jpeg", .mime = "image/jpeg" },
+        .{ .ext = ".gif", .mime = "image/gif" },
+        .{ .ext = ".webp", .mime = "image/webp" },
+        .{ .ext = ".bmp", .mime = "image/bmp" },
+    };
+    for (table) |entry| {
+        if (std.ascii.eqlIgnoreCase(ext, entry.ext)) return entry.mime;
+    }
+    return null;
 }
 
 fn paletteComposerStyle() PaletteComposerPrompt.Style {
@@ -2397,6 +2459,9 @@ pub const PaletteComposerPrompt = palette.composerPrompt(.{
     .strip_icon_reserve = 14.0,
     .strip_icon_gap = 5.0,
     .strip_chevron = false,
+    // Leading "+" attach button (host-drawn in `attachRect`).
+    .attach_size = COMPOSER_ATTACH_DESIGN_PX * COMPOSER_DESIGN_SCALE,
+    .attach_gap = COMPOSER_ATTACH_GAP_DESIGN_PX * COMPOSER_DESIGN_SCALE,
     .pill_padding_x = 13.0,
     // `pill_overlay_icon_reserve + pill_icon_gap` must clear the host-drawn
     // toolbar icon AND leave breathing room at 1× display scale. Provider
@@ -2877,6 +2942,8 @@ fn paletteComposerPromptEvent(context: ?*anyopaque, event: palette.ComposerPromp
         // hit-rect path) still open the host popovers.
         .directory_clicked => state.openPaletteDirectoryPicker(),
         .runtime_clicked => state.openPaletteRuntimePicker(),
+        .access_chip_clicked => state.toggleComposerSettingsMenuFromShortcut(.access),
+        .attach_clicked => state.openComposerAttachDialog(),
         .model_clicked => state.toggleComposerSettingsMenu(),
         .reasoning_clicked => state.toggleRunConfigPopover(),
     }
@@ -9764,6 +9831,84 @@ pub const AppState = struct {
         };
     }
 
+    /// Git branch of the current thread's working directory for the
+    /// composer strip, or empty when it is not a repository. Remote runtimes
+    /// run elsewhere, so the local checkout says nothing about them.
+    pub fn currentComposerBranchLabel(self: *AppState) []const u8 {
+        const route = self.currentThread().selectedRuntimeRoute();
+        if (!std.mem.eql(u8, route.profile_id, chat_types.LOCAL_RUNTIME_PROFILE_ID)) return "";
+        return self.composer_controller.git_branches.branchFor(self.currentThreadEffectiveCwd(), unixTimestampMs());
+    }
+
+    /// Opens the native image picker behind the composer's "+" button.
+    /// Picks arrive through `composerAttachDialogCallback` and are attached
+    /// by `pollComposerAttachDialog`.
+    pub fn openComposerAttachDialog(self: *AppState) void {
+        if (self.project_controller.projects.items.len == 0) return;
+        if (self.paletteComposerEditBlockedByAcceptance()) return;
+        // Parenting to the focused window makes the dialog a sheet on macOS.
+        SDL_ShowOpenFileDialog(
+            composerAttachDialogCallback,
+            &self.composer_controller.attach_inbox,
+            SDL_GetKeyboardFocus(),
+            &COMPOSER_ATTACH_DIALOG_FILTERS,
+            COMPOSER_ATTACH_DIALOG_FILTERS.len,
+            null,
+            true,
+        );
+        self.noteInteraction();
+    }
+
+    /// Attaches images picked in the "+" dialog to the current draft.
+    fn pollComposerAttachDialog(self: *AppState) void {
+        var paths: std.ArrayList([]u8) = .empty;
+        const failed = self.composer_controller.attach_inbox.take(&paths);
+        defer {
+            for (paths.items) |path| std.heap.page_allocator.free(path);
+            paths.deinit(std.heap.page_allocator);
+        }
+        if (failed) self.setSidebarNotice("Image picker unavailable.");
+        if (paths.items.len == 0 or self.project_controller.projects.items.len == 0) return;
+        var attached: usize = 0;
+        for (paths.items) |path| {
+            if (self.attachImageFileToCurrentDraft(path)) attached += 1;
+        }
+        if (attached > 0) {
+            self.setSidebarNotice(if (attached == 1) "Image attached." else "Images attached.");
+            self.requestComposerFocus();
+        }
+    }
+
+    // Copies one picked image into Verde storage (the draft must survive the
+    // original moving) and adds it to the current draft.
+    fn attachImageFileToCurrentDraft(self: *AppState, path: []const u8) bool {
+        const mime = composerAttachImageMime(path) orelse {
+            self.setSidebarNotice("Unsupported image type.");
+            return false;
+        };
+        var threaded = std.Io.Threaded.init_single_threaded;
+        const bytes = std.Io.Dir.cwd().readFileAlloc(threaded.io(), path, self.allocator, .limited(utils.CLIPBOARD_IMAGE_MAX_BYTES)) catch |err| {
+            log.warn("failed to read picked image: {s}", .{@errorName(err)});
+            self.setSidebarNotice(if (err == error.StreamTooLong) "Image is larger than 10 MB." else "Could not read the image.");
+            return false;
+        };
+        defer self.allocator.free(bytes);
+        const stored = self.writeImageBytesToStorage("attached-images", "attached", utils.extensionForImageMime(mime), bytes) catch |err| {
+            log.err("failed to persist picked image: {s}", .{@errorName(err)});
+            self.setSidebarNotice("Failed to save the image.");
+            return false;
+        };
+        defer self.allocator.free(stored);
+        const thread = self.currentThreadMutable();
+        thread.addDraftImage(self.allocator, stored, mime, bytes.len) catch |err| {
+            log.err("failed to attach picked image: {s}", .{@errorName(err)});
+            self.setSidebarNotice("Failed to attach the image.");
+            return false;
+        };
+        self.noteThreadDraftMutation(thread);
+        return true;
+    }
+
     pub fn slashCommandPickerActive(self: *AppState) bool {
         if (self.project_controller.projects.items.len == 0) return false;
         if (slashCommandPrefix(self.currentDraft()) == null) return false;
@@ -12391,6 +12536,8 @@ pub const AppState = struct {
         self.composer_controller.toolbar_reasoning_rect = self.composer_controller.composer.reasoningRect();
         self.composer_controller.toolbar_fast_rect = self.composer_controller.composer.fastRect();
         self.composer_controller.toolbar_access_rect = self.composer_controller.composer.accessRect();
+        self.composer_controller.toolbar_access_chip_rect = self.composer_controller.composer.accessChipRect();
+        self.composer_controller.toolbar_attach_rect = self.composer_controller.composer.attachRect();
         self.composer_controller.toolbar_overlay_valid = true;
     }
 
@@ -12431,6 +12578,15 @@ pub const AppState = struct {
         // current thread route. A workspace-level preference may seed future
         // drafts; it never overrides an individual thread selection here.
         self.composer_controller.composer.setShowRuntimeToggle(show_directory);
+        self.composer_controller.composer.setShowAttach(true);
+        // Branch and access chips follow the directory chip on the strip.
+        self.composer_controller.composer.setShowAccessChip(show_directory);
+        self.composer_controller.composer.setBranchLabel(self.allocator, if (show_directory) self.currentComposerBranchLabel() else "") catch |err| {
+            log.warn("failed to sync palette composer branch label: {s}", .{@errorName(err)});
+        };
+        self.composer_controller.composer.setAccessChipLabel(self.allocator, self.currentComposerAccessLabel()) catch |err| {
+            log.warn("failed to sync palette composer access label: {s}", .{@errorName(err)});
+        };
         if (show_directory) {
             const directory_label = self.directoryPillLabel(self.currentThreadEffectiveCwd());
             self.composer_controller.composer.setDirectoryLabel(self.allocator, directory_label) catch |err| {
@@ -14228,6 +14384,14 @@ pub const AppState = struct {
             self.openPaletteRuntimePicker();
             return true;
         }
+        if (self.composer_controller.toolbar_access_chip_rect.w > 0.0 and self.composer_controller.toolbar_access_chip_rect.contains(point)) {
+            self.toggleComposerSettingsMenuFromShortcut(.access);
+            return true;
+        }
+        if (self.composer_controller.toolbar_attach_rect.w > 0.0 and self.composer_controller.toolbar_attach_rect.contains(point)) {
+            self.openComposerAttachDialog();
+            return true;
+        }
         if (self.composer_controller.toolbar_model_rect.contains(point)) {
             self.toggleComposerSettingsMenu();
             return true;
@@ -15161,6 +15325,7 @@ pub const AppState = struct {
     }
 
     pub fn pollPicker(self: *AppState) void {
+        self.pollComposerAttachDialog();
         var picked_path: ?[]u8 = null;
         var next_status: PickerStatus = .idle;
 

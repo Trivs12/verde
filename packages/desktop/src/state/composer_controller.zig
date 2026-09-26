@@ -1,9 +1,11 @@
 //! Composer widget, focus, picker, attachment-hit, run-config, and model &
-//! settings menu state.
+//! settings menu state, plus the strip's git branch cache and the attach
+//! dialog inbox.
 
 const std = @import("std");
 const palette = @import("palette");
 const provider_models = @import("provider_models.zig");
+const state_sync = @import("sync.zig");
 
 const Provider = provider_models.Provider;
 
@@ -260,6 +262,158 @@ pub fn layoutSettingsMenu(anchor: palette.Rect, bounds: palette.Rect, kinds: []c
     return layout;
 }
 
+/// How long a cached branch name is trusted before `.git/HEAD` is read
+/// again, so checkouts made elsewhere show up without per-frame file IO.
+pub const GIT_BRANCH_CACHE_TTL_MS: i64 = 4000;
+const GIT_BRANCH_CACHE_ENTRIES = 4;
+const GIT_BRANCH_MAX_BYTES = 128;
+/// Parent directories searched for `.git`; bounds pathological depths.
+const GIT_BRANCH_MAX_DEPTH = 64;
+
+/// Branch names for the composer strip keyed by working directory. A few
+/// entries let unfocused split panes with different directories share the
+/// cache without re-reading each other's HEAD every frame.
+pub const GitBranchCache = struct {
+    entries: [GIT_BRANCH_CACHE_ENTRIES]Entry = [_]Entry{.{}} ** GIT_BRANCH_CACHE_ENTRIES,
+
+    const Entry = struct {
+        cwd: [std.fs.max_path_bytes]u8 = undefined,
+        cwd_len: usize = 0,
+        branch: [GIT_BRANCH_MAX_BYTES]u8 = undefined,
+        branch_len: usize = 0,
+        checked_ms: i64 = 0,
+        used: bool = false,
+    };
+
+    /// Branch checked out for `cwd` (short commit when detached), or empty
+    /// when `cwd` is not inside a git repository. Reads HEAD at most once
+    /// per `GIT_BRANCH_CACHE_TTL_MS` per directory.
+    pub fn branchFor(self: *GitBranchCache, cwd: []const u8, now_ms: i64) []const u8 {
+        if (cwd.len == 0 or cwd.len > std.fs.max_path_bytes) return "";
+        var slot: *Entry = &self.entries[0];
+        for (&self.entries) |*entry| {
+            if (entry.used and std.mem.eql(u8, entry.cwd[0..entry.cwd_len], cwd)) {
+                if (now_ms - entry.checked_ms < GIT_BRANCH_CACHE_TTL_MS) return entry.branch[0..entry.branch_len];
+                slot = entry;
+                break;
+            }
+            // Otherwise replace an unused entry, else the stalest one.
+            if (!entry.used or (slot.used and entry.checked_ms < slot.checked_ms)) slot = entry;
+        }
+        @memcpy(slot.cwd[0..cwd.len], cwd);
+        slot.cwd_len = cwd.len;
+        slot.used = true;
+        slot.checked_ms = now_ms;
+        const branch = readGitBranch(cwd, &slot.branch) orelse "";
+        slot.branch_len = branch.len;
+        return slot.branch[0..slot.branch_len];
+    }
+};
+
+/// Resolves the branch for `cwd` by walking up to the nearest `.git`, which
+/// is a directory in a normal checkout and a `gitdir:` pointer file in
+/// worktrees and submodules. Writes the name into `out`.
+fn readGitBranch(cwd: []const u8, out: *[GIT_BRANCH_MAX_BYTES]u8) ?[]const u8 {
+    if (!std.fs.path.isAbsolute(cwd)) return null;
+    var threaded = std.Io.Threaded.init_single_threaded;
+    const io = threaded.io();
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var file_buf: [std.fs.max_path_bytes + 16]u8 = undefined;
+    var dir: []const u8 = cwd;
+    var depth: usize = 0;
+    while (depth < GIT_BRANCH_MAX_DEPTH) : (depth += 1) {
+        const head_path = std.fmt.bufPrint(&path_buf, "{s}/.git/HEAD", .{std.mem.trimEnd(u8, dir, "/")}) catch return null;
+        if (std.Io.Dir.cwd().readFile(io, head_path, &file_buf)) |head| {
+            return copyBranch(parseHeadBranch(head) orelse return null, out);
+        } else |_| {}
+        const dot_git = head_path[0 .. head_path.len - "/HEAD".len];
+        if (std.Io.Dir.cwd().readFile(io, dot_git, &file_buf)) |pointer| {
+            const gitdir = parseGitdirPointer(pointer) orelse return null;
+            var gitdir_buf: [std.fs.max_path_bytes]u8 = undefined;
+            const resolved = if (std.fs.path.isAbsolute(gitdir))
+                std.fmt.bufPrint(&gitdir_buf, "{s}/HEAD", .{gitdir}) catch return null
+            else
+                std.fmt.bufPrint(&gitdir_buf, "{s}/{s}/HEAD", .{ std.mem.trimEnd(u8, dir, "/"), gitdir }) catch return null;
+            const head = std.Io.Dir.cwd().readFile(io, resolved, &file_buf) catch return null;
+            return copyBranch(parseHeadBranch(head) orelse return null, out);
+        } else |_| {}
+        dir = std.fs.path.dirname(dir) orelse return null;
+    }
+    return null;
+}
+
+fn copyBranch(branch: []const u8, out: *[GIT_BRANCH_MAX_BYTES]u8) []const u8 {
+    const len = @min(branch.len, out.len);
+    @memcpy(out[0..len], branch[0..len]);
+    return out[0..len];
+}
+
+/// Branch name from a HEAD file: the ref after `refs/heads/`, or the short
+/// commit id for a detached HEAD.
+pub fn parseHeadBranch(content: []const u8) ?[]const u8 {
+    const head = std.mem.trim(u8, content, &std.ascii.whitespace);
+    if (std.mem.startsWith(u8, head, "ref:")) {
+        const ref = std.mem.trim(u8, head["ref:".len..], &std.ascii.whitespace);
+        const name = if (std.mem.startsWith(u8, ref, "refs/heads/")) ref["refs/heads/".len..] else ref;
+        return if (name.len > 0) name else null;
+    }
+    if (head.len < 7) return null;
+    for (head) |byte| {
+        if (!std.ascii.isHex(byte)) return null;
+    }
+    return head[0..7];
+}
+
+/// Target of a `.git` pointer file (`gitdir: <path>`).
+pub fn parseGitdirPointer(content: []const u8) ?[]const u8 {
+    const line = std.mem.trim(u8, content, &std.ascii.whitespace);
+    if (!std.mem.startsWith(u8, line, "gitdir:")) return null;
+    const target = std.mem.trim(u8, line["gitdir:".len..], &std.ascii.whitespace);
+    return if (target.len > 0) target else null;
+}
+
+/// Paths picked in the attach dialog, handed from SDL's dialog callback
+/// (which may run off the main thread) to the frame loop.
+pub const AttachInbox = struct {
+    mutex: state_sync.Mutex = .{},
+    /// Owned by `std.heap.page_allocator` so the callback thread never
+    /// touches the app allocator.
+    paths: std.ArrayList([]u8) = .empty,
+    failed: bool = false,
+
+    pub fn push(self: *AttachInbox, path: []const u8) void {
+        const owned = std.heap.page_allocator.dupe(u8, path) catch {
+            self.markFailed();
+            return;
+        };
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        self.paths.append(std.heap.page_allocator, owned) catch {
+            std.heap.page_allocator.free(owned);
+            self.failed = true;
+        };
+    }
+
+    pub fn markFailed(self: *AttachInbox) void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        self.failed = true;
+    }
+
+    /// Moves the pending paths into `out` (caller frees each with
+    /// `std.heap.page_allocator` and deinits the list) and reports whether
+    /// the dialog failed since the last take.
+    pub fn take(self: *AttachInbox, out: *std.ArrayList([]u8)) bool {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        out.* = self.paths;
+        self.paths = .empty;
+        const failed = self.failed;
+        self.failed = false;
+        return failed;
+    }
+};
+
 pub fn State(
     comptime ComposerPrompt: type,
     comptime ModelPicker: type,
@@ -300,6 +454,12 @@ pub fn State(
         toolbar_reasoning_rect: palette.Rect = .{ .x = 0, .y = 0, .w = 0, .h = 0 },
         toolbar_fast_rect: palette.Rect = .{ .x = 0, .y = 0, .w = 0, .h = 0 },
         toolbar_access_rect: palette.Rect = .{ .x = 0, .y = 0, .w = 0, .h = 0 },
+        toolbar_access_chip_rect: palette.Rect = .{ .x = 0, .y = 0, .w = 0, .h = 0 },
+        toolbar_attach_rect: palette.Rect = .{ .x = 0, .y = 0, .w = 0, .h = 0 },
+        /// Strip branch chip labels per working directory.
+        git_branches: GitBranchCache = .{},
+        /// Results of the "+" button's image dialog; drained by `pollPicker`.
+        attach_inbox: AttachInbox = .{},
         composer: ComposerPrompt,
         model_picker: ModelPicker,
         model_picker_entries: std.ArrayList(ModelPickerEntry) = .empty,
@@ -360,6 +520,17 @@ pub fn restoreComposerFocus(self: anytype) void {
     self.terminal_controller.focused = false;
     self.unfocusBrowserPane();
     self.browser_controller.address_focused = false;
+}
+
+test "git HEAD parsing handles branches, detached commits and worktree pointers" {
+    try std.testing.expectEqualStrings("main", parseHeadBranch("ref: refs/heads/main\n").?);
+    try std.testing.expectEqualStrings("rd/composer", parseHeadBranch("ref: refs/heads/rd/composer").?);
+    try std.testing.expectEqualStrings("f5bbf52", parseHeadBranch("f5bbf522c0ffee00112233445566778899aabbcc\n").?);
+    try std.testing.expectEqual(@as(?[]const u8, null), parseHeadBranch("ref: "));
+    try std.testing.expectEqual(@as(?[]const u8, null), parseHeadBranch("not a head"));
+    try std.testing.expectEqualStrings("/repo/.git/worktrees/wt", parseGitdirPointer("gitdir: /repo/.git/worktrees/wt\n").?);
+    try std.testing.expectEqualStrings("../.git/modules/sub", parseGitdirPointer("gitdir: ../.git/modules/sub").?);
+    try std.testing.expectEqual(@as(?[]const u8, null), parseGitdirPointer("[core]"));
 }
 
 test "settings rows follow provider capabilities" {
