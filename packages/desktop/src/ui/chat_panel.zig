@@ -9353,7 +9353,8 @@ fn renderInactiveComposer(state: *app_state.AppState, rect: palette.Rect) void {
     queuePanel(
         state,
         layout.frame,
-        paletteColor(theme.withAlpha(theme.COLOR_PANEL_ALT, 248)),
+        // Matches the live composer pill's panel fill.
+        paletteColor(theme.COLOR_PANEL),
         paletteColor(theme.COLOR_PANEL_MUTED),
         layout.corner_radius,
         @max(theme.scaledUi(1.0), 1.0),

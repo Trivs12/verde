@@ -2366,7 +2366,9 @@ fn composerAttachImageMime(path: []const u8) ?[]const u8 {
 
 fn paletteComposerStyle() PaletteComposerPrompt.Style {
     return .{
-        .background_color = paletteColor(theme.withAlpha(theme.COLOR_PANEL_ALT, 248)),
+        // The prompt pill reads as a white (panel) field over the chat
+        // background; its resting border keeps it separated.
+        .background_color = paletteColor(theme.COLOR_PANEL),
         .border_color = paletteColor(theme.restingEdge()),
         .focus_border_color = paletteColor(theme.focusRing()),
         .focus_border_width = 1.0,
@@ -2500,7 +2502,7 @@ pub const PaletteComposerPrompt = palette.composerPrompt(.{
     .border_width = 1.0,
     // These comptime values are only the pre-first-frame fallback. The
     // component receives the active palette through `setStyle` every frame.
-    .background_color = paletteColor(theme.withAlpha(theme.default_colors.panel_alt, 248)),
+    .background_color = paletteColor(theme.default_colors.panel),
     .border_color = paletteColor(theme.default_colors.panel_muted),
     .focus_border_color = paletteColor(theme.mix(theme.default_colors.background, theme.default_colors.text, 0.30)),
     .focus_border_width = 1.0,
