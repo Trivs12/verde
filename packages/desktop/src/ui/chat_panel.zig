@@ -5913,7 +5913,8 @@ fn userBubbleMaxWidth(column_w: f32) f32 {
 fn transcriptBodyWrapWidth(role: app_state.ChatRole, column_w: f32) f32 {
     return switch (role) {
         .user => @max(userBubbleMaxWidth(column_w) - designUi(USER_BUBBLE_PAD_X_CSS) * 2.0, theme.scaledUi(80.0)),
-        .assistant, .system => @max(column_w - theme.scaledUi(28.0), theme.scaledUi(80.0)),
+        .system => @max(column_w - systemNoticeTextInset() - theme.scaledUi(14.0), theme.scaledUi(80.0)),
+        .assistant => @max(column_w - theme.scaledUi(28.0), theme.scaledUi(80.0)),
     };
 }
 
@@ -5921,7 +5922,8 @@ fn transcriptBodyWrapWidth(role: app_state.ChatRole, column_w: f32) f32 {
 fn transcriptPlainRowChrome(role: app_state.ChatRole, labeled: bool) f32 {
     return switch (role) {
         .user => designUi(USER_BUBBLE_PAD_Y_CSS) * 2.0,
-        .assistant, .system => theme.scaledUi(46.0) - transcriptLabelRowCut(labeled),
+        .system => systemNoticeBodyTop() + designUi(SYSTEM_NOTICE_BOTTOM_PAD_CSS),
+        .assistant => theme.scaledUi(46.0) - transcriptLabelRowCut(labeled),
     };
 }
 
@@ -5958,6 +5960,55 @@ fn userBubbleWidth(column_w: f32, body: []const u8) f32 {
     return @min(max_w, natural + pad_x * 2.0 + designUi(USER_BUBBLE_FIT_SLACK_CSS));
 }
 
+/// System notices ("System", "Handoff prepared", "Send failed", ...) read as
+/// quiet lines: a small Lucide icon, a medium-weight small title, and the
+/// body in the muted colour below it. No fill or border. Design px.
+const SYSTEM_NOTICE_ICON_CSS: f32 = 14.0;
+/// Icon column: icon plus gap before the title/body text.
+const SYSTEM_NOTICE_INDENT_CSS: f32 = 22.0;
+const SYSTEM_NOTICE_TOP_PAD_CSS: f32 = 4.0;
+const SYSTEM_NOTICE_TITLE_H_CSS: f32 = 20.0;
+const SYSTEM_NOTICE_TITLE_FONT_CSS: f32 = 13.0;
+const SYSTEM_NOTICE_BODY_GAP_CSS: f32 = 2.0;
+const SYSTEM_NOTICE_BOTTOM_PAD_CSS: f32 = 4.0;
+const LU_INFO = "\u{E0F9}";
+const LU_ALERT_CIRCLE = "\u{E077}";
+const LU_ARROW_RIGHT_LEFT = "\u{E417}";
+
+/// Transcript category for generic system notices; picks the icon and accent.
+const SystemNoticeTone = enum { info, failure, handoff };
+
+fn systemNoticeTone(author_raw: []const u8, body_raw: []const u8) SystemNoticeTone {
+    const author = std.mem.trim(u8, author_raw, "\n\r\t ");
+    if (std.ascii.startsWithIgnoreCase(author, "handoff")) return .handoff;
+    inline for (.{ "fail", "error", "denied", "rejected" }) |needle| {
+        if (std.ascii.indexOfIgnoreCase(author, needle) != null) return .failure;
+    }
+    const body = std.mem.trimStart(u8, body_raw, "\n\r\t ");
+    if (std.ascii.startsWithIgnoreCase(body, "error")) return .failure;
+    return .info;
+}
+
+test "system notice tone categorises handoff, failure and plain notices" {
+    try std.testing.expectEqual(SystemNoticeTone.handoff, systemNoticeTone("Handoff prepared", "Source pane 11 handed off"));
+    try std.testing.expectEqual(SystemNoticeTone.handoff, systemNoticeTone("Handoff source", ""));
+    try std.testing.expectEqual(SystemNoticeTone.failure, systemNoticeTone("Send failed", "timeout"));
+    try std.testing.expectEqual(SystemNoticeTone.failure, systemNoticeTone("Agent error", ""));
+    try std.testing.expectEqual(SystemNoticeTone.failure, systemNoticeTone("System", "Error: stream closed"));
+    try std.testing.expectEqual(SystemNoticeTone.info, systemNoticeTone("System", "stop_sequence"));
+    try std.testing.expectEqual(SystemNoticeTone.info, systemNoticeTone("Notice", "Connection restored"));
+}
+
+fn systemNoticeBodyTop() f32 {
+    return designUi(SYSTEM_NOTICE_TOP_PAD_CSS + SYSTEM_NOTICE_TITLE_H_CSS + SYSTEM_NOTICE_BODY_GAP_CSS);
+}
+
+/// Left edge of notice text relative to the column: aligned with reply
+/// text, after the icon column.
+fn systemNoticeTextInset() f32 {
+    return theme.scaledUi(14.0) + designUi(SYSTEM_NOTICE_INDENT_CSS);
+}
+
 const TranscriptRowBox = struct {
     /// Row surface; only the user bubble is filled.
     bubble: palette.Rect,
@@ -5981,7 +6032,17 @@ fn transcriptRowBox(role: app_state.ChatRole, labeled: bool, column: palette.Rec
                 .h = @max(height - pad_y * 2.0, theme.scaledUi(1.0)),
             } };
         },
-        .assistant, .system => {
+        .system => {
+            const inset = systemNoticeTextInset();
+            const top = systemNoticeBodyTop();
+            return .{ .bubble = .{ .x = column.x, .y = y, .w = column.w, .h = height }, .body = .{
+                .x = column.x + inset,
+                .y = y + top,
+                .w = transcriptBodyWrapWidth(.system, column.w),
+                .h = @max(height - top, theme.scaledUi(1.0)),
+            } };
+        },
+        .assistant => {
             const label_cut = transcriptLabelRowCut(labeled);
             return .{ .bubble = .{ .x = column.x, .y = y, .w = column.w, .h = height }, .body = .{
                 .x = column.x + theme.scaledUi(14.0),
@@ -8770,11 +8831,14 @@ fn renderTranscriptBubbleFromParts(
         return;
     }
     const box = transcriptRowBox(role, role_label != null, column, y, height, body_raw);
+    if (role == .system) {
+        renderSystemNotice(state, column, box, role_label orelse "System", body_raw, clip, message_index, streaming);
+        return;
+    }
     const bubble = snapRect(box.bubble);
     // Replies render directly on the pane background with no card; the
     // user's own turns sit in a soft neutral bubble. Live state is carried by
     // the pulsing dot beside the role label, not by the bubble edge.
-    const rr = transcriptBubbleCornerRadius();
     const activity = if (active) theme.activityPulse(profiler.nowNs()) else 0.0;
     switch (role) {
         .user => {
@@ -8782,8 +8846,7 @@ fn renderTranscriptBubbleFromParts(
             fill.h = @max(fill.h - transcriptImageBlockHeightFor(.user, image_count, column.w), theme.scaledUi(1.0));
             queueRoundedClipped(state, fill, paletteColor(theme.userBubble()), designUi(USER_BUBBLE_RADIUS_CSS), clip);
         },
-        .assistant => {},
-        .system => queueRoundedShellClipped(state, bubble, paletteColor(theme.wash(theme.COLOR_YELLOW, 54)), paletteColor(theme.restingEdge()), rr, clip),
+        .assistant, .system => {},
     }
 
     var label_x = bubble.x + theme.scaledUi(14.0);
@@ -8831,6 +8894,49 @@ fn renderTranscriptBubbleFromParts(
         );
     }
     if (active) renderStreamCaret(state, last_body_tail, clip);
+}
+
+// System notice region: icon + medium title on one line, muted body below.
+fn renderSystemNotice(
+    state: *app_state.AppState,
+    column: palette.Rect,
+    box: TranscriptRowBox,
+    title: []const u8,
+    body_raw: []const u8,
+    clip: palette.Rect,
+    message_index: usize,
+    streaming: bool,
+) void {
+    const tone = systemNoticeTone(title, body_raw);
+    const icon_size = designUi(SYSTEM_NOTICE_ICON_CSS);
+    const title_y = box.bubble.y + designUi(SYSTEM_NOTICE_TOP_PAD_CSS);
+    const title_h = designUi(SYSTEM_NOTICE_TITLE_H_CSS);
+    const icon_color = switch (tone) {
+        .failure => theme.danger(),
+        .info, .handoff => theme.COLOR_TEXT_SUBTLE,
+    };
+    queueLucideIcon(state, .{
+        .x = column.x + theme.scaledUi(14.0),
+        .y = title_y + (title_h - icon_size) * 0.5,
+        .w = icon_size,
+        .h = icon_size,
+    }, switch (tone) {
+        .info => LU_INFO,
+        .failure => LU_ALERT_CIRCLE,
+        .handoff => LU_ARROW_RIGHT_LEFT,
+    }, paletteColor(icon_color), icon_size, clip);
+    const text_x = column.x + systemNoticeTextInset();
+    const title_w = @max(column.x + column.w - theme.scaledUi(14.0) - text_x, theme.scaledUi(20.0));
+    const title_font = designUi(SYSTEM_NOTICE_TITLE_FONT_CSS);
+    var title_buf: [256]u8 = undefined;
+    queueRoleLabel(state, .{
+        .x = text_x,
+        .y = title_y,
+        .w = title_w,
+        .h = title_h,
+    }, truncateUiLabel(&title_buf, title, title_w, title_font), paletteColor(theme.COLOR_WHITE), title_font, .ui_medium, clip);
+    last_body_tail = null;
+    renderPlainSelectableBody(state, message_index, box.body, std.mem.trim(u8, body_raw, "\n\r\t "), theme.COLOR_TEXT_MUTED, clip, streaming);
 }
 
 /// End of the last prose line drawn by the most recent body render (fresh
