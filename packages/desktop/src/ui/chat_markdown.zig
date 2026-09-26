@@ -88,6 +88,29 @@ pub const MarkdownMetrics = struct {
     pub const quote_inset_min: f32 = 6.0;
 };
 
+/// Canvas-to-app scale for the code block header's design values. The design
+/// draws body text at 15px where transcript text is 18 UI units, so a design
+/// px is 1.2 UI units. Constants marked `// design px` go through `designUi`.
+const DESIGN_SCALE: f32 = 18.0 / 15.0;
+
+/// Fenced code header strip: fence language on the left, copy on the right.
+const CODE_HEADER_HEIGHT_CSS: f32 = 34.0; // design px
+const CODE_HEADER_LABEL_FONT_CSS: f32 = 12.0; // design px
+const CODE_HEADER_COPY_BUTTON_CSS: f32 = 24.0; // design px
+const CODE_HEADER_COPY_ICON_CSS: f32 = 14.0; // design px
+const CODE_HEADER_COPY_RIGHT_PAD_CSS: f32 = 6.0; // design px
+const CODE_HEADER_COPY_RADIUS_CSS: f32 = 6.0; // design px
+/// Longest fence tag shown verbatim; longer info strings fall back to "code".
+const CODE_HEADER_LABEL_MAX_LEN: usize = 24;
+
+// Lucide (ISC) glyphs drawn through the `icon_alt` role.
+const LU_COPY = "\u{E09E}";
+const LU_CHECK = "\u{E06C}";
+
+fn designUi(px: f32) f32 {
+    return theme.scaledUi(px * DESIGN_SCALE);
+}
+
 pub const RenderOptions = struct {
     base_font_size: f32 = 24.0,
     line_height: ?f32 = null,
@@ -1362,10 +1385,10 @@ fn renderPaletteFencedCodeBlock(context: *PaletteRenderContext, block: FencedCod
         paletteColor(theme.md.code_border),
         codeBlockRounding(options),
     );
-    queueCodeCopyButton(context, block, rect, options);
+    queueCodeBlockHeader(context, block, rect, options);
 
-    if (visibleClipRect(context.clip, rect)) |code_clip| {
-        var y = start[1] + pad_y;
+    if (visibleClipRect(context.clip, codeBlockBodyRect(rect))) |code_clip| {
+        var y = start[1] + codeBlockHeaderHeight() + pad_y;
         for (block.lines) |line| {
             const rows = renderPaletteCodeLine(context, line, .{
                 .x = start[0] + pad_x,
@@ -2450,7 +2473,7 @@ pub fn hitTestSelectablePaletteBody(
                 const tw = @max(block_w - pad_x * 2.0, 1.0);
                 const cw = codeCharWidth(options);
                 const height = codeBlockHeight(code_block, line_height, pad_y, tw, cw);
-                const content_start = .{ start[0] + pad_x, start[1] + pad_y };
+                const content_start = .{ start[0] + pad_x, start[1] + codeBlockHeaderHeight() + pad_y };
 
                 const lines = try buildSelectableCodeLinesWithWrap(allocator, code_block, options, tw);
                 defer deinitSelectableCodeLines(allocator, lines);
@@ -3263,16 +3286,18 @@ fn renderSelectablePaletteCodeBlock(
         paletteColor(theme.md.code_border),
         codeBlockRounding(options),
     );
-    queueCodeCopyButton(context, block, rect, options);
+    queueCodeBlockHeader(context, block, rect, options);
 
     const lines = try buildSelectableCodeLinesWithWrap(allocator, block, options, text_width_sel);
     defer deinitSelectableCodeLines(allocator, lines);
 
-    // Code text clips to the block *and* the transcript viewport; the block
-    // rect alone let scrolled-away lines paint above the pane. Every line
-    // still runs for selection bounds, hover, and copy even when invisible.
-    const code_clip = intersectClipRect(context.clip, rect) orelse rect;
-    const content_start = .{ start[0] + pad_x, start[1] + pad_y };
+    // Code text clips to the block body (below the header strip) *and* the
+    // transcript viewport; the block rect alone let scrolled-away lines paint
+    // above the pane. Every line still runs for selection bounds, hover, and
+    // copy even when invisible.
+    const body_rect = codeBlockBodyRect(rect);
+    const code_clip = intersectClipRect(context.clip, body_rect) orelse body_rect;
+    const content_start = .{ start[0] + pad_x, start[1] + codeBlockHeaderHeight() + pad_y };
     for (lines, 0..) |line, index| {
         renderSelectableCodeLine(
             allocator,
@@ -3733,26 +3758,70 @@ fn codeCopySourceIdentity(block: FencedCodeView) u64 {
     return hasher.final();
 }
 
-fn queueCodeCopyButton(
+/// Height of the header strip every fenced code block carries above its code.
+fn codeBlockHeaderHeight() f32 {
+    return designUi(CODE_HEADER_HEIGHT_CSS);
+}
+
+/// Block area below the header strip, where code lines draw.
+fn codeBlockBodyRect(block_rect: palette.Rect) palette.Rect {
+    const header_h = @min(codeBlockHeaderHeight(), block_rect.h);
+    return .{ .x = block_rect.x, .y = block_rect.y + header_h, .w = block_rect.w, .h = block_rect.h - header_h };
+}
+
+/// Header label: the fence's language tag (first info-string word), or
+/// "code" when the fence has none or the tag is unreasonably long.
+fn codeBlockLabel(info: []const u8) []const u8 {
+    const trimmed = std.mem.trim(u8, info, " \t\r\n");
+    const end = std.mem.indexOfAny(u8, trimmed, " \t{") orelse trimmed.len;
+    const tag = trimmed[0..end];
+    if (tag.len == 0 or tag.len > CODE_HEADER_LABEL_MAX_LEN) return "code";
+    return tag;
+}
+
+// Header strip: bottom hairline, fence label on the left, and (when the host
+// records copy hits) a small copy icon button on the right.
+fn queueCodeBlockHeader(
     context: *PaletteRenderContext,
     block: FencedCodeView,
     block_rect: palette.Rect,
     options: RenderOptions,
 ) void {
-    const recorder = context.code_copy_recorder orelse return;
+    const header_h = codeBlockHeaderHeight();
+    const header_rect: palette.Rect = .{ .x = block_rect.x, .y = block_rect.y, .w = block_rect.w, .h = header_h };
+    if (visibleClipRect(context.clip, header_rect) == null) return;
 
+    const inset = @max(theme.scaledUi(1.0), 1.0);
+    const hairline = @max(theme.scaledUi(1.0), 1.0);
+    queuePaletteRect(context, .{
+        .x = block_rect.x + inset,
+        .y = block_rect.y + header_h - hairline,
+        .w = @max(block_rect.w - inset * 2.0, 0.0),
+        .h = hairline,
+    }, paletteColor(theme.md.code_border));
+
+    const cy = block_rect.y + header_h * 0.5;
+    const pad_x = codeBlockPaddingX(options);
+    const button_size = designUi(CODE_HEADER_COPY_BUTTON_CSS);
+    const label_font = designUi(CODE_HEADER_LABEL_FONT_CSS);
+    const label_clip = intersectClipRect(context.clip, header_rect) orelse header_rect;
+    queuePaletteRoleText(context, .{
+        .x = block_rect.x + pad_x,
+        .y = @round(cy - label_font * 0.65),
+        .w = @max(block_rect.w - pad_x * 2.0 - button_size, 1.0),
+        .h = label_font * 1.3,
+    }, codeBlockLabel(block.info), paletteColor(theme.COLOR_TEXT_SUBTLE), label_font, .ui, label_clip);
+
+    const recorder = context.code_copy_recorder orelse return;
     const identity = codeCopySourceIdentity(block);
     const is_recent = recorder.recent_active and recorder.recent_identity == identity;
 
-    // Nerd Font Symbols glyphs: codicon-copy (U+EBCC) and codicon-check (U+EAB2).
-    const glyph: []const u8 = if (is_recent) "\u{eab2}" else "\u{ebcc}";
-    const icon_size = options.base_font_size * 0.95;
-    const pad: f32 = @max(icon_size * 0.30, 5.0);
-    const btn_size = icon_size + pad * 2.0;
-    const margin = @max(codeBlockPaddingY(options) * 0.5, 5.0);
-    const btn_x = block_rect.x + block_rect.w - btn_size - margin;
-    const btn_y = block_rect.y + margin;
-    const btn_rect: palette.Rect = .{ .x = btn_x, .y = btn_y, .w = btn_size, .h = btn_size };
+    const btn_rect: palette.Rect = .{
+        .x = block_rect.x + block_rect.w - designUi(CODE_HEADER_COPY_RIGHT_PAD_CSS) - button_size,
+        .y = cy - button_size * 0.5,
+        .w = button_size,
+        .h = button_size,
+    };
     const visible_btn_rect = visibleClipRect(context.clip, btn_rect) orelse return;
 
     const mx = context.mouse_pos[0];
@@ -3760,26 +3829,25 @@ fn queueCodeCopyButton(
     const hovered = mx >= visible_btn_rect.x and mx <= visible_btn_rect.x + visible_btn_rect.w and
         my >= visible_btn_rect.y and my <= visible_btn_rect.y + visible_btn_rect.h;
 
-    const bg_color = if (is_recent)
-        paletteColor(theme.md.copy_bg_recent)
-    else if (hovered)
-        paletteColor(theme.md.copy_bg_hover)
-    else
-        paletteColor(theme.md.copy_bg_idle);
-    queuePaletteRoundedRect(context, btn_rect, bg_color, @max(icon_size * 0.32, 4.0));
-
+    // Quiet icon button: no fill at rest, a soft tile on hover or while the
+    // "Copied" check shows.
+    if (is_recent or hovered) {
+        const bg_color = if (is_recent) theme.md.copy_bg_recent else theme.md.copy_bg_hover;
+        queuePaletteRoundedRect(context, btn_rect, paletteColor(bg_color), designUi(CODE_HEADER_COPY_RADIUS_CSS));
+    }
     const glyph_color = if (is_recent)
         paletteColor(theme.md.copy_glyph_recent)
     else if (hovered)
         paletteColor(theme.md.copy_glyph_hover)
     else
         paletteColor(theme.md.copy_glyph_idle);
+    const icon_size = designUi(CODE_HEADER_COPY_ICON_CSS);
     queuePaletteRoleText(context, .{
-        .x = btn_x + pad,
-        .y = btn_y + pad - icon_size * 0.05,
+        .x = btn_rect.x + (button_size - icon_size) * 0.5,
+        .y = cy - icon_size * 0.5,
         .w = icon_size,
-        .h = icon_size + icon_size * 0.1,
-    }, glyph, glyph_color, icon_size, .icon, context.clip);
+        .h = icon_size,
+    }, if (is_recent) LU_CHECK else LU_COPY, glyph_color, icon_size, .icon_alt, context.clip);
 
     const payload_start = context.frame_text.items.len;
     for (block.lines, 0..) |line, i| {
@@ -3828,7 +3896,7 @@ fn codeBlockTotalRows(block: FencedCodeView, text_width: f32, char_width: f32) u
 }
 
 fn codeBlockHeight(block: FencedCodeView, line_height: f32, pad_y: f32, text_width: f32, char_width: f32) f32 {
-    return pad_y * 2.0 + line_height * @as(f32, @floatFromInt(codeBlockTotalRows(block, text_width, char_width)));
+    return codeBlockHeaderHeight() + pad_y * 2.0 + line_height * @as(f32, @floatFromInt(codeBlockTotalRows(block, text_width, char_width)));
 }
 
 fn advancePaletteCursor(context: *PaletteRenderContext, height: f32) void {
@@ -4288,6 +4356,85 @@ test "fenced code text stays inside the transcript clip on every render path" {
             try std.testing.expect(clip.y + clip.h <= viewport.y + viewport.h);
         }
         try std.testing.expect(text_commands > 0);
+    }
+}
+
+test "code block header label uses the fence tag or falls back to code" {
+    try std.testing.expectEqualStrings("zig", codeBlockLabel("zig"));
+    try std.testing.expectEqualStrings("json", codeBlockLabel("  json title=config.json"));
+    try std.testing.expectEqualStrings("ts", codeBlockLabel("ts{1,3}"));
+    try std.testing.expectEqualStrings("code", codeBlockLabel(""));
+    try std.testing.expectEqualStrings("code", codeBlockLabel("   "));
+    try std.testing.expectEqualStrings("code", codeBlockLabel("a-very-long-info-string-that-is-not-a-language"));
+}
+
+test "fenced code header strip reserves height and hosts the copy button" {
+    const allocator = std.testing.allocator;
+    var body = try buildBodyView(allocator,
+        \\```zig
+        \\const a = 1;
+        \\```
+    );
+    defer body.deinit(allocator);
+    const options: RenderOptions = .{ .base_font_size = 16.0, .line_height = 22.0 };
+    const width: f32 = 320.0;
+
+    const code = switch (body.blockAt(0)) {
+        .fenced_code => |code| code,
+        else => return error.TestUnexpectedResult,
+    };
+    const measured = measureFencedCodeHeight(code, width, options);
+    const header_h = codeBlockHeaderHeight();
+    try std.testing.expect(header_h > 0.0);
+    try std.testing.expectApproxEqAbs(header_h + codeBlockPaddingY(options) * 2.0 + codeLineHeight(options), measured, 0.001);
+
+    const Hits = struct {
+        rects: [4]palette.Rect = undefined,
+        count: usize = 0,
+        fn push(context: *anyopaque, hit: CodeCopyButtonSink) void {
+            const self: *@This() = @ptrCast(@alignCast(context));
+            if (self.count < self.rects.len) self.rects[self.count] = hit.rect;
+            self.count += 1;
+        }
+    };
+
+    for ([_]bool{ false, true }) |selectable| {
+        var hits: Hits = .{};
+        var batch: palette.RenderBatch = .{};
+        defer batch.deinit(allocator);
+        var frame_text: std.ArrayList(u8) = .empty;
+        defer frame_text.deinit(allocator);
+        var arena = std.heap.ArenaAllocator.init(allocator);
+        defer arena.deinit();
+        var context: PaletteRenderContext = .{
+            .allocator = allocator,
+            .batch = &batch,
+            .frame_text = &frame_text,
+            .text_arena = &arena,
+            .cursor = .{ .x = 0.0, .y = 0.0, .w = width, .h = 600.0 },
+            .available_width = width,
+            .code_copy_recorder = .{ .context = @ptrCast(&hits), .push_fn = Hits.push },
+        };
+        if (selectable) {
+            var output = renderSelectablePaletteBody(&context, allocator, body, options, null, false);
+            output.deinit(allocator);
+        } else {
+            renderPaletteBody(&context, body, options);
+        }
+
+        try std.testing.expectEqual(@as(usize, 1), hits.count);
+        const btn = hits.rects[0];
+        try std.testing.expect(btn.y >= 0.0 and btn.y + btn.h <= header_h);
+        try std.testing.expect(btn.x + btn.w <= width);
+
+        // Code glyphs start below the header strip.
+        var saw_code = false;
+        for (batch.commands.items) |command| {
+            if (command.kind != .text or command.font_role != @as(?palette.FontRole, .code)) continue;
+            saw_code = true;
+            try std.testing.expect(command.rect.y >= header_h);
+        }
+        try std.testing.expect(saw_code);
     }
 }
 

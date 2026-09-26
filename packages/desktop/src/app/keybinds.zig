@@ -287,7 +287,7 @@ pub const NativeKeyboardConfig = struct {
             .refresh = try cloneDefaultKeybinds(allocator),
             .open_default = try cloneDefaultOpenKeybinds(allocator),
             .open_editor = try cloneDefaultOpenEditorKeybinds(allocator),
-            .new_thread = try cloneEmptyKeybinds(allocator),
+            .new_thread = try cloneDefaultNewThreadKeybinds(allocator),
             .command_palette = try cloneDefaultCommandPaletteKeybinds(allocator),
             .settings = try cloneEmptyKeybinds(allocator),
             .companion = try cloneDefaultCompanionKeybinds(allocator),
@@ -1757,6 +1757,16 @@ fn cloneDefaultWorkspaceCloseCurrentKeybinds(allocator: std.mem.Allocator) ![]Ke
     return cloneEmptyKeybinds(allocator);
 }
 
+/// Cmd+N on macOS only. Elsewhere the primary modifier is Ctrl, and app
+/// actions resolve before focused terminals receive keys, so Ctrl+N would
+/// steal readline's next-history (and the composer's file-search Ctrl+N).
+fn cloneDefaultNewThreadKeybinds(allocator: std.mem.Allocator) ![]Keybind {
+    if (builtin.os.tag != .macos) return cloneEmptyKeybinds(allocator);
+    return allocator.dupe(Keybind, &.{
+        try parseDefaultAccelerator("CommandOrControl+N"),
+    });
+}
+
 fn cloneDefaultCommandPaletteKeybinds(allocator: std.mem.Allocator) ![]Keybind {
     return allocator.dupe(Keybind, &.{
         try parseDefaultAccelerator("CommandOrControl+Shift+P"),
@@ -2758,11 +2768,44 @@ test "default browser keybind uses ctrl shift b" {
     try std.testing.expectEqual(sdl.Keycode.b, config.toggle_browser[0].key);
 }
 
-test "direct new thread and terminal pane keybinds are disabled by default" {
+test "default new thread keybind is cmd n on macOS and unbound elsewhere" {
     var config = try NativeKeyboardConfig.load(std.testing.allocator);
     defer config.deinit();
 
+    if (builtin.os.tag == .macos) {
+        try std.testing.expectEqual(@as(usize, 1), config.new_thread.len);
+        try std.testing.expect(config.new_thread[0].primary);
+        try std.testing.expect(!config.new_thread[0].shift);
+        try std.testing.expect(!config.new_thread[0].alt);
+        try std.testing.expectEqual(sdl.Keycode.n, config.new_thread[0].key);
+        const event = testKeyEvent(.n, primaryModBits());
+        try std.testing.expectEqual(@as(?NativeKeyboardAction, .new_thread), config.actionForEvent(&event));
+        // Plain Ctrl+N still reaches terminals and the composer on macOS.
+        const ctrl_n = testKeyEvent(.n, sdl.Keymod.ctrl);
+        try std.testing.expect(config.actionForEvent(&ctrl_n) != @as(?NativeKeyboardAction, .new_thread));
+    } else {
+        // Ctrl+N stays with terminals (readline next-history) off macOS.
+        try std.testing.expectEqual(@as(usize, 0), config.new_thread.len);
+    }
+}
+
+test "new thread default can be disabled by override" {
+    var config = try NativeKeyboardConfig.load(std.testing.allocator);
+    defer config.deinit();
+
+    var parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator,
+        \\{"keybinds": {"new_thread": null}}
+    , .{});
+    defer parsed.deinit();
+
+    config.applyOverrides(parsed.value);
     try std.testing.expectEqual(@as(usize, 0), config.new_thread.len);
+}
+
+test "direct terminal pane and settings keybinds are disabled by default" {
+    var config = try NativeKeyboardConfig.load(std.testing.allocator);
+    defer config.deinit();
+
     try std.testing.expectEqual(@as(usize, 0), config.workspace_split_terminal_horizontal.len);
     try std.testing.expectEqual(@as(usize, 0), config.settings.len);
 }
