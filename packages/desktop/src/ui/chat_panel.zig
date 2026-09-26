@@ -34,6 +34,13 @@ const WORKSPACE_HEADER_CHEVRON_CONTROL_CSS: f32 = 22.0;
 const WORKSPACE_HEADER_CONTROL_GAP_CSS: f32 = 6.0;
 const WORKSPACE_HEADER_CONTROL_RADIUS_CSS: f32 = 5.0;
 const WORKSPACE_HEADER_HOVER_ALPHA: u8 = 16;
+/// Design px → UI units (design body 15px = app 18 units); mirrors
+/// `DESIGN_SCALE` in sidebar.zig.
+const DESIGN_SCALE: f32 = 18.0 / 15.0;
+
+fn designUi(px: f32) f32 {
+    return theme.scaledUi(px * DESIGN_SCALE);
+}
 /// Header title: the design's 14.5px title at the app's type scale (design
 /// px × 18/15; see `DESIGN_SCALE` in sidebar.zig).
 const WORKSPACE_HEADER_TITLE_FONT_CSS: f32 = 17.4;
@@ -6961,6 +6968,133 @@ const DiffLayout = enum {
 };
 
 const DIFF_SPLIT_MIN_WIDTH_CSS: f32 = 620.0;
+/// Diff-card header label: design 13.5px medium (× `DESIGN_SCALE`).
+const DIFF_CARD_HEADER_FONT_CSS: f32 = 13.5;
+/// Diff-card per-file text buttons: design 12px label, 26px tall, 8px sides.
+const DIFF_FILE_ACTION_FONT_CSS: f32 = 12.0;
+const DIFF_FILE_ACTION_HEIGHT_CSS: f32 = 26.0;
+const DIFF_FILE_ACTION_PAD_CSS: f32 = 8.0;
+/// Scratch size for diff-card path labels; longer paths render unshortened.
+const DIFF_PATH_BUF_LEN: usize = 1024;
+
+/// Diff-card path label: relative to the first root that contains `path`
+/// (thread directory, then project root), else with the home directory
+/// abbreviated to `~`. Returns `path` itself when nothing applies.
+fn diffDisplayPath(buf: []u8, path: []const u8, roots: []const []const u8, home: ?[]const u8) []const u8 {
+    for (roots) |root| {
+        if (pathRelativeTo(root, path)) |relative| return relative;
+    }
+    if (home) |home_dir| {
+        if (pathRelativeTo(home_dir, path)) |relative| {
+            return std.fmt.bufPrint(buf, "~/{s}", .{relative}) catch path;
+        }
+    }
+    return path;
+}
+
+/// Portion of `path` below `root`, or null when `path` is not strictly
+/// inside it (a sibling like `/repo-other` does not match `/repo`).
+fn pathRelativeTo(root_raw: []const u8, path: []const u8) ?[]const u8 {
+    const root = std.mem.trimEnd(u8, root_raw, "/");
+    if (root.len == 0) return null;
+    if (path.len <= root.len + 1) return null;
+    if (!std.mem.startsWith(u8, path, root) or path[root.len] != '/') return null;
+    return path[root.len + 1 ..];
+}
+
+/// Ellipsizes `text` at the start with measured `.code` advances so the
+/// tail (the filename) stays visible.
+fn ellipsizeCodeStart(buf: []u8, text: []const u8, max_w: f32, font_size: f32) []const u8 {
+    if (text.len == 0 or max_w <= 0.0) return "";
+    const ellipsis = "\u{2026}";
+    var advances: [1024]f32 = undefined;
+    // Only the tail can survive start-ellipsizing, so very long paths are
+    // measured from a codepoint-aligned tail window.
+    var start: usize = text.len -| advances.len;
+    while (start < text.len and start > 0 and (text[start] & 0xC0) == 0x80) start += 1;
+    const measured = text[start..];
+    text_measure.textGlyphAdvances(.code, measured, font_size, advances[0..measured.len]);
+    const ellipsis_w = text_measure.textWidth(.code, font_size, ellipsis);
+    return ellipsizeStartWithAdvances(buf, measured, advances[0..measured.len], start > 0, max_w, ellipsis, ellipsis_w);
+}
+
+/// Pure core of `ellipsizeCodeStart`: `advances[i]` is the width of the
+/// glyph starting at byte `i`. Keeps the widest codepoint-aligned suffix that
+/// fits after the ellipsis, snapping to the first `/` inside it when one
+/// exists so only whole path segments are shown.
+fn ellipsizeStartWithAdvances(
+    buf: []u8,
+    text: []const u8,
+    advances: []const f32,
+    force: bool,
+    max_w: f32,
+    ellipsis: []const u8,
+    ellipsis_w: f32,
+) []const u8 {
+    var total: f32 = 0.0;
+    for (advances) |advance| total += advance;
+    if (!force and total <= max_w) return text;
+    const budget = max_w - ellipsis_w;
+    if (budget <= 0.0) return "";
+    var used: f32 = 0.0;
+    var keep_from: usize = text.len;
+    var i: usize = text.len;
+    var glyph_w: f32 = 0.0;
+    while (i > 0) {
+        i -= 1;
+        glyph_w += advances[i];
+        if ((text[i] & 0xC0) == 0x80) continue;
+        if (used + glyph_w > budget) break;
+        used += glyph_w;
+        glyph_w = 0.0;
+        keep_from = i;
+    }
+    if (keep_from >= text.len) return "";
+    if (std.mem.indexOfScalarPos(u8, text, keep_from, '/')) |slash| {
+        if (slash > keep_from and slash + 1 < text.len) keep_from = slash;
+    }
+    const tail = text[keep_from..];
+    if (ellipsis.len + tail.len > buf.len) return tail;
+    @memcpy(buf[0..ellipsis.len], ellipsis);
+    @memcpy(buf[ellipsis.len..][0..tail.len], tail);
+    return buf[0 .. ellipsis.len + tail.len];
+}
+
+test "diff display path is relative to the thread or project root" {
+    var buf: [256]u8 = undefined;
+    const roots = [_][]const u8{ "/Users/me/repo/app", "/Users/me/repo/" };
+    try std.testing.expectEqualStrings("src/main.zig", diffDisplayPath(&buf, "/Users/me/repo/app/src/main.zig", &roots, "/Users/me"));
+    try std.testing.expectEqualStrings("scripts/a.py", diffDisplayPath(&buf, "/Users/me/repo/scripts/a.py", &roots, "/Users/me"));
+    try std.testing.expectEqualStrings("~/other/b.py", diffDisplayPath(&buf, "/Users/me/other/b.py", &roots, "/Users/me"));
+    try std.testing.expectEqualStrings("/Users/me/repo-x/c.py", diffDisplayPath(&buf, "/Users/me/repo-x/c.py", &.{"/Users/me/repo"}, null));
+    try std.testing.expectEqualStrings("/etc/hosts", diffDisplayPath(&buf, "/etc/hosts", &roots, "/Users/me"));
+    try std.testing.expectEqualStrings("rel/path.zig", diffDisplayPath(&buf, "rel/path.zig", &roots, "/Users/me"));
+}
+
+test "start ellipsis keeps the filename and whole segments" {
+    var buf: [256]u8 = undefined;
+    const text = "ab/scripts/prevail.py";
+    var advances: [text.len]f32 = @splat(1.0);
+    try std.testing.expectEqualStrings(text, ellipsizeStartWithAdvances(&buf, text, &advances, false, 40.0, "…", 1.0));
+    // 14 cells: ellipsis + 13 glyphs -> "ts/prevail.py" snaps to "/prevail.py".
+    try std.testing.expectEqualStrings("…/prevail.py", ellipsizeStartWithAdvances(&buf, text, &advances, false, 14.0, "…", 1.0));
+    try std.testing.expectEqualStrings("…/scripts/prevail.py", ellipsizeStartWithAdvances(&buf, text, &advances, false, 20.0, "…", 1.0));
+    // Filename alone too long: character-level cut.
+    try std.testing.expectEqualStrings("…ail.py", ellipsizeStartWithAdvances(&buf, text, &advances, false, 7.0, "…", 1.0));
+}
+
+test "start ellipsis never splits a UTF-8 sequence" {
+    var buf: [64]u8 = undefined;
+    const text = "x/\u{00E9}\u{00E9}\u{00E9}.md"; // é is two bytes
+    var advances: [text.len]f32 = @splat(0.0);
+    var i: usize = 0;
+    while (i < text.len) : (i += 1) {
+        if ((text[i] & 0xC0) != 0x80) advances[i] = 1.0;
+    }
+    const out = ellipsizeStartWithAdvances(&buf, text, &advances, false, 5.0, "…", 1.0);
+    try std.testing.expect(std.unicode.utf8ValidateSlice(out));
+    try std.testing.expectEqualStrings("…\u{00E9}.md", out);
+}
 
 fn diffLayoutForWidth(
     state: ?*app_state.AppState,
@@ -7080,14 +7214,14 @@ fn renderDiffSummaryCard(
     const can_split = bubble.w >= theme.scaledUi(DIFF_SPLIT_MIN_WIDTH_CSS);
     const layout = diffLayoutForWidth(state, bubble.w);
 
-    // Header: "Changed files - N file(s) +A -D"
+    // Header: "N files changed" · +A -D · Stacked/Split
     var total_add: i64 = 0;
     var total_del: i64 = 0;
     for (files) |f| {
         total_add += f.additions;
         total_del += f.deletions;
     }
-    const header_label = std.fmt.allocPrint(state.allocator, "Changed files — {d} file{s}", .{ files.len, if (files.len == 1) "" else "s" }) catch null;
+    const header_label = std.fmt.allocPrint(state.allocator, "{d} file{s} changed", .{ files.len, if (files.len == 1) "" else "s" }) catch null;
     defer if (header_label) |t| state.allocator.free(t);
     const header_y = bubble.y + pad_y;
     const layout_toggle_w = if (can_split) theme.scaledUi(132.0) else 0.0;
@@ -7103,12 +7237,13 @@ fn renderDiffSummaryCard(
         layout_toggle_rect.x - layout_toggle_gap - header_counts_w
     else
         bubble.x + bubble.w - pad_x - header_counts_w;
-    queueFixedTextLine(state, snapRect(.{
+    const header_font = designUi(DIFF_CARD_HEADER_FONT_CSS);
+    queueRoleLabel(state, .{
         .x = bubble.x + pad_x,
-        .y = header_y + theme.scaledUi(9.0),
+        .y = header_y + (header_h - header_font * 1.4) * 0.5,
         .w = @max(counts_x - theme.scaledUi(10.0) - (bubble.x + pad_x), theme.scaledUi(80.0)),
-        .h = theme.scaledUi(20.0),
-    }), header_label orelse "Changed files", paletteColor(theme.COLOR_WHITE), theme.scaledUi(14.0), clip);
+        .h = header_font * 1.4,
+    }, header_label orelse "Files changed", paletteColor(theme.COLOR_WHITE), header_font, .ui_medium, clip);
 
     const counts = std.fmt.allocPrint(state.allocator, "+{d}  -{d}", .{ total_add, total_del }) catch null;
     defer if (counts) |t| state.allocator.free(t);
@@ -7145,6 +7280,9 @@ fn renderDiffSummaryCard(
         return;
     }
 
+    const cwd_root = state.currentThreadEffectiveCwd();
+    const project_root = state.currentProject().path;
+    const home_root = state.composerHomePath();
     for (files) |file| {
         const key = diffFileCardKey(message_index, file.path);
         const expanded = state.isCardExpanded(key);
@@ -7161,25 +7299,31 @@ fn renderDiffSummaryCard(
         const chev_y = row_y + row_h * 0.5;
         queueCardChevron(state, chev_x, chev_y, expanded, paletteColor(theme.COLOR_TEXT_SUBTLE), clip);
 
-        // Path
+        // Path: shown relative to the thread's directory / project root and
+        // ellipsized at the start so the filename stays visible.
         const path_x = chev_x + theme.scaledUi(14.0);
-        const action_w = theme.scaledUi(54.0);
-        // "Comment" is the longest action label; give it a wider touch target.
-        const comment_w = theme.scaledUi(76.0);
-        const action_h = theme.scaledUi(28.0);
-        const action_gap = theme.scaledUi(6.0);
+        const action_font = designUi(DIFF_FILE_ACTION_FONT_CSS);
+        const action_pad = designUi(DIFF_FILE_ACTION_PAD_CSS);
+        const open_w = chromeLabelWidth(action_font, "Open") + action_pad * 2.0;
+        const copy_w = chromeLabelWidth(action_font, "Copy") + action_pad * 2.0;
+        const comment_w = chromeLabelWidth(action_font, "Comment") + action_pad * 2.0;
+        const action_h = designUi(DIFF_FILE_ACTION_HEIGHT_CSS);
+        const action_gap = theme.scaledUi(2.0);
+        const counts_gap = theme.scaledUi(8.0);
         const counts_w = theme.scaledUi(92.0);
-        const actions_w = action_w * 2.0 + comment_w + action_gap * 2.0;
-        const path_right = bubble.x + bubble.w - pad_x - counts_w - action_gap - actions_w;
+        const actions_w = open_w + copy_w + comment_w + action_gap * 2.0;
+        const path_right = bubble.x + bubble.w - pad_x - counts_w - counts_gap - actions_w;
         const path_w = @max(path_right - path_x, theme.scaledUi(40.0));
-        const path_display = truncateMonoToWidth(state.allocator, file.path, path_w, file_font);
-        defer if (path_display.allocated) state.allocator.free(path_display.text);
-        queueFixedTextLine(state, snapRect(.{
+        var display_buf: [DIFF_PATH_BUF_LEN]u8 = undefined;
+        const display_path = diffDisplayPath(&display_buf, file.path, &.{ cwd_root, project_root }, home_root);
+        var ellipsis_buf: [DIFF_PATH_BUF_LEN]u8 = undefined;
+        const path_text = ellipsizeCodeStart(&ellipsis_buf, display_path, path_w, file_font);
+        queueRoleLabel(state, .{
             .x = path_x,
-            .y = row_y + (row_h - file_font * 1.25) * 0.5,
+            .y = row_y + (row_h - file_font * 1.4) * 0.5,
             .w = path_w,
-            .h = file_font * 1.25,
-        }), path_display.text, paletteColor(theme.COLOR_WHITE), file_font, clip);
+            .h = file_font * 1.4,
+        }, path_text, paletteColor(theme.COLOR_WHITE), file_font, .code, clip);
 
         // Counts on right (green +N, red -M)
         const adds_text = std.fmt.allocPrint(state.allocator, "+{d}", .{file.additions}) catch null;
@@ -7187,15 +7331,15 @@ fn renderDiffSummaryCard(
         const dels_text = std.fmt.allocPrint(state.allocator, "-{d}", .{file.deletions}) catch null;
         defer if (dels_text) |t| state.allocator.free(t);
         const open_rect = palette.Rect{
-            .x = bubble.x + bubble.w - pad_x - action_w,
+            .x = bubble.x + bubble.w - pad_x - open_w,
             .y = row_y + (row_h - action_h) * 0.5,
-            .w = action_w,
+            .w = open_w,
             .h = action_h,
         };
         const copy_rect = palette.Rect{
-            .x = open_rect.x - action_gap - action_w,
+            .x = open_rect.x - action_gap - copy_w,
             .y = open_rect.y,
-            .w = action_w,
+            .w = copy_w,
             .h = open_rect.h,
         };
         const comment_rect = palette.Rect{
@@ -7204,9 +7348,9 @@ fn renderDiffSummaryCard(
             .w = comment_w,
             .h = open_rect.h,
         };
-        renderDiffFileActionButton(state, comment_rect, "Comment", false, clip);
-        renderDiffFileActionButton(state, copy_rect, "Copy", false, clip);
-        renderDiffFileActionButton(state, open_rect, "Open", true, clip);
+        renderDiffFileTextButton(state, comment_rect, "Comment", action_font, clip);
+        renderDiffFileTextButton(state, copy_rect, "Copy", action_font, clip);
+        renderDiffFileTextButton(state, open_rect, "Open", action_font, clip);
         state.recordTranscriptCopyHit(copy_rect, file.patch, diffCopyIdentity(message_index, file.path, file.patch));
         if (diff_file_open_hit_count < diff_file_open_hits.len) {
             diff_file_open_hits[diff_file_open_hit_count] = .{ .rect = open_rect, .path = file.path };
@@ -7223,7 +7367,7 @@ fn renderDiffSummaryCard(
             diff_file_comment_hit_count += 1;
         }
 
-        const counts_right = comment_rect.x - action_gap;
+        const counts_right = comment_rect.x - counts_gap;
         const dels_w = counts_w * 0.5;
         const adds_w = counts_w * 0.5;
         queueFixedTextLine(state, snapRect(.{
@@ -7323,6 +7467,29 @@ fn renderDiffLayoutOption(
 }
 
 // Renders one file-row action in the diff card.
+/// Quiet text button for diff-card file rows: no fill at rest, the header's
+/// soft neutral fill on hover, muted `.ui` label.
+fn renderDiffFileTextButton(
+    state: *app_state.AppState,
+    rect: palette.Rect,
+    label: []const u8,
+    font_size: f32,
+    clip: palette.Rect,
+) void {
+    const hovered = state.transcript_controller.palette_mouse_in_workspace and
+        rectContains(rect, state.transcript_controller.palette_mouse_x, state.transcript_controller.palette_mouse_y);
+    if (hovered) {
+        queueRoundedClipped(
+            state,
+            snapRect(rect),
+            paletteColor(theme.withAlpha(theme.COLOR_WHITE, WORKSPACE_HEADER_HOVER_ALPHA)),
+            theme.scaledUi(WORKSPACE_HEADER_CONTROL_RADIUS_CSS),
+            clip,
+        );
+    }
+    queueCenteredChromeLabel(state, rect, label, paletteColor(if (hovered) theme.COLOR_WHITE else theme.COLOR_TEXT_MUTED), font_size, clip);
+}
+
 fn renderDiffFileActionButton(
     state: *app_state.AppState,
     rect: palette.Rect,
@@ -10184,13 +10351,18 @@ fn queueFixedTextLine(state: *app_state.AppState, rect: palette.Rect, value: []c
 /// this for workspace header buttons / sidebar labels so they share the same
 /// typeface as the composer prompt and selector pills.
 fn queueChromeLabel(state: *app_state.AppState, rect: palette.Rect, value: []const u8, color: palette.Color, font_size: f32, clip: ?palette.Rect) void {
+    queueRoleLabel(state, rect, value, color, font_size, .ui, clip);
+}
+
+/// Single-line label in an explicit font role (a null role renders bold).
+fn queueRoleLabel(state: *app_state.AppState, rect: palette.Rect, value: []const u8, color: palette.Color, font_size: f32, role: palette.FontRole, clip: ?palette.Rect) void {
     state.palette_overlay_batch.roleText(
         state.allocator,
         snapRect(rect),
         stableText(state, value),
         color,
         font_size,
-        .ui,
+        role,
         null,
         clip,
     ) catch {};

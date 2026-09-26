@@ -12818,7 +12818,7 @@ pub const AppState = struct {
         return chat_controller.effectiveThreadCwd(self.currentProject().path, self.currentThread());
     }
 
-    fn composerHomePath(self: *AppState) ?[]const u8 {
+    pub fn composerHomePath(self: *AppState) ?[]const u8 {
         if (self.composer_controller.home_path == null) {
             self.composer_controller.home_path = platform_paths.userHome(self.allocator) catch null;
         }
