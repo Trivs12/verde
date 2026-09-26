@@ -5,6 +5,7 @@
 //! changing the root UI entry point again.
 
 const std = @import("std");
+const builtin = @import("builtin");
 
 const palette = @import("palette");
 const sdl = @import("zsdl3");
@@ -21,6 +22,7 @@ const context_menu = @import("context_menu.zig");
 const handoff_sheet = @import("handoff_sheet.zig");
 const profiler = @import("../runtime/profiler.zig");
 const terminal_panel = @import("terminal_panel.zig");
+const text_measure = @import("text_measure.zig");
 const theme = @import("theme.zig");
 const utils = @import("../utils.zig");
 
@@ -76,6 +78,38 @@ const LU_CHEVRON_UP = "\u{E070}";
 const LU_SQUARE_PEN = "\u{E172}";
 const LU_HISTORY = "\u{E1F5}";
 const LU_SQUARE_TERMINAL = "\u{E20A}";
+const LU_COMMAND = "\u{E09A}";
+const LU_SHIFT = "\u{E1E4}";
+const LU_OPTION = "\u{E1F8}";
+const LU_CONTROL = LU_CHEVRON_UP;
+
+/// Design values are CSS px; UI units are design px x 1.2 (design body 15px
+/// renders as the app's 18-unit body), then the user's UI scale.
+const DESIGN_SCALE: f32 = 18.0 / 15.0;
+
+fn designUi(px: f32) f32 {
+    return theme.scaledUi(px * DESIGN_SCALE);
+}
+
+// Empty workspace (design px, x `DESIGN_SCALE`).
+const EMPTY_TITLE_FONT_CSS: f32 = 26.0;
+const EMPTY_PATH_FONT_CSS: f32 = 14.0;
+const EMPTY_SECTION_GAP_CSS: f32 = 28.0;
+const EMPTY_CARD_ROW_WIDTH_CSS: f32 = 720.0;
+const EMPTY_CARD_HEIGHT_CSS: f32 = 116.0;
+const EMPTY_CARD_GAP_CSS: f32 = 12.0;
+const EMPTY_CARD_RADIUS_CSS: f32 = 14.0;
+const EMPTY_CARD_PAD_CSS: f32 = 16.0;
+const EMPTY_CARD_ICON_CSS: f32 = 20.0;
+const EMPTY_CARD_LABEL_FONT_CSS: f32 = 14.0;
+const EMPTY_CARD_DETAIL_FONT_CSS: f32 = 12.5;
+const EMPTY_CARD_SELECTED_BORDER_ALPHA: u8 = 110;
+const EMPTY_HINT_FONT_CSS: f32 = 12.5;
+const EMPTY_HINT_GAP_CSS: f32 = 18.0;
+const EMPTY_SIDE_GUTTER_CSS: f32 = 24.0;
+const EMPTY_BOTTOM_LIFT_CSS: f32 = 60.0;
+/// Lucide modifier glyphs sit a touch smaller than the key text.
+const SHORTCUT_GLYPH_RATIO: f32 = 0.95;
 
 fn nowMs() i64 {
     return @intCast(@divTrunc(profiler.nowNs(), std.time.ns_per_ms));
@@ -1051,41 +1085,106 @@ pub fn renderAtWithTranscriptLayoutWidth(state: *runtime.AppState, rect: palette
     prunePaneRectSlots();
 }
 
-// Empty workspace invitation shown after the final pane closes.
+// Empty workspace invitation shown after the final pane closes: workspace
+// name and path, three action cards, then a row of live key hints.
 fn renderEmptyWorkspace(state: *runtime.AppState, rect: palette.Rect) void {
     queueRect(state, rect, paletteColor(theme.background()));
+    const project = state.currentProject();
 
-    const content_w = @max(1.0, @min(rect.w - theme.scaledUi(32.0), theme.scaledUi(380.0)));
-    const title_size = theme.scaledUi(28.0);
-    const body_size = theme.scaledUi(14.0);
-    const button_w = @min(content_w, theme.scaledUi(280.0));
-    const button_h = theme.scaledUi(38.0);
-    const content_h = theme.scaledUi(232.0);
-    const x = rect.x + (rect.w - content_w) * 0.5;
-    var y = rect.y + @max(0.0, (rect.h - content_h) * 0.5);
+    const title_size = designUi(EMPTY_TITLE_FONT_CSS);
+    const path_size = designUi(EMPTY_PATH_FONT_CSS);
+    const card_h = designUi(EMPTY_CARD_HEIGHT_CSS);
+    const card_gap = designUi(EMPTY_CARD_GAP_CSS);
+    const section_gap = designUi(EMPTY_SECTION_GAP_CSS);
+    const hint_size = designUi(EMPTY_HINT_FONT_CSS);
+    const row_w = @max(1.0, @min(rect.w - designUi(EMPTY_SIDE_GUTTER_CSS) * 2.0, designUi(EMPTY_CARD_ROW_WIDTH_CSS)));
+    const row_x = rect.x + (rect.w - row_w) * 0.5;
+    // Title block (26 + 8 + 14px lines), cards, hints; the design lifts the
+    // stack by its 60px bottom padding so it sits slightly above centre.
+    const title_block_h = title_size * 1.3 + designUi(8.0) + path_size * 1.4;
+    const content_h = title_block_h + section_gap + card_h + section_gap + hint_size * 1.6;
+    var y = rect.y + @max(0.0, (rect.h - content_h - designUi(EMPTY_BOTTOM_LIFT_CSS)) * 0.5);
 
-    const title = "No open panes";
-    const title_w = runtime.paletteUiTextPrefixWidth(title, title_size, title.len);
-    queueText(state, .{ .x = x + @max(0.0, (content_w - title_w) * 0.5), .y = y, .w = @min(content_w, title_w), .h = title_size * 1.3 }, title, paletteColor(theme.COLOR_WHITE), title_size, rect);
-    y += theme.scaledUi(42.0);
-    const body = "Start a chat or open a terminal from this workspace.";
-    const body_w = runtime.paletteUiTextPrefixWidth(body, body_size, body.len);
-    queueText(state, .{ .x = x + @max(0.0, (content_w - body_w) * 0.5), .y = y, .w = @min(content_w, body_w), .h = body_size * 1.4 }, body, paletteColor(theme.COLOR_TEXT_MUTED), body_size, rect);
-    y += theme.scaledUi(34.0);
+    // Workspace name and home-relative path.
+    const title: []const u8 = project.label;
+    const title_w = @min(row_w, text_measure.textWidth(.ui_medium, title_size, title));
+    queueRoleText(state, .{ .x = rect.x + (rect.w - title_w) * 0.5, .y = y, .w = title_w, .h = title_size * 1.3 }, title, paletteColor(theme.COLOR_WHITE), title_size, .ui_medium, rect);
+    y += title_size * 1.3 + designUi(8.0);
+    var path_buf: [512]u8 = undefined;
+    const path_line = emptyWorkspacePathLine(&path_buf, project.path, state.composerHomePath());
+    const path_w = @min(row_w, text_measure.textWidth(.ui, path_size, path_line));
+    queueRoleText(state, .{ .x = rect.x + (rect.w - path_w) * 0.5, .y = y, .w = path_w, .h = path_size * 1.4 }, path_line, paletteColor(theme.COLOR_TEXT_SUBTLE), path_size, .ui, rect);
+    y += path_size * 1.4 + section_gap;
 
+    // Action cards: the selected one (keyboard) reads stronger than the rest.
     var new_chat_hint_buf: [32]u8 = undefined;
-    var history_hint_buf: [32]u8 = undefined;
+    var palette_hint_buf: [32]u8 = undefined;
     var terminal_hint_buf: [32]u8 = undefined;
+    var saved_buf: [160]u8 = undefined;
     const config = state.command_controller.keyboard_config;
     const new_chat_hint = if (config) |loaded| firstKeybindHint(&new_chat_hint_buf, loaded.new_thread) else "Ctrl+T";
-    const history_hint = if (config) |loaded| firstKeybindHint(&history_hint_buf, loaded.command_palette) else "Ctrl+Shift+P";
+    const palette_hint = if (config) |loaded| firstKeybindHint(&palette_hint_buf, loaded.command_palette) else "Ctrl+Shift+P";
     const terminal_hint = if (config) |loaded| firstKeybindHint(&terminal_hint_buf, loaded.workspace_split_terminal_horizontal) else "Ctrl+Shift+T";
-    const button_x = rect.x + (rect.w - button_w) * 0.5;
-    renderEmptyWorkspaceAction(state, .{ .x = button_x, .y = y, .w = button_w, .h = button_h }, LU_SQUARE_PEN, "New chat", new_chat_hint, .new_chat_thread, true, empty_workspace_selected_action == 0);
-    y += button_h + theme.scaledUi(8.0);
-    renderEmptyWorkspaceAction(state, .{ .x = button_x, .y = y, .w = button_w, .h = button_h }, LU_HISTORY, "Open previous chat", history_hint, .open_chat_history, false, empty_workspace_selected_action == 1);
-    y += button_h + theme.scaledUi(8.0);
-    renderEmptyWorkspaceAction(state, .{ .x = button_x, .y = y, .w = button_w, .h = button_h }, LU_SQUARE_TERMINAL, "Open terminal pane", terminal_hint, .open_terminal, false, empty_workspace_selected_action == 2);
+    const saved_count = project.threads.items.len;
+    const saved_line = if (saved_count == 0)
+        "No saved chats yet"
+    else
+        std.fmt.bufPrint(&saved_buf, "{d} saved in {s}", .{ saved_count, project.label }) catch "Saved chats";
+    const card_w = @max(1.0, (row_w - card_gap * 2.0) / 3.0);
+    const cards = [_]struct { icon: []const u8, label: []const u8, detail: []const u8, detail_is_shortcut: bool, action: WorkspacePaneAction }{
+        .{ .icon = LU_SQUARE_PEN, .label = "New chat", .detail = new_chat_hint, .detail_is_shortcut = true, .action = .new_chat_thread },
+        .{ .icon = LU_HISTORY, .label = "Open previous chat", .detail = saved_line, .detail_is_shortcut = false, .action = .open_chat_history },
+        .{ .icon = LU_SQUARE_TERMINAL, .label = "Open terminal pane", .detail = "Runs zsh or an agent TUI", .detail_is_shortcut = false, .action = .open_terminal },
+    };
+    for (cards, 0..) |card, index| {
+        const card_rect: palette.Rect = .{ .x = row_x + @as(f32, @floatFromInt(index)) * (card_w + card_gap), .y = y, .w = card_w, .h = card_h };
+        renderEmptyWorkspaceAction(state, card_rect, card.icon, card.label, card.detail, card.detail_is_shortcut, card.action, empty_workspace_selected_action == index);
+    }
+    y += card_h + section_gap;
+
+    // Key hints row, centred; hints that no longer fit are dropped.
+    const hints = [_]struct { keys: []const u8, label: []const u8 }{
+        .{ .keys = palette_hint, .label = "Command palette" },
+        .{ .keys = terminal_hint, .label = "Split terminal" },
+        .{ .keys = if (builtin.os.tag == .macos) "\u{2325}" else "Alt", .label = "Hold for shortcut tips" },
+    };
+    const hint_gap = designUi(EMPTY_HINT_GAP_CSS);
+    var widths: [hints.len]f32 = undefined;
+    var shown: usize = 0;
+    var total_w: f32 = 0.0;
+    for (hints, 0..) |hint, index| {
+        if (hint.keys.len == 0) {
+            widths[index] = 0.0;
+            continue;
+        }
+        const w = keyHintWidth(hint.keys, hint.label, hint_size);
+        const next_total = total_w + (if (shown > 0) hint_gap else 0.0) + w;
+        if (next_total > row_w) break;
+        widths[index] = w;
+        total_w = next_total;
+        shown = index + 1;
+    }
+    var hint_x = rect.x + (rect.w - total_w) * 0.5;
+    const hint_cy = y + hint_size * 0.8;
+    for (hints[0..shown], 0..) |hint, index| {
+        if (widths[index] <= 0.0) continue;
+        queueKeyHint(state, hint_x, hint_cy, hint.keys, hint.label, hint_size, rect);
+        hint_x += widths[index] + hint_gap;
+    }
+}
+
+/// "~/GitHub/revicare · no open panes" with the home directory abbreviated.
+fn emptyWorkspacePathLine(buf: []u8, path: []const u8, home: ?[]const u8) []const u8 {
+    const suffix = " \u{00B7} no open panes";
+    if (home) |home_dir| {
+        const trimmed_home = std.mem.trimEnd(u8, home_dir, "/");
+        if (trimmed_home.len > 0 and std.mem.startsWith(u8, path, trimmed_home) and
+            (path.len == trimmed_home.len or path[trimmed_home.len] == '/'))
+        {
+            return std.fmt.bufPrint(buf, "~{s}{s}", .{ path[trimmed_home.len..], suffix }) catch path;
+        }
+    }
+    return std.fmt.bufPrint(buf, "{s}{s}", .{ path, suffix }) catch path;
 }
 
 fn firstKeybindHint(buf: []u8, bindings: []const keybinds.Keybind) []const u8 {
@@ -1093,50 +1192,131 @@ fn firstKeybindHint(buf: []u8, bindings: []const keybinds.Keybind) []const u8 {
     return keybinds.formatKeybind(buf, bindings[0]);
 }
 
-// One empty-workspace action row with its configured shortcut.
+// One empty-workspace action card: icon top-left, label and detail line
+// bottom-left. `selected` is the keyboard selection.
 fn renderEmptyWorkspaceAction(
     state: *runtime.AppState,
     rect: palette.Rect,
     icon: []const u8,
     label: []const u8,
-    shortcut: []const u8,
+    detail: []const u8,
+    detail_is_shortcut: bool,
     action: WorkspacePaneAction,
-    primary: bool,
     selected: bool,
 ) void {
     const hovered = state.transcript_controller.palette_mouse_in_workspace and
         rectContains(rect, state.transcript_controller.palette_mouse_x, state.transcript_controller.palette_mouse_y);
-    const base_color = if (primary) theme.accent() else theme.COLOR_PANEL_ALT;
-    const button_color = if (hovered or selected) theme.raise(base_color, 0.08) else base_color;
-    queueRounded(state, rect, paletteColor(button_color), theme.scaledUi(7.0));
-    const border_color = if (selected and primary)
-        theme.COLOR_WHITE
-    else if (selected)
-        theme.accent()
+    const radius = designUi(EMPTY_CARD_RADIUS_CSS);
+    const fill = if (selected)
+        theme.raise(theme.COLOR_PANEL, 0.04)
+    else if (hovered)
+        theme.raise(theme.COLOR_PANEL, 0.02)
+    else
+        theme.COLOR_PANEL;
+    queueRounded(state, rect, paletteColor(fill), radius);
+    const hairline = @max(@round(theme.scaledUi(1.0)), 1.0);
+    const border_color = if (selected)
+        theme.withAlpha(theme.COLOR_WHITE, EMPTY_CARD_SELECTED_BORDER_ALPHA)
+    else if (hovered)
+        theme.border()
     else
         theme.borderMuted();
-    if (!primary or selected) queueBorder(state, rect, paletteColor(border_color), theme.scaledUi(7.0), theme.scaledUi(if (selected) 2.0 else 1.0));
+    queueBorder(state, rect, paletteColor(border_color), radius, hairline);
 
-    const font_size = theme.scaledUi(14.0);
-    const icon_size = theme.scaledUi(15.0);
-    // Lucide is optically smaller than the Codicons it replaced; draw it a
-    // little larger about the original 15px slot's centre.
-    const lucide_size = theme.scaledUi(16.0);
-    const left = rect.x + theme.scaledUi(13.0);
-    queueLucideIcon(state, .{
-        .x = left + (icon_size - lucide_size) * 0.5,
-        .y = rect.y + (rect.h - lucide_size) * 0.5,
-        .w = lucide_size,
-        .h = lucide_size,
-    }, icon, paletteColor(theme.COLOR_WHITE), lucide_size, rect);
-    const label_w = runtime.paletteUiTextPrefixWidth(label, font_size, label.len);
-    queueText(state, .{ .x = left + theme.scaledUi(24.0), .y = rect.y + (rect.h - font_size * 1.25) * 0.5, .w = @min(label_w, rect.w * 0.58), .h = font_size * 1.25 }, label, paletteColor(theme.COLOR_WHITE), font_size, rect);
-    if (shortcut.len > 0) {
-        const hint_size = theme.scaledUi(11.0);
-        const hint_w = runtime.paletteUiTextPrefixWidth(shortcut, hint_size, shortcut.len);
-        queueText(state, .{ .x = rect.x + rect.w - theme.scaledUi(13.0) - hint_w, .y = rect.y + (rect.h - hint_size * 1.25) * 0.5, .w = hint_w, .h = hint_size * 1.25 }, shortcut, paletteColor(if (primary) theme.withAlpha(theme.COLOR_WHITE, 190) else theme.COLOR_TEXT_SUBTLE), hint_size, rect);
+    const pad = designUi(EMPTY_CARD_PAD_CSS);
+    const inner: palette.Rect = .{ .x = rect.x + pad, .y = rect.y + pad, .w = @max(1.0, rect.w - pad * 2.0), .h = @max(1.0, rect.h - pad * 2.0) };
+    const icon_size = designUi(EMPTY_CARD_ICON_CSS);
+    queueLucideIcon(state, .{ .x = inner.x, .y = inner.y, .w = icon_size, .h = icon_size }, icon, paletteColor(theme.COLOR_WHITE), icon_size, rect);
+
+    const label_size = designUi(EMPTY_CARD_LABEL_FONT_CSS);
+    const detail_size = designUi(EMPTY_CARD_DETAIL_FONT_CSS);
+    const detail_line = detail_size * 1.35;
+    const label_line = label_size * 1.35;
+    const detail_top = inner.y + inner.h - detail_line;
+    const label_top = detail_top - designUi(2.0) - label_line;
+    queueRoleText(state, .{ .x = inner.x, .y = label_top, .w = inner.w, .h = label_line }, label, paletteColor(theme.COLOR_WHITE), label_size, .ui_medium, inner);
+    if (detail.len > 0) {
+        const detail_color = paletteColor(theme.COLOR_TEXT_SUBTLE);
+        if (detail_is_shortcut) {
+            _ = queueShortcutKeys(state, inner.x, detail_top + detail_line * 0.5, detail, detail_color, detail_size, inner);
+        } else {
+            queueRoleText(state, .{ .x = inner.x, .y = detail_top, .w = inner.w, .h = detail_line }, detail, detail_color, detail_size, .ui, inner);
+        }
     }
     appendHit(.{ .action = action, .rect = rect });
+}
+
+/// Width of a `queueKeyHint` chip plus its trailing label.
+fn keyHintWidth(keys: []const u8, label: []const u8, font_size: f32) f32 {
+    const chip_pad = designUi(6.0);
+    return shortcutKeysWidth(keys, font_size) + chip_pad * 2.0 + designUi(6.0) + text_measure.textWidth(.ui, font_size, label);
+}
+
+// A key chip (muted pill around the shortcut) followed by its label.
+fn queueKeyHint(state: *runtime.AppState, x: f32, cy: f32, keys: []const u8, label: []const u8, font_size: f32, clip: palette.Rect) void {
+    const chip_pad = designUi(6.0);
+    const keys_w = shortcutKeysWidth(keys, font_size);
+    const chip_h = font_size * 1.55;
+    const chip: palette.Rect = .{ .x = x, .y = cy - chip_h * 0.5, .w = keys_w + chip_pad * 2.0, .h = chip_h };
+    queueRounded(state, chip, paletteColor(theme.COLOR_PANEL_ALT), designUi(5.0));
+    queueBorder(state, chip, paletteColor(theme.withAlpha(theme.borderMuted(), 150)), designUi(5.0), @max(@round(theme.scaledUi(1.0)), 1.0));
+    _ = queueShortcutKeys(state, chip.x + chip_pad, cy, keys, paletteColor(theme.COLOR_TEXT_MUTED), font_size, clip);
+    const label_x = chip.x + chip.w + designUi(6.0);
+    const label_w = text_measure.textWidth(.ui, font_size, label);
+    queueRoleText(state, .{ .x = label_x, .y = @round(cy - font_size * 0.65), .w = label_w + theme.scaledUi(4.0), .h = font_size * 1.3 }, label, paletteColor(theme.COLOR_TEXT_SUBTLE), font_size, .ui, clip);
+}
+
+/// Splits leading macOS modifier symbols (⌃⌥⇧⌘) off a formatted keybind.
+const ShortcutParts = struct {
+    mods: [4][]const u8 = undefined,
+    mod_count: usize = 0,
+    rest: []const u8 = "",
+};
+
+fn shortcutParts(hint: []const u8) ShortcutParts {
+    var parts: ShortcutParts = .{ .rest = hint };
+    while (parts.rest.len >= 3 and parts.mod_count < parts.mods.len) {
+        const glyph: ?[]const u8 = if (std.mem.startsWith(u8, parts.rest, "\u{2303}"))
+            LU_CONTROL
+        else if (std.mem.startsWith(u8, parts.rest, "\u{2325}"))
+            LU_OPTION
+        else if (std.mem.startsWith(u8, parts.rest, "\u{21E7}"))
+            LU_SHIFT
+        else if (std.mem.startsWith(u8, parts.rest, "\u{2318}"))
+            LU_COMMAND
+        else
+            null;
+        parts.mods[parts.mod_count] = glyph orelse break;
+        parts.mod_count += 1;
+        parts.rest = parts.rest[3..];
+    }
+    return parts;
+}
+
+fn shortcutKeysWidth(hint: []const u8, font_size: f32) f32 {
+    const parts = shortcutParts(hint);
+    const glyph = font_size * SHORTCUT_GLYPH_RATIO;
+    const glyph_gap = designUi(1.0);
+    return @as(f32, @floatFromInt(parts.mod_count)) * (glyph + glyph_gap) + text_measure.textWidth(.ui, font_size, parts.rest);
+}
+
+/// Draws a formatted keybind left-aligned at `x`, with macOS modifier
+/// symbols as Lucide glyphs (the text face lacks them). Returns its width.
+fn queueShortcutKeys(state: *runtime.AppState, x: f32, cy: f32, hint: []const u8, color: palette.Color, font_size: f32, clip: palette.Rect) f32 {
+    const parts = shortcutParts(hint);
+    const glyph = font_size * SHORTCUT_GLYPH_RATIO;
+    const glyph_gap = designUi(1.0);
+    var cursor = x;
+    for (parts.mods[0..parts.mod_count]) |g| {
+        queueLucideIcon(state, .{ .x = cursor, .y = cy - glyph * 0.5, .w = glyph, .h = glyph }, g, color, glyph, clip);
+        cursor += glyph + glyph_gap;
+    }
+    if (parts.rest.len > 0) {
+        const rest_w = text_measure.textWidth(.ui, font_size, parts.rest);
+        queueRoleText(state, .{ .x = cursor, .y = @round(cy - font_size * 0.65), .w = rest_w + theme.scaledUi(4.0), .h = font_size * 1.3 }, parts.rest, color, font_size, .ui, clip);
+        cursor += rest_w;
+    }
+    return cursor - x;
 }
 
 // Floating quick-pane overlay above the unchanged tiled workspace.
@@ -3476,6 +3656,11 @@ fn queueRounded(state: *runtime.AppState, rect: palette.Rect, color: palette.Col
 
 fn queueBorder(state: *runtime.AppState, rect: palette.Rect, color: palette.Color, radius: f32, width: f32) void {
     state.palette_overlay_batch.rectBorder(state.allocator, rect, color, radius, width) catch {};
+}
+
+/// Text in an explicit face; untyped text falls back to the bold prose face.
+fn queueRoleText(state: *runtime.AppState, rect: palette.Rect, value: []const u8, color: palette.Color, font_size: f32, role: palette.FontRole, clip: palette.Rect) void {
+    state.palette_overlay_batch.roleText(state.allocator, rect, stableText(state, value), color, font_size, role, null, clip) catch {};
 }
 
 fn queueText(state: *runtime.AppState, rect: palette.Rect, value: []const u8, color: palette.Color, font_size: f32, clip: palette.Rect) void {
