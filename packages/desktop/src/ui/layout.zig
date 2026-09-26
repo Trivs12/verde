@@ -1736,7 +1736,8 @@ fn focusModalInput(state: *runtime.AppState, focus: runtime.PaletteModalTextFocu
         clearModalSelection(state);
     }
     const value = focusedValue(state);
-    const font_size = theme.scaledUi(14.0);
+    // The palette's query field draws larger than the other modal fields.
+    const font_size = if (focus == .command_palette) command_palette.searchFontSize() else theme.scaledUi(14.0);
     const text_x = rect.x + theme.scaledUi(10.0);
     const rel = @max(x - text_x, 0.0);
     const offset = focusedMetricOffsetForClickX(state, value, font_size, rel);
