@@ -585,6 +585,13 @@ pub const Client = struct {
             parsed.deinit();
             return;
         }
+        if (std.mem.eql(u8, kind, "context_usage")) {
+            if (stream_request) |request| {
+                _ = emitBridgeContextUsage(parsed.value, request);
+            }
+            parsed.deinit();
+            return;
+        }
         if (std.mem.eql(u8, kind, "approval_request")) {
             if (stream_request) |request| {
                 if (request.on_approval_request) |on_approval_request| {
@@ -873,6 +880,18 @@ fn getOptionalObjectInt(value: std.json.Value, field: []const u8) ?i64 {
         .integer => |int| int,
         else => null,
     };
+}
+
+/// The bridge reports the last top-level call's prompt tokens (input plus
+/// cache reads/writes) and that model's `contextWindow` from the SDK result.
+fn emitBridgeContextUsage(value: std.json.Value, request: provider_types.SendPromptRequest) bool {
+    const on_stream_event = request.on_stream_event orelse return false;
+    const used = getOptionalObjectInt(value, "used_tokens") orelse return false;
+    const window = getOptionalObjectInt(value, "window_tokens") orelse return false;
+    if (used < 0 or window <= 0) return false;
+    const usage = provider_types.ContextUsage.init(@intCast(used), @intCast(window)) orelse return false;
+    on_stream_event(request.stream_context, .{ .context_usage = usage });
+    return true;
 }
 
 fn bridgeToolCallKind(value: []const u8) provider_types.ToolCallKind {
@@ -1311,4 +1330,31 @@ test "Claude bridge keeps explicitly backgrounded tools alive for auto continuat
     try std.testing.expect(std.mem.indexOf(u8, source, "message?.type === \"steer_prompt\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, source, "activeClaudePromptChannel?.push(prompt, \"next\")") != null);
     try std.testing.expectEqual(@as(usize, 0), std.mem.count(u8, source, "query.close()"));
+}
+
+test "Claude bridge context usage lines become metadata events" {
+    const Capture = struct {
+        usage: ?provider_types.ContextUsage = null,
+        fn handle(context: ?*anyopaque, event: provider_types.StreamEvent) void {
+            const self: *@This() = @ptrCast(@alignCast(context orelse return));
+            switch (event) {
+                .context_usage => |usage| self.usage = usage,
+                else => {},
+            }
+        }
+    };
+    const payload =
+        \\{"type":"context_usage","used_tokens":76000,"window_tokens":200000}
+    ;
+    var parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, payload, .{});
+    defer parsed.deinit();
+    var capture: Capture = .{};
+    const request: provider_types.SendPromptRequest = .{ .prompt = "", .stream_context = &capture, .on_stream_event = Capture.handle };
+    try std.testing.expect(emitBridgeContextUsage(parsed.value, request));
+    try std.testing.expectEqual(@as(u64, 76000), capture.usage.?.used_tokens);
+    try std.testing.expectEqual(@as(u64, 200000), capture.usage.?.window_tokens);
+
+    var zero_window = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, "{\"type\":\"context_usage\",\"used_tokens\":1,\"window_tokens\":0}", .{});
+    defer zero_window.deinit();
+    try std.testing.expect(!emitBridgeContextUsage(zero_window.value, request));
 }

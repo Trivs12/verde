@@ -6599,6 +6599,11 @@ pub fn applyDaemonChatEventLocked(self: anytype, send_state: *SendState, kind: [
         try upsertPendingToolCallEvent(std.heap.page_allocator, &send_state.pending_events, update);
     } else if (std.mem.eql(u8, kind, "diff")) {
         try applyDaemonDiffEventLocked(send_state, payload_json);
+    } else if (std.mem.eql(u8, kind, "context_usage")) {
+        if (parseContextUsagePayload(payload_json)) |usage| {
+            send_state.context_usage = usage;
+            send_state.ui_revision +%= 1;
+        }
     } else if (std.mem.eql(u8, kind, "thread_id")) {
         if (daemonPayloadStringAlloc(payload_json, "thread_id")) |thread_id| {
             defer std.heap.page_allocator.free(thread_id);
@@ -6610,6 +6615,19 @@ pub fn applyDaemonChatEventLocked(self: anytype, send_state: *SendState, kind: [
             try replacePageOwned(&send_state.active_turn_id, turn_id);
         }
     }
+}
+
+/// Decodes the daemon's `context_usage` turn event; malformed payloads are
+/// dropped because the ring is advisory metadata.
+fn parseContextUsagePayload(payload_json: []const u8) ?provider_types.ContextUsage {
+    var parsed = std.json.parseFromSlice(std.json.Value, std.heap.page_allocator, payload_json, .{}) catch return null;
+    defer parsed.deinit();
+    if (parsed.value != .object) return null;
+    const object = parsed.value.object;
+    return provider_types.ContextUsage.init(
+        jsonValueU64(object.get("used_tokens") orelse .null),
+        jsonValueU64(object.get("window_tokens") orelse .null),
+    );
 }
 
 pub fn applyDaemonDiffEventLocked(send_state: *SendState, payload_json: []const u8) !void {
@@ -9925,4 +9943,20 @@ pub fn applySendFailure(
     });
     thread.touch();
     if (persist_projection) self.markDirty();
+}
+
+test "daemon context_usage events update the live ring without transcript rows" {
+    var send_state: SendState = .{ .provider = .codex };
+    defer {
+        send_state.partial_text.deinit(std.heap.page_allocator);
+        freePendingTimelineEventsLocked(std.heap.page_allocator, &send_state.pending_events);
+    }
+    try applyDaemonChatEventLocked({}, &send_state, "context_usage", "{\"used_tokens\":76000,\"window_tokens\":200000}");
+    try std.testing.expectEqual(@as(u64, 76000), send_state.context_usage.?.used_tokens);
+    try std.testing.expectEqual(@as(u64, 200000), send_state.context_usage.?.window_tokens);
+    try std.testing.expectEqual(@as(usize, 0), send_state.pending_events.items.len);
+    // Malformed or windowless payloads keep the last good value.
+    try applyDaemonChatEventLocked({}, &send_state, "context_usage", "{\"used_tokens\":5,\"window_tokens\":0}");
+    try applyDaemonChatEventLocked({}, &send_state, "context_usage", "not json");
+    try std.testing.expectEqual(@as(u64, 76000), send_state.context_usage.?.used_tokens);
 }

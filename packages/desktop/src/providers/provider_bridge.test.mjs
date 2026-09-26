@@ -255,3 +255,37 @@ test('workspace roots reach Claude on resumed turns without widening permission 
   assert.equal(options.permissionMode, 'default');
   assert.equal(options.allowDangerouslySkipPermissions, undefined);
 });
+
+test('context usage reports the last top-level prompt against the result model window', { timeout: 2000 }, async () => {
+  const { context, events } = bridge();
+  const assistant = (usage, model = 'claude-opus-4-7', parent = null) => ({
+    type: 'assistant', parent_tool_use_id: parent, message: { model, content: [{ type: 'text', text: 'hi' }], usage },
+  });
+  await context.handleClaudeSendPrompt({ async *query({ prompt }) {
+    const input = prompt[Symbol.asyncIterator]();
+    await input.next();
+    yield assistant({ input_tokens: 5, cache_creation_input_tokens: 1000, cache_read_input_tokens: 20000, output_tokens: 40 });
+    // A subagent's own context must not replace the parent's sample.
+    yield assistant({ input_tokens: 90000, cache_read_input_tokens: 0 }, 'claude-haiku-4-5', 'agent');
+    yield assistant({ input_tokens: 12, cache_creation_input_tokens: 988, cache_read_input_tokens: 75000, output_tokens: 300 });
+    yield { type: 'result', result: 'reply', modelUsage: {
+      'claude-haiku-4-5': { contextWindow: 200000 },
+      'claude-opus-4-7': { contextWindow: 1000000 },
+    } };
+  } }, { prompt: 'test' });
+  const usage = events.filter(e => e.type === 'context_usage');
+  assert.equal(usage.length, 1);
+  assert.equal(usage[0].used_tokens, 76000);
+  assert.equal(usage[0].window_tokens, 1000000);
+});
+
+test('context usage is omitted when the result has no context window', { timeout: 2000 }, async () => {
+  const { context, events } = bridge();
+  await context.handleClaudeSendPrompt({ async *query({ prompt }) {
+    const input = prompt[Symbol.asyncIterator]();
+    await input.next();
+    yield { type: 'assistant', parent_tool_use_id: null, message: { model: 'm', content: [], usage: { input_tokens: 10 } } };
+    yield { type: 'result', result: 'reply' };
+  } }, { prompt: 'test' });
+  assert.equal(events.some(e => e.type === 'context_usage'), false);
+});

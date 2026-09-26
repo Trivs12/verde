@@ -3,6 +3,7 @@
 const std = @import("std");
 const palette = @import("palette");
 const provider_types = @import("headless").provider_types;
+pub const ContextUsage = provider_types.ContextUsage;
 const chat_threads = @import("../chat/threads.zig");
 const chat_markdown = @import("../ui/chat_markdown.zig");
 const platform_paths = @import("platform_paths");
@@ -404,6 +405,9 @@ pub const ChatThread = struct {
     access_mode: AccessMode = .full_access,
     provider: Provider = .opencode,
     harness: Harness = .local_cli,
+    /// Context-window occupancy the daemon recorded for this thread. Live
+    /// turn updates land on `send_state` first; see `contextUsage`.
+    persisted_context_usage: ?ContextUsage = null,
     /// Runtime/repository routing is independently selectable while this is a
     /// draft. `committed` is the durable-action boundary; route APIs lock the
     /// binding before evaluating changes once that bit is set.
@@ -612,6 +616,16 @@ pub const ChatThread = struct {
 
     pub fn touch(self: *ChatThread) void {
         self.last_activity_at = unixTimestampSeconds();
+    }
+
+    /// Latest known context-window occupancy: the newest live turn report,
+    /// else the daemon's recorded value. Null when the provider never
+    /// reported one (the composer hides its ring).
+    pub fn contextUsage(self: *const ChatThread) ?ContextUsage {
+        self.send_state.mutex.lock();
+        const live = self.send_state.context_usage;
+        self.send_state.mutex.unlock();
+        return live orelse self.persisted_context_usage;
     }
 
     pub fn isSubagentView(self: *const ChatThread) bool {
@@ -1226,6 +1240,9 @@ pub const SendState = struct {
     /// header keeps showing "Thinking" briefly past it so a reasoning burst
     /// that flickers pending/done between deltas does not flip the verb.
     thinking_cleared_at_ms: i64 = 0,
+    /// Latest `context_usage` turn event. Kept across turns (SendState lives
+    /// as long as its thread) so the ring does not blink between sends.
+    context_usage: ?ContextUsage = null,
     pending_events: std.ArrayListUnmanaged(PendingTimelineEvent) = .empty,
     pending_diff_files: std.ArrayListUnmanaged(PendingDiffFile) = .empty,
     /// Once present, a cumulative turn snapshot owns the changed-files card;

@@ -28,6 +28,7 @@ pub const ToolCallKind = provider_types.ToolCallKind;
 pub const isSubagentToolName = provider_types.isSubagentToolName;
 pub const ToolCallStatus = provider_types.ToolCallStatus;
 pub const ToolCallUpdate = provider_types.ToolCallUpdate;
+pub const ContextUsage = provider_types.ContextUsage;
 pub const StreamEvent = provider_types.StreamEvent;
 pub const SendPromptRequest = provider_types.SendPromptRequest;
 pub const SendPromptResult = provider_types.SendPromptResult;

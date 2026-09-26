@@ -1265,6 +1265,13 @@ pub const Client = struct {
 
             saw_mcp_tool_call = saw_mcp_tool_call or isMcpToolCallNotification(root);
 
+            if (contextUsageFromNotification(root, thread_id)) |usage| {
+                if (request.on_stream_event) |on_stream_event| {
+                    on_stream_event(request.stream_context, .{ .context_usage = usage });
+                }
+                continue;
+            }
+
             try emitNotificationEvent(self, root, &collab_agents, request);
 
             if (try appendNotificationDelta(root, allocator, &reply)) {
@@ -2359,6 +2366,25 @@ fn serverRequestKind(method: []const u8) ServerRequestKind {
     if (std.mem.eql(u8, method, "mcpServer/elicitation/request")) return .mcp_elicitation;
     if (std.mem.eql(u8, method, "item/tool/call")) return .dynamic_tool;
     return .unsupported;
+}
+
+/// Reads app-server v2 `thread/tokenUsage/updated` for this thread.
+/// `last` is the most recent model call; its `inputTokens` already include
+/// `cachedInputTokens` (OpenAI accounting), so it is the prompt currently in
+/// context. `total` is cumulative spend and is deliberately ignored.
+fn contextUsageFromNotification(root: std.json.Value, thread_id: []const u8) ?provider_types.ContextUsage {
+    const method = getOptionalObjectString(root, "method") orelse return null;
+    if (!std.mem.eql(u8, method, "thread/tokenUsage/updated")) return null;
+    const params = getObjectField(root, "params") orelse return null;
+    if (getOptionalObjectString(params, "threadId")) |notified_thread| {
+        if (!std.mem.eql(u8, notified_thread, thread_id)) return null;
+    }
+    const token_usage = getObjectField(params, "tokenUsage") orelse return null;
+    const last = getObjectField(token_usage, "last") orelse return null;
+    const input = getOptionalObjectInteger(last, "inputTokens") orelse return null;
+    const window = getOptionalObjectInteger(token_usage, "modelContextWindow") orelse return null;
+    if (input < 0 or window <= 0) return null;
+    return provider_types.ContextUsage.init(@intCast(input), @intCast(window));
 }
 
 fn getObjectField(value: std.json.Value, field: []const u8) ?std.json.Value {
@@ -4566,6 +4592,7 @@ const TestStreamEventCapture = struct {
                 }
                 self.diff_count += 1;
             },
+            .context_usage => {},
         }
     }
 
@@ -5647,4 +5674,32 @@ test "background terminal list matches the exact provider process" {
     ;
     try std.testing.expect(try backgroundTerminalListContainsProcess(std.testing.allocator, payload, "456"));
     try std.testing.expect(!try backgroundTerminalListContainsProcess(std.testing.allocator, payload, "45"));
+}
+
+test "codex token usage notification reports the last call against the model window" {
+    const allocator = std.testing.allocator;
+    const line =
+        \\{"jsonrpc":"2.0","method":"thread/tokenUsage/updated","params":{"threadId":"thr_1","turnId":"turn_1","tokenUsage":{"total":{"totalTokens":900000,"inputTokens":880000,"cachedInputTokens":700000,"outputTokens":20000,"reasoningOutputTokens":4000},"last":{"totalTokens":98000,"inputTokens":96900,"cachedInputTokens":90000,"outputTokens":1100,"reasoningOutputTokens":300},"modelContextWindow":258400}}}
+    ;
+    var parsed = try std.json.parseFromSlice(std.json.Value, allocator, line, .{});
+    defer parsed.deinit();
+    const usage = contextUsageFromNotification(parsed.value, "thr_1").?;
+    try std.testing.expectEqual(@as(u64, 96900), usage.used_tokens);
+    try std.testing.expectEqual(@as(u64, 258400), usage.window_tokens);
+    try std.testing.expectEqual(@as(u8, 38), usage.percent());
+    // A collab child's usage must not overwrite the parent thread's ring.
+    try std.testing.expect(contextUsageFromNotification(parsed.value, "thr_other") == null);
+}
+
+test "codex token usage without a context window is ignored" {
+    const allocator = std.testing.allocator;
+    const line =
+        \\{"jsonrpc":"2.0","method":"thread/tokenUsage/updated","params":{"threadId":"thr_1","turnId":"turn_1","tokenUsage":{"total":{"totalTokens":10,"inputTokens":8,"cachedInputTokens":0,"outputTokens":2,"reasoningOutputTokens":0},"last":{"totalTokens":10,"inputTokens":8,"cachedInputTokens":0,"outputTokens":2,"reasoningOutputTokens":0},"modelContextWindow":null}}}
+    ;
+    var parsed = try std.json.parseFromSlice(std.json.Value, allocator, line, .{});
+    defer parsed.deinit();
+    try std.testing.expect(contextUsageFromNotification(parsed.value, "thr_1") == null);
+    var other = try std.json.parseFromSlice(std.json.Value, allocator, "{\"method\":\"item/completed\",\"params\":{}}", .{});
+    defer other.deinit();
+    try std.testing.expect(contextUsageFromNotification(other.value, "thr_1") == null);
 }

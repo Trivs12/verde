@@ -54,6 +54,7 @@ pub const CheckboxEvent = checkbox_component.CheckboxEvent;
 pub const CodeViewConfig = code_view_component.CodeViewConfig;
 pub const ComposerPromptCallbacks = composer_prompt_component.ComposerPromptCallbacks;
 pub const ComposerPromptConfig = composer_prompt_component.ComposerPromptConfig;
+pub const ComposerPromptContextCells = composer_prompt_component.ComposerPromptContextCells;
 pub const ComposerPromptEvent = composer_prompt_component.ComposerPromptEvent;
 pub const ComposerPromptGeometry = composer_prompt_component.ComposerPromptGeometry;
 pub const ComposerPromptIconSlot = composer_prompt_component.ComposerPromptIconSlot;

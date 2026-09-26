@@ -64,6 +64,14 @@ pub const ComposerPromptConfig = struct {
     /// and `setShowAccessChip`).
     branch_max_width: f32 = 160.0,
     access_chip_max_width: f32 = 160.0,
+    /// Read-only context-usage indicator at the trailing end of the strip,
+    /// just before the runtime chip (see `setContextLabel`). The host draws
+    /// both its ring (in `context_icon`) and its label (in `context_text`);
+    /// the component only lays it out. Null fields fall back to the strip's.
+    context_icon_reserve: ?f32 = null,
+    context_icon_gap: ?f32 = null,
+    context_font_size: ?f32 = null,
+    context_max_width: f32 = 160.0,
     /// Circular attach button at the leading edge of an `inline_toolbar`
     /// frame, shown once the host calls `setShowAttach`. The host draws the
     /// circle and glyph in `attachRect()`. The slim bar's prompt text starts
@@ -273,6 +281,8 @@ pub const ComposerPromptGeometry = struct {
     branch: draw.Rect,
     access_chip: draw.Rect,
     runtime: draw.Rect,
+    /// Read-only context-usage indicator; zero width when hidden.
+    context: draw.Rect,
     model: draw.Rect,
     reasoning: draw.Rect,
     fast: draw.Rect,
@@ -286,6 +296,8 @@ pub const ComposerPromptGeometry = struct {
     branch_icon: draw.Rect,
     access_chip_icon: draw.Rect,
     runtime_icon: draw.Rect,
+    /// Square cell for the host-drawn context ring.
+    context_icon: draw.Rect,
     /// Label cells: merged model name / detail words / chevron, and the
     /// strip chip labels. Zero width outside the matching mode.
     model_text: draw.Rect,
@@ -295,8 +307,16 @@ pub const ComposerPromptGeometry = struct {
     branch_text: draw.Rect,
     access_chip_text: draw.Rect,
     runtime_text: draw.Rect,
+    context_text: draw.Rect,
     corner_radius: f32,
     inline_active: bool,
+};
+
+/// Host-drawn context indicator cells; see `Component.contextCells`.
+pub const ComposerPromptContextCells = struct {
+    chip: draw.Rect,
+    icon: draw.Rect,
+    text: draw.Rect,
 };
 
 /// Label overrides for `previewGeometry`, so an unfocused pane's preview is
@@ -309,6 +329,8 @@ pub const ComposerPromptPreviewLabels = struct {
     branch: ?[]const u8 = null,
     access_chip: ?[]const u8 = null,
     runtime: ?[]const u8 = null,
+    /// Empty hides the context indicator, as with `setContextLabel`.
+    context: ?[]const u8 = null,
     /// The preview's own send state, so a `running_only` send button
     /// matches that pane's turn instead of the live composer's.
     send_state: ?ComposerPromptSendState = null,
@@ -466,6 +488,7 @@ pub fn ComposerPrompt(comptime config: ComposerPromptConfig) type {
         runtime_label_buffer: std.ArrayList(u8) = .empty,
         branch_label_buffer: std.ArrayList(u8) = .empty,
         access_chip_label_buffer: std.ArrayList(u8) = .empty,
+        context_label_buffer: std.ArrayList(u8) = .empty,
         model_label_buffer: std.ArrayList(u8) = .empty,
         /// Muted variant words after the model name in the merged label.
         model_detail_label_buffer: std.ArrayList(u8) = .empty,
@@ -733,6 +756,7 @@ pub fn ComposerPrompt(comptime config: ComposerPromptConfig) type {
             self.runtime_label_buffer.deinit(allocator);
             self.branch_label_buffer.deinit(allocator);
             self.access_chip_label_buffer.deinit(allocator);
+            self.context_label_buffer.deinit(allocator);
             self.access_label_buffer.deinit(allocator);
             self.clearEditHistory(allocator);
             self.undo_stack.deinit(allocator);
@@ -835,6 +859,13 @@ pub fn ComposerPrompt(comptime config: ComposerPromptConfig) type {
 
         pub fn setAccessChipLabel(self: *Component, allocator: std.mem.Allocator, value: []const u8) !void {
             try setOwnedString(allocator, &self.access_chip_label_buffer, value);
+        }
+
+        /// Read-only context-usage label (e.g. "38% context") at the end of
+        /// the strip; empty hides the indicator. It is the first strip
+        /// control to drop when the strip runs out of room.
+        pub fn setContextLabel(self: *Component, allocator: std.mem.Allocator, value: []const u8) !void {
+            try setOwnedString(allocator, &self.context_label_buffer, value);
         }
 
         pub fn setModelLabel(self: *Component, allocator: std.mem.Allocator, value: []const u8) !void {
@@ -1108,6 +1139,7 @@ pub fn ComposerPrompt(comptime config: ComposerPromptConfig) type {
                 .branch = toolbar.branch,
                 .access_chip = toolbar.access_chip,
                 .runtime = toolbar.runtime,
+                .context = toolbar.context,
                 .model = toolbar.model,
                 .reasoning = toolbar.reasoning,
                 .fast = toolbar.fast,
@@ -1119,6 +1151,7 @@ pub fn ComposerPrompt(comptime config: ComposerPromptConfig) type {
                 .branch_icon = self.leadingIconCell(.branch, toolbar.branch),
                 .access_chip_icon = self.leadingIconCell(.access_chip, toolbar.access_chip),
                 .runtime_icon = self.leadingIconCell(.runtime, toolbar.runtime),
+                .context_icon = self.contextIconRect(toolbar.context),
                 .model_text = merged.name,
                 .detail_text = merged.detail,
                 .chevron = merged.chevron,
@@ -1126,6 +1159,7 @@ pub fn ComposerPrompt(comptime config: ComposerPromptConfig) type {
                 .branch_text = if (chips) self.stripChipTextRect(toolbar.branch) else zero,
                 .access_chip_text = if (chips) self.stripChipTextRect(toolbar.access_chip) else zero,
                 .runtime_text = if (chips) self.stripChipTextRect(toolbar.runtime) else zero,
+                .context_text = self.contextTextRect(toolbar.context),
                 .corner_radius = self.cornerRadius(),
                 .inline_active = config.inline_toolbar and self.inlineActive(),
             };
@@ -1342,6 +1376,13 @@ pub fn ComposerPrompt(comptime config: ComposerPromptConfig) type {
         /// Access chip on the outside strip; zero width when hidden.
         pub fn accessChipRect(self: *const Component) draw.Rect {
             return self.toolbarGeometry().access_chip;
+        }
+
+        /// Context indicator cells (chip, ring, label) for the host to draw;
+        /// every rect has zero width while the indicator is hidden.
+        pub fn contextCells(self: *const Component) ComposerPromptContextCells {
+            const chip = self.toolbarGeometry().context;
+            return .{ .chip = chip, .icon = self.contextIconRect(chip), .text = self.contextTextRect(chip) };
         }
 
         /// Leading attach button; zero width unless `showAttach`.
@@ -2255,6 +2296,10 @@ pub fn ComposerPrompt(comptime config: ComposerPromptConfig) type {
             return self.preview_labels.branch orelse self.branch_label_buffer.items;
         }
 
+        fn contextLabel(self: *const Component) []const u8 {
+            return self.preview_labels.context orelse self.context_label_buffer.items;
+        }
+
         fn accessChipLabel(self: *const Component) []const u8 {
             return self.preview_labels.access_chip orelse self.access_chip_label_buffer.items;
         }
@@ -2523,6 +2568,7 @@ pub fn ComposerPrompt(comptime config: ComposerPromptConfig) type {
             branch: draw.Rect,
             access_chip: draw.Rect,
             runtime: draw.Rect,
+            context: draw.Rect,
             attach: draw.Rect,
             model: draw.Rect,
             reasoning: draw.Rect,
@@ -2601,12 +2647,14 @@ pub fn ComposerPrompt(comptime config: ComposerPromptConfig) type {
             var runtime: draw.Rect = snapRect(.{ .x = toolbar.x + toolbar.w, .y = y, .w = 0.0, .h = control_h });
             var branch = runtime;
             var access_chip = runtime;
+            var context = runtime;
             if (directory_outside) {
                 const strip = self.stripRects(directory_w);
                 directory = strip.directory;
                 branch = strip.branch;
                 access_chip = strip.access_chip;
                 runtime = strip.runtime;
+                context = strip.context;
             } else if (self.show_directory_toggle) {
                 directory = snapRect(.{ .x = x, .y = y, .w = directory_w, .h = control_h });
                 x += directory_w + self.scaled(config.control_gap);
@@ -2640,6 +2688,7 @@ pub fn ComposerPrompt(comptime config: ComposerPromptConfig) type {
                 .branch = branch,
                 .access_chip = access_chip,
                 .runtime = runtime,
+                .context = context,
                 .attach = attach,
                 .model = model,
                 .reasoning = reasoning,
@@ -2649,14 +2698,16 @@ pub fn ComposerPrompt(comptime config: ComposerPromptConfig) type {
             };
         }
 
-        const StripRects = struct { directory: draw.Rect, branch: draw.Rect, access_chip: draw.Rect, runtime: draw.Rect };
+        const StripRects = struct { directory: draw.Rect, branch: draw.Rect, access_chip: draw.Rect, runtime: draw.Rect, context: draw.Rect };
 
         /// Controls on the strip under the frame: the directory control
         /// leads at its natural width, followed by the optional branch and
         /// access chips, and the runtime control trails at the far edge.
-        /// When space runs out the branch chip shrinks toward a short floor,
-        /// then the access and branch chips drop, and only then does the
-        /// directory control yield.
+        /// The read-only context indicator sits just before the runtime
+        /// control. When space runs out the context indicator drops first,
+        /// then the branch chip shrinks toward a short floor, then the access
+        /// and branch chips drop, and only then does the directory control
+        /// yield.
         fn stripRects(self: *const Component, pill_directory_w: f32) StripRects {
             const strip = self.directoryStripRect();
             const gap = self.scaled(config.control_gap);
@@ -2672,7 +2723,7 @@ pub fn ComposerPrompt(comptime config: ComposerPromptConfig) type {
                 self.pillWidth(true, 0.0, config.runtime_icon, self.runtimeLabel(), config.chevron_icon, config.runtime_min_width, config.runtime_max_width);
             var runtime_w: f32 = if (self.show_runtime_toggle) @min(natural_runtime_w, strip.w) else 0.0;
             const runtime_span = if (self.show_runtime_toggle) runtime_w + gap else 0.0;
-            const avail = @max(strip.w - runtime_span, 0.0);
+            var avail = @max(strip.w - runtime_span, 0.0);
 
             var branch_w: f32 = if (config.strip_chips and self.branchLabel().len > 0)
                 @min(self.stripChipWidth(self.branchLabel()), self.scaled(config.branch_max_width))
@@ -2682,6 +2733,12 @@ pub fn ComposerPrompt(comptime config: ComposerPromptConfig) type {
                 @min(self.stripChipWidth(self.accessChipLabel()), self.scaled(config.access_chip_max_width))
             else
                 0.0;
+            var context_w: f32 = if (config.strip_chips and self.contextLabel().len > 0)
+                @min(self.contextChipWidth(self.contextLabel()), self.scaled(config.context_max_width))
+            else
+                0.0;
+            if (stripLeadSpan(directory_w, branch_w, access_w, gap) + context_w + gap > avail) context_w = 0.0;
+            if (context_w > 0.0) avail -= context_w + gap;
             const overflow = stripLeadSpan(directory_w, branch_w, access_w, gap) - avail;
             if (overflow > 0.0 and branch_w > 0.0) {
                 const floor = @min(branch_w, self.stripChipWidth("") + self.stripMetrics().font_size * 3.0);
@@ -2706,11 +2763,14 @@ pub fn ComposerPrompt(comptime config: ComposerPromptConfig) type {
             const branch = snapRect(.{ .x = if (branch_w > 0.0) x + gap else x, .y = strip_y, .w = branch_w, .h = strip_control_h });
             if (branch_w > 0.0) x = branch.x + branch.w;
             const access_chip = snapRect(.{ .x = if (access_w > 0.0) x + gap else x, .y = strip_y, .w = access_w, .h = strip_control_h });
+            const context_right = if (runtime.w > 0.0) runtime.x - gap else strip.x + strip.w;
+            const context = snapRect(.{ .x = context_right - context_w, .y = strip_y, .w = context_w, .h = strip_control_h });
             return .{
                 .directory = directory,
                 .branch = branch,
                 .access_chip = access_chip,
                 .runtime = runtime,
+                .context = context,
             };
         }
 
@@ -2736,6 +2796,7 @@ pub fn ComposerPrompt(comptime config: ComposerPromptConfig) type {
             var runtime: draw.Rect = snapRect(.{ .x = toolbar.x + toolbar.w, .y = y, .w = 0.0, .h = control_h });
             var branch = runtime;
             var access_chip = runtime;
+            var context = runtime;
             if (self.show_directory_toggle) {
                 const directory_w = self.pillWidth(true, 0.0, config.directory_icon, self.directoryLabel(), config.chevron_icon, config.directory_min_width, config.directory_max_width);
                 if (self.directoryOutside()) {
@@ -2744,6 +2805,7 @@ pub fn ComposerPrompt(comptime config: ComposerPromptConfig) type {
                     branch = strip.branch;
                     access_chip = strip.access_chip;
                     runtime = strip.runtime;
+                    context = strip.context;
                 } else {
                     directory.w = @round(@min(directory_w, @max(send.x - gap - toolbar.x, 0.0)));
                     left += directory.w + gap;
@@ -2761,6 +2823,7 @@ pub fn ComposerPrompt(comptime config: ComposerPromptConfig) type {
                 .branch = branch,
                 .access_chip = access_chip,
                 .runtime = runtime,
+                .context = context,
                 .attach = attach,
                 .model = snapRect(.{ .x = label_x, .y = y, .w = split_x - label_x, .h = control_h }),
                 .reasoning = snapRect(.{ .x = split_x, .y = y, .w = label_right - split_x, .h = control_h }),
@@ -2903,6 +2966,48 @@ pub fn ComposerPrompt(comptime config: ComposerPromptConfig) type {
         fn stripChipTextRect(self: *const Component, chip: draw.Rect) draw.Rect {
             const x = chip.x + self.stripPadX() + self.stripIconReserve() + self.stripIconGap();
             return .{ .x = x, .y = chip.y, .w = @max(chip.x + chip.w - self.stripPadX() - self.stripChevronReserve() - x, 0.0), .h = chip.h };
+        }
+
+        /// Strip metrics at `context_font_size`, so the host-drawn label is
+        /// measured at the size it renders.
+        fn contextMetrics(self: *const Component) text_layout.FontMetrics {
+            var metrics = self.toolbarMetrics();
+            const size: f32 = if (config.context_font_size) |value| value else if (config.strip_font_size) |value| value else return metrics;
+            const ratio = size / config.toolbar_font_size;
+            metrics.font_size *= ratio;
+            metrics.line_height *= ratio;
+            if (metrics.fixed_advance) |advance| metrics.fixed_advance = advance * ratio;
+            if (metrics.ascent) |ascent| metrics.ascent = ascent * ratio;
+            if (metrics.descent) |descent| metrics.descent = descent * ratio;
+            if (metrics.baseline) |baseline| metrics.baseline = baseline * ratio;
+            return metrics;
+        }
+
+        fn contextIconReserve(self: *const Component) f32 {
+            return if (config.context_icon_reserve) |value| self.scaled(value) else self.stripIconReserve();
+        }
+
+        fn contextIconGap(self: *const Component) f32 {
+            return if (config.context_icon_gap) |value| self.scaled(value) else self.stripIconGap();
+        }
+
+        /// `[ring] label` with the strip's horizontal padding and no chevron.
+        fn contextChipWidth(self: *const Component, label: []const u8) f32 {
+            const metrics = self.contextMetrics();
+            const slack = self.scaled(config.pill_label_width_fudge) + metrics.font_size * 0.15;
+            return self.stripPadX() * 2.0 + self.contextIconReserve() + self.contextIconGap() + metrics.measureSlice(label) + slack;
+        }
+
+        fn contextIconRect(self: *const Component, chip: draw.Rect) draw.Rect {
+            if (chip.w <= 0.0) return .{ .x = chip.x, .y = chip.y, .w = 0.0, .h = 0.0 };
+            const reserve = @min(self.contextIconReserve(), chip.h);
+            return .{ .x = chip.x + self.stripPadX(), .y = chip.y + (chip.h - reserve) * 0.5, .w = reserve, .h = reserve };
+        }
+
+        fn contextTextRect(self: *const Component, chip: draw.Rect) draw.Rect {
+            if (chip.w <= 0.0) return .{ .x = chip.x, .y = chip.y, .w = 0.0, .h = chip.h };
+            const x = chip.x + self.stripPadX() + self.contextIconReserve() + self.contextIconGap();
+            return .{ .x = x, .y = chip.y, .w = @max(chip.x + chip.w - self.stripPadX() - x, 0.0), .h = chip.h };
         }
 
         fn separatorX(left: draw.Rect, right: draw.Rect) f32 {
@@ -3743,4 +3848,41 @@ test "composer prompt strip lays branch and access chips after the directory" {
     const preview = prompt.previewGeometry(prompt.bounds(), .{ .branch = "" });
     try std.testing.expectEqual(@as(f32, 0.0), preview.branch.w);
     try std.testing.expect(preview.access_chip.w > 0.0);
+}
+
+test "composer prompt context indicator trails the strip and drops first when narrow" {
+    var prompt = InlineTestPrompt.init();
+    defer prompt.deinit(std.testing.allocator);
+    try initInlineTestPrompt(&prompt);
+    try prompt.setDirectoryLabel(std.testing.allocator, "verde");
+    try prompt.setBranchLabel(std.testing.allocator, "main");
+    try std.testing.expectEqual(@as(f32, 0.0), prompt.contextCells().chip.w);
+
+    try prompt.setContextLabel(std.testing.allocator, "38% context");
+    const cells = prompt.contextCells();
+    const runtime = prompt.runtimeRect();
+    const branch = prompt.branchRect();
+    try std.testing.expect(cells.chip.w > 0.0);
+    // Sits right before the runtime chip, after the leading chips.
+    try std.testing.expect(cells.chip.x + cells.chip.w <= runtime.x);
+    try std.testing.expect(cells.chip.x >= branch.x + branch.w);
+    try std.testing.expectEqual(runtime.y, cells.chip.y);
+    // The ring cell leads the label, both inside the chip.
+    try std.testing.expect(cells.icon.w > 0.0 and cells.icon.w == cells.icon.h);
+    try std.testing.expect(cells.text.x >= cells.icon.x + cells.icon.w);
+    try std.testing.expect(cells.text.x + cells.text.w <= cells.chip.x + cells.chip.w + 0.5);
+    // Read-only: never a click target.
+    try std.testing.expectEqual(@as(?ComposerPromptPart, null), prompt.hitTest(.{ .x = cells.chip.x + 2, .y = cells.chip.y + 2 }));
+
+    // A narrow strip drops the indicator while the directory chip survives.
+    prompt.setBounds(.{ .x = 0, .y = 0, .w = 200, .h = prompt.preferredHeight(200, false, 1, 10) });
+    try std.testing.expectEqual(@as(f32, 0.0), prompt.contextCells().chip.w);
+    try std.testing.expect(prompt.directoryRect().w > 0.0);
+
+    // Preview labels override the live label; empty hides it.
+    prompt.setBounds(.{ .x = 0, .y = 0, .w = 600, .h = prompt.preferredHeight(600, false, 1, 10) });
+    const hidden = prompt.previewGeometry(prompt.bounds(), .{ .context = "" });
+    try std.testing.expectEqual(@as(f32, 0.0), hidden.context.w);
+    const shown = prompt.previewGeometry(prompt.bounds(), .{ .context = "91% context" });
+    try std.testing.expect(shown.context.w > 0.0 and shown.context_icon.w > 0.0 and shown.context_text.w > 0.0);
 }

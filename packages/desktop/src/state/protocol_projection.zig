@@ -81,6 +81,8 @@ pub fn snapshotThreadToPersisted(
         .runtime_id = thread.runtime_id,
         .repository_id = thread.repository_id,
         .repository_cwd = thread.repository_cwd,
+        .context_used_tokens = thread.context_used_tokens,
+        .context_window_tokens = thread.context_window_tokens,
         .draft = thread.draft,
         .draft_image = snapshotAttachment(thread.draft_image),
         .draft_extra_images = try snapshotAttachmentExtras(allocator, thread.draft_images),
