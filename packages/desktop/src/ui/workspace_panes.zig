@@ -123,6 +123,11 @@ const QUICK_PANE_BUTTON_ICON_CSS: f32 = 13.0;
 const QUICK_PANE_STRIP_RIGHT_PAD_CSS: f32 = 6.0;
 const QUICK_PANE_RESIZE_DOT_CSS: f32 = 1.6;
 const QUICK_PANE_RESIZE_DOT_STEP_CSS: f32 = 3.5;
+// Scrolling strip position indicator (design px, x `DESIGN_SCALE`).
+const SCROLLING_POSITION_GUTTER_CSS: f32 = 16.0;
+const SCROLLING_POSITION_BAR_W_CSS: f32 = 20.0;
+const SCROLLING_POSITION_BAR_H_CSS: f32 = 5.0;
+const SCROLLING_POSITION_BAR_GAP_CSS: f32 = 6.0;
 /// Lucide modifier glyphs sit a touch smaller than the key text.
 const SHORTCUT_GLYPH_RATIO: f32 = 0.95;
 
@@ -2129,7 +2134,7 @@ fn renderScrollingStrip(
     var group_ids: [MAX_WORKSPACE_PANE_RECTS]runtime.WorkspacePaneId = undefined;
     var representative_pane_ids: [MAX_WORKSPACE_PANE_RECTS]runtime.WorkspacePaneId = undefined;
     const pane_count = collectScrollingGroups(layout, &group_ids, &representative_pane_ids);
-    const viewport = scrollingViewportRect(workspace, gap, pane_count, state.app_config.workspace_panes_per_view);
+    var viewport = scrollingViewportRect(workspace, gap, pane_count, state.app_config.workspace_panes_per_view);
     const target_viewport_width = scrollingViewportExtent(target_workspace_width, gap, pane_count, state.app_config.workspace_panes_per_view);
     const viewport_has_margins = scrollingViewportUsesMargins(pane_count, state.app_config.workspace_panes_per_view);
     const viewport_extent = if (vertical) viewport.h else viewport.w;
@@ -2176,6 +2181,15 @@ fn renderScrollingStrip(
     const offset: *f32 = if (vertical) &layout.scroll_offset_y else &layout.scroll_offset_x;
     const target: *f32 = if (vertical) &layout.scroll_target_y else &layout.scroll_target_x;
     clampScrollingOffsets(offset, target, max_offset);
+    // The position indicator only earns its gutter when a horizontal strip
+    // actually scrolls; the gutter only shortens panes, so the width-based
+    // extents above are unaffected.
+    const position_gutter: ?palette.Rect = if (scrollingPositionVisible(vertical, strip_scrolls, pane_count, max_offset)) blk: {
+        const gutter_h = @min(designUi(SCROLLING_POSITION_GUTTER_CSS), viewport.h * 0.25);
+        viewport.h = @max(1.0, viewport.h - gutter_h);
+        const top = viewport.y + viewport.h;
+        break :blk .{ .x = viewport.x, .y = top, .w = viewport.w, .h = @max(0.0, workspace.y + workspace.h - top) };
+    } else null;
 
     const previous_viewport = layout.scroll_viewport_extent;
     layout.scroll_viewport_extent = viewport_extent;
@@ -2313,6 +2327,7 @@ fn renderScrollingStrip(
             );
             clipWorkspaceBatch(state, command_start, text_run_start, viewport);
             clipWorkspaceHitCaches(viewport);
+            if (position_gutter) |gutter| renderScrollingPosition(state, gutter, extents[0..pane_count], gap, offset.*, viewport_extent);
             renderScrollingEdgeNavigation(state, layout, viewport, direction, pane_count);
             return;
         }
@@ -2344,7 +2359,52 @@ fn renderScrollingStrip(
     }
     clipWorkspaceBatch(state, command_start, text_run_start, viewport);
     clipWorkspaceHitCaches(viewport);
+    if (position_gutter) |gutter| renderScrollingPosition(state, gutter, extents[0..pane_count], gap, offset.*, viewport_extent);
     renderScrollingEdgeNavigation(state, layout, viewport, direction, pane_count);
+}
+
+fn scrollingPositionVisible(vertical: bool, strip_scrolls: bool, pane_count: usize, max_offset: f32) bool {
+    return !vertical and strip_scrolls and pane_count > 1 and max_offset > SCROLLING_ANIMATION_EPSILON;
+}
+
+/// Whether a strip item counts as in view: at least half of it (or half the
+/// viewport, for items wider than it) is visible.
+fn scrollingItemInView(origin: f32, extent: f32, offset: f32, viewport_extent: f32) bool {
+    const visible = @min(origin + extent, offset + viewport_extent) - @max(origin, offset);
+    return visible >= @min(extent, viewport_extent) * 0.5;
+}
+
+// Strip position indicator: one short bar per item, centred in the bottom
+// gutter; in-view items in the text colour. Paint only, no hit targets.
+fn renderScrollingPosition(state: *runtime.AppState, gutter: palette.Rect, extents: []const f32, gap: f32, offset: f32, viewport_extent: f32) void {
+    if (extents.len == 0 or gutter.h <= 0.0) return;
+    const bar_w = designUi(SCROLLING_POSITION_BAR_W_CSS);
+    const bar_h = designUi(SCROLLING_POSITION_BAR_H_CSS);
+    const bar_gap = designUi(SCROLLING_POSITION_BAR_GAP_CSS);
+    const count: f32 = @floatFromInt(extents.len);
+    const total_w = count * bar_w + (count - 1.0) * bar_gap;
+    if (total_w > gutter.w) return;
+    var x = @round(gutter.x + (gutter.w - total_w) * 0.5);
+    const y = @round(gutter.y + (gutter.h - bar_h) * 0.5);
+    var origin: f32 = 0.0;
+    for (extents) |extent| {
+        const in_view = scrollingItemInView(origin, extent, offset, viewport_extent);
+        const color = if (in_view) theme.COLOR_WHITE else theme.borderMuted();
+        queueRounded(state, .{ .x = x, .y = y, .w = bar_w, .h = bar_h }, paletteColor(color), bar_h * 0.5);
+        x += bar_w + bar_gap;
+        origin += extent + gap;
+    }
+}
+
+test "strip position marks items at least half visible" {
+    try std.testing.expect(scrollingItemInView(0.0, 100.0, 0.0, 250.0));
+    try std.testing.expect(scrollingItemInView(200.0, 100.0, 0.0, 250.0));
+    try std.testing.expect(!scrollingItemInView(220.0, 100.0, 0.0, 250.0));
+    try std.testing.expect(scrollingItemInView(0.0, 600.0, 100.0, 250.0));
+    try std.testing.expect(!scrollingPositionVisible(false, true, 3, 0.0));
+    try std.testing.expect(!scrollingPositionVisible(true, true, 3, 200.0));
+    try std.testing.expect(!scrollingPositionVisible(false, false, 3, 200.0));
+    try std.testing.expect(scrollingPositionVisible(false, true, 3, 200.0));
 }
 
 const ScrollingEdgeAvailability = struct {
