@@ -34,7 +34,11 @@ const WORKSPACE_HEADER_CHEVRON_CONTROL_CSS: f32 = 22.0;
 const WORKSPACE_HEADER_CONTROL_GAP_CSS: f32 = 6.0;
 const WORKSPACE_HEADER_CONTROL_RADIUS_CSS: f32 = 5.0;
 const WORKSPACE_HEADER_HOVER_ALPHA: u8 = 16;
-const WORKSPACE_HEADER_TITLE_FONT_CSS: f32 = 14.5;
+/// Header title: the design's 14.5px title at the app's type scale (design
+/// px × 18/15; see `DESIGN_SCALE` in sidebar.zig).
+const WORKSPACE_HEADER_TITLE_FONT_CSS: f32 = 17.4;
+/// "in <workspace>" subtitle after the title (design 13px × 1.2).
+const WORKSPACE_HEADER_SUBTITLE_FONT_CSS: f32 = 15.6;
 /// Total composer footprint: the framed editor plus the directory strip
 /// under it (toolbar_height 32 + toolbar_gap 10 in the composer config).
 const COMPOSER_HEIGHT: f32 = 262.0;
@@ -2791,7 +2795,13 @@ fn renderHeader(state: *app_state.AppState, rect: palette.Rect, right_reserve: f
 
     const open_folder = state.defaultOpenShowsFolderIcon();
     const open_tex = state.defaultOpenIconTexture();
-    const open_main_w = theme.scaledUi(WORKSPACE_HEADER_ICON_CONTROL_CSS);
+    // Outlined "Open" button: target icon + label, then the menu chevron.
+    const open_label = "Open";
+    const open_label_font = theme.scaledUi(15.0);
+    const open_pad_x = theme.scaledUi(10.0);
+    const open_icon_w = theme.scaledUi(16.0);
+    const open_icon_gap = theme.scaledUi(7.0);
+    const open_main_w = open_pad_x + open_icon_w + open_icon_gap + chromeLabelWidth(open_label_font, open_label) + theme.scaledUi(2.0);
     const chevron_w = theme.scaledUi(WORKSPACE_HEADER_CHEVRON_CONTROL_CSS);
     const browser_w = theme.scaledUi(WORKSPACE_HEADER_ICON_CONTROL_CSS);
     const open_combo_w = open_main_w + chevron_w;
@@ -2837,6 +2847,27 @@ fn renderHeader(state: *app_state.AppState, rect: palette.Rect, right_reserve: f
             null,
             title_rect,
         ) catch {};
+        // "in <workspace>" follows a title that fits; it never competes with
+        // the title for width.
+        const title_w = text_measure.textPrefixWidth(.ui_medium, title_display, title_font, title_display.len);
+        const subtitle_font = theme.scaledUi(WORKSPACE_HEADER_SUBTITLE_FONT_CSS);
+        const subtitle_gap = theme.scaledUi(9.0);
+        const projects = state.project_controller.projects.items;
+        if (std.mem.eql(u8, title_display, cleaned.text) and projects.len > 0) {
+            const project_label = projects[@min(state.project_controller.selected_index, projects.len - 1)].label;
+            var subtitle_buf: [160]u8 = undefined;
+            const subtitle = std.fmt.bufPrint(&subtitle_buf, "in {s}", .{project_label}) catch "";
+            const subtitle_x = title_x + title_w + subtitle_gap;
+            const subtitle_w = chromeLabelWidth(subtitle_font, subtitle);
+            if (subtitle.len > 0 and subtitle_x + subtitle_w <= title_x + title_max_w) {
+                queueChromeLabel(state, .{
+                    .x = subtitle_x,
+                    .y = @round(center_y - subtitle_font * 0.68),
+                    .w = subtitle_w + theme.scaledUi(4.0),
+                    .h = subtitle_font * 1.36,
+                }, subtitle, paletteColor(theme.COLOR_TEXT_SUBTLE), subtitle_font, rect);
+            }
+        }
     }
 
     const mx = state.transcript_controller.palette_mouse_x;
@@ -2862,13 +2893,15 @@ fn renderHeader(state: *app_state.AppState, rect: palette.Rect, right_reserve: f
     if (chevron_hover) queueWorkspaceHeaderHoverFill(state, chevron_rect);
     if (browser_hover) queueWorkspaceHeaderHoverFill(state, browser_rect);
 
-    const icon_slot = theme.scaledUi(16.0);
-    const icon_x = open_main_rect.x + (open_main_rect.w - icon_slot) * 0.5;
+    // Hairline outline around the whole Open combo (main + chevron).
+    queueBorder(state, snapRect(.{ .x = open_main_rect.x, .y = open_main_rect.y, .w = open_main_rect.w + chevron_rect.w, .h = button_h }), paletteColor(theme.restingEdge()), theme.scaledUi(7.0), @max(theme.scaledUi(1.0), 1.0));
+    const icon_slot = open_icon_w;
+    const icon_x = open_main_rect.x + open_pad_x;
     const icon_cy = open_main_rect.y + button_h * 0.5;
     const text_color_open = workspaceHeaderIconColor(open_main_hover);
     if (open_folder) {
         const folder_w = theme.scaledUi(13.0);
-        queueWorkspaceHeaderFolderIcon(state, open_main_rect.x + (open_main_rect.w - folder_w) * 0.5, icon_cy, text_color_open);
+        queueWorkspaceHeaderFolderIcon(state, icon_x + (icon_slot - folder_w) * 0.5, icon_cy, text_color_open);
     } else if (open_tex) |cached| {
         const scaled = runtime.scaledImageSize(cached.width, cached.height, icon_slot, icon_slot);
         queueTintedImage(state, .{
@@ -2879,12 +2912,18 @@ fn renderHeader(state: *app_state.AppState, rect: palette.Rect, right_reserve: f
         }, cached, text_color_open, rect);
     } else {
         queueIconText(state, .{
-            .x = open_main_rect.x + (open_main_rect.w - icon_slot) * 0.5,
+            .x = icon_x,
             .y = open_main_rect.y + (open_main_rect.h - icon_slot) * 0.5,
             .w = icon_slot,
             .h = icon_slot,
         }, NF_COD_LINK_EXTERNAL, text_color_open, icon_slot, rect);
     }
+    queueChromeLabel(state, .{
+        .x = icon_x + icon_slot + open_icon_gap,
+        .y = @round(icon_cy - open_label_font * 0.68),
+        .w = chromeLabelWidth(open_label_font, open_label) + theme.scaledUi(4.0),
+        .h = open_label_font * 1.36,
+    }, open_label, if (can_open) paletteColor(theme.COLOR_WHITE) else text_color_open, open_label_font, rect);
 
     const chevron_size = theme.scaledUi(12.0);
     queueIconText(state, .{
