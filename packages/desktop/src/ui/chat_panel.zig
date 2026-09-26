@@ -1970,15 +1970,7 @@ fn transcriptSelectableBodyRect(
     {
         return null;
     }
-    const bubble_width = if (role == .user) column.w * 0.62 else column.w;
-    const bubble_x = if (role == .user) column.x + column.w - bubble_width else column.x;
-    const label_cut = transcriptLabelRowCut(labeled);
-    return .{
-        .x = bubble_x + theme.scaledUi(14.0),
-        .y = y + theme.scaledUi(34.0) - label_cut,
-        .w = bubble_width - theme.scaledUi(28.0),
-        .h = height - theme.scaledUi(42.0) + label_cut,
-    };
+    return transcriptRowBox(role, labeled, column, y, height, body).body;
 }
 
 fn buildTranscriptSelectableBodyView(
@@ -4805,7 +4797,7 @@ fn renderPendingTranscriptStream(state: *app_state.AppState, thread: *const app_
         } else {
             const role_label = transcriptRowLabel(state, event.role, event.author);
             if (y + item_h >= column.y and y <= column.y + column.h) {
-                renderTranscriptBubbleFromParts(state, column, y, item_h, event.role, role_label, event.body, false, false, clip, msg_idx, false, false);
+                renderTranscriptBubbleFromParts(state, column, y, item_h, event.role, role_label, event.body, false, false, clip, msg_idx, false, false, event.images.items.len);
                 const first_image: ?app_state.ChatImageAttachment = if (event.images.items.len > 0) event.images.items[0] else null;
                 const extra_images: []const app_state.ChatImageAttachment = if (event.images.items.len > 1) event.images.items[1..] else &.{};
                 renderTranscriptImagesFromParts(state, column, y, item_h, event.role, first_image, extra_images, clip);
@@ -4831,7 +4823,7 @@ fn renderPendingTranscriptStream(state: *app_state.AppState, thread: *const app_
     const stream_msg_idx = base_message_index + send_state.pending_events.items.len;
     const assistant_h = pendingStreamBodyHeight(state, send_state, stream_msg_idx, column.w, variant_hash);
     if (y + assistant_h >= column.y and y <= column.y + column.h) {
-        renderTranscriptBubbleFromParts(state, column, y, assistant_h, .assistant, working_label, body, stream_text.len == 0, stream_plain, clip, stream_msg_idx, stream_text.len > 0, true);
+        renderTranscriptBubbleFromParts(state, column, y, assistant_h, .assistant, working_label, body, stream_text.len == 0, stream_plain, clip, stream_msg_idx, stream_text.len > 0, true, 0);
     }
 }
 
@@ -5782,8 +5774,7 @@ fn transcriptImageBlockHeight(message: app_state.ChatMessage, column_width: f32)
 
 fn transcriptImageBlockHeightFor(role: app_state.ChatRole, count: usize, column_width: f32) f32 {
     if (count == 0) return 0.0;
-    const bubble_width = if (role == .user) column_width * 0.62 else column_width;
-    const inner_w = @max(bubble_width - theme.scaledUi(28.0), theme.scaledUi(80.0));
+    const inner_w = transcriptImageFrameWidth(role, column_width);
     const thumb_h = @max(@min(inner_w * 0.56, theme.scaledUi(220.0)), theme.scaledUi(96.0));
     const gap = theme.scaledUi(10.0);
     return gap + @as(f32, @floatFromInt(count)) * (thumb_h + gap);
@@ -5838,8 +5829,8 @@ fn transcriptMessageHeightStream(
     const font_size = theme.scaledUi(TRANSCRIPT_MARKDOWN_FONT_SIZE);
     // Rows without the small author label reclaim its reserved strip.
     const label_cut = transcriptLabelRowCut(labeled);
-    const body_width = if (role == .user) column_width * 0.62 else column_width;
-    const body_inner_width = @max(body_width - theme.scaledUi(28.0), theme.scaledUi(80.0));
+    const body_inner_width = transcriptBodyWrapWidth(role, column_width);
+    const plain_chrome = transcriptPlainRowChrome(role, labeled);
     if (role == .assistant and !assistant_plain_layout) {
         if (!streaming) {
             if (state) |app| {
@@ -5878,17 +5869,17 @@ fn transcriptMessageHeightStream(
             else
                 app.transcriptPlainBodyEntry(index, body);
             if (cached) |entry| {
-                return theme.scaledUi(46.0) - label_cut + chat_markdown.measureBodyHeight(entry.view, body_inner_width, transcriptPlainTextOptions(theme.COLOR_WHITE));
+                return plain_chrome + chat_markdown.measureBodyHeight(entry.view, body_inner_width, transcriptPlainTextOptions(theme.COLOR_WHITE));
             }
         }
     }
     var plain_view = chat_markdown.buildPlainBodyView(std.heap.page_allocator, body) catch {
         const chars_per_line = @max(@as(usize, @intFromFloat(body_inner_width / (font_size * 0.52))), 1);
         const line_count = wrappedLineCount(body, chars_per_line);
-        return theme.scaledUi(46.0) - label_cut + @as(f32, @floatFromInt(line_count)) * font_size * 1.38;
+        return plain_chrome + @as(f32, @floatFromInt(line_count)) * font_size * 1.38;
     };
     defer plain_view.deinit(std.heap.page_allocator);
-    return theme.scaledUi(46.0) - label_cut + chat_markdown.measureBodyHeight(plain_view, body_inner_width, transcriptPlainTextOptions(theme.COLOR_WHITE));
+    return plain_chrome + chat_markdown.measureBodyHeight(plain_view, body_inner_width, transcriptPlainTextOptions(theme.COLOR_WHITE));
 }
 
 /// Vertical strip reserved for a transcript row's small author label; rows
@@ -5899,12 +5890,115 @@ fn transcriptLabelRowCut(labeled: bool) f32 {
     return if (labeled) 0.0 else theme.scaledUi(TRANSCRIPT_LABEL_ROW_CUT);
 }
 
+/// User turns sit in a soft neutral bubble sized to their text and pinned to
+/// the right edge, with no author label (design: 10x16 padding, 18px radius,
+/// at most 500px wide). Values are design px (see `designUi`).
+const USER_BUBBLE_PAD_X_CSS: f32 = 16.0;
+const USER_BUBBLE_PAD_Y_CSS: f32 = 10.0;
+const USER_BUBBLE_RADIUS_CSS: f32 = 18.0;
+const USER_BUBBLE_MAX_W_CSS: f32 = 500.0;
+/// Narrow panes cap the bubble at this share of the column so it still reads
+/// as a right-aligned turn rather than a full-width block.
+const USER_BUBBLE_MAX_COLUMN_FRACTION: f32 = 0.85;
+/// Room added to the measured natural width so a shrunk bubble never
+/// re-wraps a line that the wrap-width measurement kept whole.
+const USER_BUBBLE_FIT_SLACK_CSS: f32 = 6.0;
+
+fn userBubbleMaxWidth(column_w: f32) f32 {
+    return @min(designUi(USER_BUBBLE_MAX_W_CSS), column_w * USER_BUBBLE_MAX_COLUMN_FRACTION);
+}
+
+/// Width a generic row's body wraps at. Heights are measured at this width,
+/// so it must not depend on anything the height cache key omits.
+fn transcriptBodyWrapWidth(role: app_state.ChatRole, column_w: f32) f32 {
+    return switch (role) {
+        .user => @max(userBubbleMaxWidth(column_w) - designUi(USER_BUBBLE_PAD_X_CSS) * 2.0, theme.scaledUi(80.0)),
+        .assistant, .system => @max(column_w - theme.scaledUi(28.0), theme.scaledUi(80.0)),
+    };
+}
+
+/// Vertical chrome a generic row adds around its measured plain-text body.
+fn transcriptPlainRowChrome(role: app_state.ChatRole, labeled: bool) f32 {
+    return switch (role) {
+        .user => designUi(USER_BUBBLE_PAD_Y_CSS) * 2.0,
+        .assistant, .system => theme.scaledUi(46.0) - transcriptLabelRowCut(labeled),
+    };
+}
+
+/// Width of image attachment frames under a row.
+fn transcriptImageFrameWidth(role: app_state.ChatRole, column_w: f32) f32 {
+    return switch (role) {
+        .user => @max(userBubbleMaxWidth(column_w), theme.scaledUi(80.0)),
+        .assistant, .system => @max(column_w - theme.scaledUi(28.0), theme.scaledUi(80.0)),
+    };
+}
+
+/// Widest line of `body` in transcript plain-text metrics, or null as soon as
+/// a line reaches `limit` (the body then wraps and fills the bubble).
+fn transcriptPlainNaturalWidth(body: []const u8, limit: f32) ?f32 {
+    const font_size = theme.scaledUi(TRANSCRIPT_MARKDOWN_FONT_SIZE);
+    // Cheap early-out for long lines: no glyph is narrower than this.
+    const min_byte_w = font_size * 0.2;
+    var widest: f32 = 0.0;
+    var lines = std.mem.splitScalar(u8, body, '\n');
+    while (lines.next()) |raw_line| {
+        const line = std.mem.trimEnd(u8, raw_line, "\r\t ");
+        if (@as(f32, @floatFromInt(line.len)) * min_byte_w >= limit) return null;
+        const width = text_measure.textWidth(.prose, font_size, line);
+        if (width >= limit) return null;
+        widest = @max(widest, width);
+    }
+    return widest;
+}
+
+fn userBubbleWidth(column_w: f32, body: []const u8) f32 {
+    const max_w = userBubbleMaxWidth(column_w);
+    const pad_x = designUi(USER_BUBBLE_PAD_X_CSS);
+    const natural = transcriptPlainNaturalWidth(body, transcriptBodyWrapWidth(.user, column_w)) orelse return max_w;
+    return @min(max_w, natural + pad_x * 2.0 + designUi(USER_BUBBLE_FIT_SLACK_CSS));
+}
+
+const TranscriptRowBox = struct {
+    /// Row surface; only the user bubble is filled.
+    bubble: palette.Rect,
+    /// Selectable body text area.
+    body: palette.Rect,
+};
+
+/// Geometry of a generic transcript row (user bubble, assistant reply,
+/// system notice). Rendering, selection and link hit-testing share it.
+fn transcriptRowBox(role: app_state.ChatRole, labeled: bool, column: palette.Rect, y: f32, height: f32, body_raw: []const u8) TranscriptRowBox {
+    switch (role) {
+        .user => {
+            const width = userBubbleWidth(column.w, std.mem.trim(u8, body_raw, "\n\r\t "));
+            const pad_x = designUi(USER_BUBBLE_PAD_X_CSS);
+            const pad_y = designUi(USER_BUBBLE_PAD_Y_CSS);
+            const bubble = palette.Rect{ .x = column.x + column.w - width, .y = y, .w = width, .h = height };
+            return .{ .bubble = bubble, .body = .{
+                .x = bubble.x + pad_x,
+                .y = y + pad_y,
+                .w = @max(width - pad_x * 2.0, theme.scaledUi(1.0)),
+                .h = @max(height - pad_y * 2.0, theme.scaledUi(1.0)),
+            } };
+        },
+        .assistant, .system => {
+            const label_cut = transcriptLabelRowCut(labeled);
+            return .{ .bubble = .{ .x = column.x, .y = y, .w = column.w, .h = height }, .body = .{
+                .x = column.x + theme.scaledUi(14.0),
+                .y = y + theme.scaledUi(34.0) - label_cut,
+                .w = column.w - theme.scaledUi(28.0),
+                .h = height - theme.scaledUi(42.0) + label_cut,
+            } };
+        },
+    }
+}
+
 /// Ordinary assistant replies carry no author label: the thread's provider
 /// is implied. The label stays when it tells authors apart, i.e. the reply
 /// came from a different provider than the thread's current one (the model
 /// picker can switch providers mid-thread). Generic "Assistant" authors and
-/// empty authors never distinguish anything. User and system rows keep their
-/// labels.
+/// empty authors never distinguish anything. User bubbles never carry a
+/// label; system rows keep theirs.
 fn assistantAuthorLabelShown(author: []const u8, thread_provider_label: []const u8) bool {
     const name = std.mem.trim(u8, author, " \t");
     if (name.len == 0 or std.ascii.eqlIgnoreCase(name, "Assistant")) return false;
@@ -5912,6 +6006,7 @@ fn assistantAuthorLabelShown(author: []const u8, thread_provider_label: []const 
 }
 
 fn transcriptRowLabeled(state: *app_state.AppState, role: app_state.ChatRole, author: []const u8) bool {
+    if (role == .user) return false;
     if (role != .assistant) return true;
     return assistantAuthorLabelShown(author, utils.providerLabel(state.currentThread().provider));
 }
@@ -5920,7 +6015,7 @@ fn transcriptRowLabeled(state: *app_state.AppState, role: app_state.ChatRole, au
 fn transcriptRowLabel(state: *app_state.AppState, role: app_state.ChatRole, author: []const u8) ?[]const u8 {
     if (!transcriptRowLabeled(state, role, author)) return null;
     return switch (role) {
-        .user => "You",
+        .user => null,
         .assistant => author,
         .system => if (author.len > 0) author else "System",
     };
@@ -5998,7 +6093,7 @@ fn renderTranscriptMessage(state: *app_state.AppState, thread: *const app_state.
         }
     }
     const role_label = transcriptRowLabel(state, message.role, message.author);
-    renderTranscriptBubbleFromParts(state, column, y, height, message.role, role_label, message.body, false, false, clip, message_index, false, false);
+    renderTranscriptBubbleFromParts(state, column, y, height, message.role, role_label, message.body, false, false, clip, message_index, false, false, transcriptImageCount(message));
     renderTranscriptImages(state, column, y, height, message, clip);
 }
 
@@ -6121,11 +6216,12 @@ fn renderTranscriptImagesFromParts(
     const count = (if (first_image != null) @as(usize, 1) else 0) + extra_images.len;
     if (count == 0) return;
 
-    const bubble_width = if (role == .user) column.w * 0.62 else column.w;
-    const bubble_x = if (role == .user) column.x + column.w - bubble_width else column.x;
     const pad = theme.scaledUi(14.0);
     const gap = theme.scaledUi(10.0);
-    const inner_w = @max(bubble_width - pad * 2.0, theme.scaledUi(80.0));
+    const inner_w = transcriptImageFrameWidth(role, column.w);
+    // User attachments sit right-aligned under the text bubble at its
+    // maximum width; other rows keep them inset in the column.
+    const frame_x = if (role == .user) column.x + column.w - inner_w else column.x + pad;
     const thumb_h = @max(@min(inner_w * 0.56, theme.scaledUi(220.0)), theme.scaledUi(96.0));
     var image_y = y + height - transcriptImageBlockHeightFor(role, count, column.w) + gap;
 
@@ -6136,7 +6232,7 @@ fn renderTranscriptImagesFromParts(
         else
             extra_images[index];
         const frame = palette.Rect{
-            .x = bubble_x + pad,
+            .x = frame_x,
             .y = image_y,
             .w = inner_w,
             .h = thumb_h,
@@ -8622,6 +8718,8 @@ fn renderTranscriptBubbleFromParts(
     message_index: usize,
     streaming: bool,
     active: bool,
+    /// Attachments drawn under the row; the user bubble's fill stops above them.
+    image_count: usize,
 ) void {
     if (childNotification(role, body_raw)) |notification| {
         // Region: clickable child identity header; the message body remains selectable.
@@ -8671,16 +8769,19 @@ fn renderTranscriptBubbleFromParts(
         }
         return;
     }
-    const bubble_width = if (role == .user) column.w * 0.62 else column.w;
-    const bubble_x = if (role == .user) column.x + column.w - bubble_width else column.x;
-    const bubble = snapRect(palette.Rect{ .x = bubble_x, .y = y, .w = bubble_width, .h = height });
+    const box = transcriptRowBox(role, role_label != null, column, y, height, body_raw);
+    const bubble = snapRect(box.bubble);
     // Replies render directly on the pane background with no card; the
     // user's own turns sit in a soft neutral bubble. Live state is carried by
     // the pulsing dot beside the role label, not by the bubble edge.
     const rr = transcriptBubbleCornerRadius();
     const activity = if (active) theme.activityPulse(profiler.nowNs()) else 0.0;
     switch (role) {
-        .user => queueRoundedClipped(state, bubble, paletteColor(theme.userBubble()), rr, clip),
+        .user => {
+            var fill = bubble;
+            fill.h = @max(fill.h - transcriptImageBlockHeightFor(.user, image_count, column.w), theme.scaledUi(1.0));
+            queueRoundedClipped(state, fill, paletteColor(theme.userBubble()), designUi(USER_BUBBLE_RADIUS_CSS), clip);
+        },
         .assistant => {},
         .system => queueRoundedShellClipped(state, bubble, paletteColor(theme.wash(theme.COLOR_YELLOW, 54)), paletteColor(theme.restingEdge()), rr, clip),
     }
@@ -8713,13 +8814,7 @@ fn renderTranscriptBubbleFromParts(
             .h = theme.scaledUi(20.0),
         }, label, paletteColor(if (active) theme.COLOR_GREEN else theme.COLOR_TEXT_MUTED), theme.scaledUi(13.0), .ui_medium, clip);
     }
-    const label_cut = transcriptLabelRowCut(role_label != null);
-    const body_rect = palette.Rect{
-        .x = bubble.x + theme.scaledUi(14.0),
-        .y = bubble.y + theme.scaledUi(34.0) - label_cut,
-        .w = bubble.w - theme.scaledUi(28.0),
-        .h = bubble.h - theme.scaledUi(42.0) + label_cut,
-    };
+    const body_rect = box.body;
     const body_text = std.mem.trim(u8, body_raw, "\n\r\t ");
     last_body_tail = null;
     if (role == .assistant and !muted_body and !assistant_plain_layout) {
