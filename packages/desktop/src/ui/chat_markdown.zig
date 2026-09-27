@@ -1827,6 +1827,9 @@ const TextBlockLayoutState = struct {
     y: f32,
     line_height: f32,
     line_start: bool,
+    /// Set after breaking a token mid-word: the next emitted step starts a
+    /// visual line that continues the previous one without a separator.
+    join_pending: bool,
 
     fn init(base_line_height: f32) TextBlockLayoutState {
         return .{
@@ -1835,6 +1838,7 @@ const TextBlockLayoutState = struct {
             .y = 0.0,
             .line_height = base_line_height,
             .line_start = true,
+            .join_pending = false,
         };
     }
 
@@ -1843,6 +1847,7 @@ const TextBlockLayoutState = struct {
         self.x = 0.0;
         self.line_height = self.base_line_height;
         self.line_start = true;
+        self.join_pending = false;
     }
 
     fn totalHeight(self: TextBlockLayoutState) f32 {
@@ -1860,7 +1865,70 @@ const TextBlockLayoutStep = struct {
     y: f32,
     width: f32,
     line_height: f32,
+    /// First step of a visual line produced by breaking one token across
+    /// lines; copy joins it to the previous line without a newline.
+    joins_previous_line: bool = false,
 };
+
+/// Bytes after which an over-long token prefers to break (paths, URLs,
+/// identifiers), before falling back to the last codepoint that fits.
+fn isTokenBreakAfter(byte: u8) bool {
+    return switch (byte) {
+        '/', '-', '_', '.', '=', '&', '?' => true,
+        else => false,
+    };
+}
+
+/// Byte length of the UTF-8 sequence starting at `text[index]`, clamped so a
+/// malformed or truncated sequence still advances by at least one byte.
+fn codepointByteLen(text: []const u8, index: usize) usize {
+    const len = std.unicode.utf8ByteSequenceLength(text[index]) catch return 1;
+    return @min(@as(usize, len), text.len - index);
+}
+
+/// End byte (exclusive) of the longest prefix of `text[start..end]` that fits
+/// in `max_width` under the real text metrics, always on a codepoint boundary
+/// and at least one codepoint long so layout makes progress. Prefers breaking
+/// just after a path-like separator inside that prefix.
+fn tokenBreakEnd(role: palette.FontRole, font_size: f32, text: []const u8, start: usize, end: usize, max_width: f32) usize {
+    std.debug.assert(start < end);
+    const first_end = start + codepointByteLen(text, start);
+    if (first_end >= end) return end;
+
+    // Binary search over codepoint boundaries; prefix width grows with length.
+    var fit_end = first_end;
+    var low: usize = first_end;
+    var high: usize = end;
+    while (low < high) {
+        var mid = low + (high - low + 1) / 2;
+        // Snap `mid` back onto a codepoint boundary.
+        while (mid > low and mid < end and (text[mid] & 0xC0) == 0x80) : (mid -= 1) {}
+        if (mid <= low) {
+            // No boundary strictly between low and high other than low: try
+            // the next boundary after low directly.
+            const next = low + codepointByteLen(text, low);
+            if (next > high or next > end) break;
+            if (text_measure.textWidth(role, font_size, text[start..next]) <= max_width) {
+                fit_end = next;
+                low = next;
+                continue;
+            }
+            break;
+        }
+        if (text_measure.textWidth(role, font_size, text[start..mid]) <= max_width) {
+            fit_end = mid;
+            low = mid;
+        } else {
+            high = mid - 1;
+        }
+    }
+
+    var index = fit_end;
+    while (index > start + 1) : (index -= 1) {
+        if (isTokenBreakAfter(text[index - 1])) return index;
+    }
+    return fit_end;
+}
 
 /// Single-space advance for a role/size, isolated via an interior measurement
 /// (`"x x"` minus `"xx"`). `TTF_GetStringSize` trims trailing whitespace, so a
@@ -1899,6 +1967,71 @@ fn segmentAdvance(role: palette.FontRole, font_size: f32, slice: []const u8, sta
     return w;
 }
 
+/// Emits a layout step, tagging the first step after a mid-token break.
+fn emitTextBlockLayoutStep(
+    state: *TextBlockLayoutState,
+    context: anytype,
+    comptime on_step: fn (@TypeOf(context), TextBlockLayoutStep) void,
+    step: TextBlockLayoutStep,
+) void {
+    var tagged = step;
+    tagged.joins_previous_line = state.join_pending;
+    state.join_pending = false;
+    on_step(context, tagged);
+}
+
+/// Style and metrics shared by every step of one inline text run.
+const TextRunLayout = struct {
+    block_style: TextStyle,
+    inline_style: InlineStyle,
+    href: ?[]const u8,
+    font_spec: FontSpec,
+    line_height: f32,
+    font_size: f32,
+    role: palette.FontRole,
+};
+
+/// A word placed at the start of a visual line that is wider than the whole
+/// line would overflow the wrap width. Break it at codepoint boundaries into
+/// full-line pieces (see `tokenBreakEnd`) until the remainder fits, and return
+/// the byte offset where the remainder starts.
+fn breakOverlongWord(
+    state: *TextBlockLayoutState,
+    context: anytype,
+    comptime on_step: fn (@TypeOf(context), TextBlockLayoutStep) void,
+    run: TextRunLayout,
+    slice: []const u8,
+    word_start: usize,
+    word_end: usize,
+    width: f32,
+) usize {
+    std.debug.assert(state.line_start);
+    var start = word_start;
+    while (start < word_end) {
+        const word_w = text_measure.textWidth(run.role, run.font_size, slice[start..word_end]);
+        if (word_w <= width) break;
+        const piece_end = tokenBreakEnd(run.role, run.font_size, slice, start, word_end, width);
+        if (piece_end >= word_end) break;
+        const piece = slice[start..piece_end];
+        emitTextBlockLayoutStep(state, context, on_step, .{
+            .text = piece,
+            .block_style = run.block_style,
+            .inline_style = run.inline_style,
+            .href = run.href,
+            .font_spec = run.font_spec,
+            .x = state.x,
+            .y = state.y,
+            .width = text_measure.textWidth(run.role, run.font_size, piece),
+            .line_height = run.line_height,
+        });
+        state.line_height = @max(state.line_height, run.line_height);
+        state.advanceLine();
+        state.join_pending = true;
+        start = piece_end;
+    }
+    return start;
+}
+
 fn walkTextBlockLayout(
     block: TextBlockView,
     available_width: f32,
@@ -1919,6 +2052,15 @@ fn walkTextBlockLayout(
                 const slice = block.text[text_run.start..text_run.end];
                 const layout_font_size = fontSizeForSpecWithOptions(spec, options);
                 const measure_role = markdownFontRole(block.style, text_run.style);
+                const run_layout: TextRunLayout = .{
+                    .block_style = block.style,
+                    .inline_style = text_run.style,
+                    .href = text_run.href,
+                    .font_spec = spec,
+                    .line_height = chunk_line_height,
+                    .font_size = layout_font_size,
+                    .role = measure_role,
+                };
 
                 // Emit one step per (style-run ∩ visual-line) instead of one
                 // per whitespace-delimited word. Internal spaces ride inside
@@ -1952,7 +2094,7 @@ fn walkTextBlockLayout(
                             // on its own so the spans keep their gap.
                             const ws = slice[ws_start..slice.len];
                             const ws_w = whitespaceAdvanceForRole(measure_role, layout_font_size, ws);
-                            on_step(context, .{
+                            emitTextBlockLayoutStep(&state, context, on_step, .{
                                 .text = ws,
                                 .block_style = block.style,
                                 .inline_style = text_run.style,
@@ -1981,7 +2123,11 @@ fn walkTextBlockLayout(
                         }
                         // Drop leading whitespace at the true start of a line;
                         // keep the inter-run space when continuing mid-line.
-                        seg_start = if (state.line_start) word_start else ws_start;
+                        // A token wider than the line is broken first.
+                        seg_start = if (state.line_start)
+                            breakOverlongWord(&state, context, on_step, run_layout, slice, word_start, word_end, width)
+                        else
+                            ws_start;
                         seg_x = state.x;
                         seg_end = word_end;
                         seg_active = true;
@@ -1999,7 +2145,7 @@ fn walkTextBlockLayout(
                     // whitespace at the break is consumed (not rendered).
                     const flush = slice[seg_start..seg_end];
                     const flush_w = segmentAdvance(measure_role, layout_font_size, slice, seg_start, seg_end);
-                    on_step(context, .{
+                    emitTextBlockLayoutStep(&state, context, on_step, .{
                         .text = flush,
                         .block_style = block.style,
                         .inline_style = text_run.style,
@@ -2012,7 +2158,7 @@ fn walkTextBlockLayout(
                     });
                     state.line_height = @max(state.line_height, chunk_line_height);
                     state.advanceLine();
-                    seg_start = word_start;
+                    seg_start = breakOverlongWord(&state, context, on_step, run_layout, slice, word_start, word_end, width);
                     seg_x = state.x;
                     seg_end = word_end;
                 }
@@ -2020,7 +2166,7 @@ fn walkTextBlockLayout(
                 if (seg_active) {
                     const seg = slice[seg_start..seg_end];
                     const seg_w = segmentAdvance(measure_role, layout_font_size, slice, seg_start, seg_end);
-                    on_step(context, .{
+                    emitTextBlockLayoutStep(&state, context, on_step, .{
                         .text = seg,
                         .block_style = block.style,
                         .inline_style = text_run.style,
@@ -2249,6 +2395,9 @@ const SelectableLine = struct {
     height: f32,
     total_columns: usize,
     chunks: []SelectableLineChunk,
+    /// Continues a token broken at the end of the previous visual line, so
+    /// copied text joins the two without a newline.
+    joins_previous: bool = false,
 };
 
 const SelectableCodeLineChunk = struct {
@@ -2790,6 +2939,7 @@ fn buildSelectableTextLines(
         current_y: ?f32 = null,
         current_height: f32 = 0.0,
         current_columns: usize = 0,
+        current_joins_previous: bool = false,
         options: RenderOptions,
         failed: ?Allocator.Error = null,
 
@@ -2805,6 +2955,7 @@ fn buildSelectableTextLines(
                 .height = self.current_height,
                 .total_columns = self.current_columns,
                 .chunks = owned_chunks,
+                .joins_previous = self.current_joins_previous,
             }) catch {
                 self.allocator.free(owned_chunks);
                 self.failed = error.OutOfMemory;
@@ -2828,6 +2979,7 @@ fn buildSelectableTextLines(
                 self.current_y = step.y;
                 self.current_height = step.line_height;
                 self.current_columns = 0;
+                self.current_joins_previous = step.joins_previous_line;
             }
 
             const chunk_columns = countColumns(step.text);
@@ -2954,7 +3106,7 @@ fn renderSelectableLine(
 
             if (copy_selection) {
                 if (copied_any_line.*) {
-                    copy_builder.append(allocator, '\n') catch {};
+                    if (!line.joins_previous) copy_builder.append(allocator, '\n') catch {};
                 } else {
                     copied_any_line.* = true;
                 }
@@ -4457,4 +4609,166 @@ test "markdown headings use the chrome emphasis face" {
     try std.testing.expectEqual(palette.FontRole.ui_medium, markdownFontRole(.heading_2, .{}));
     // Inline code inside a heading still switches to the code face.
     try std.testing.expectEqual(palette.FontRole.code, markdownFontRole(.heading_2, .{ .code = true }));
+}
+
+const long_token_path = "<output-file>/private/tmp/claude-502/-Users-taylorwork-Desktop-GitHub-revicare/d3e86eea-d5dc-4d3f-b/x.output</output-file>";
+const long_token_test_options: RenderOptions = .{ .base_font_size = 16.0, .line_height = 22.0 };
+
+/// Asserts every visual line of `lines` stays within `width` and that the
+/// chunks, rejoined across broken-token boundaries, reproduce `expected`.
+fn expectLinesFitAndRejoin(allocator: Allocator, lines: []const SelectableLine, width: f32, expected: []const u8) !void {
+    var rejoined: std.ArrayList(u8) = .empty;
+    defer rejoined.deinit(allocator);
+    for (lines, 0..) |line, index| {
+        // Word wraps consume one space unless the previous chunk kept it.
+        const ends_in_space = rejoined.items.len > 0 and isInlineWhitespace(rejoined.items[rejoined.items.len - 1]);
+        if (index > 0 and !line.joins_previous and !ends_in_space) try rejoined.append(allocator, ' ');
+        for (line.chunks) |chunk| {
+            try std.testing.expect(chunk.x + chunk.width <= width + 0.001);
+            try std.testing.expect(std.unicode.utf8ValidateSlice(chunk.text));
+            try rejoined.appendSlice(allocator, chunk.text);
+        }
+    }
+    try std.testing.expectEqualStrings(expected, rejoined.items);
+}
+
+test "an unbroken token wider than the wrap width breaks into lines that fit" {
+    const allocator = std.testing.allocator;
+    var body = try buildPlainBodyView(allocator, long_token_path);
+    defer body.deinit(allocator);
+    const width: f32 = 160.0;
+    const lines = try buildSelectableTextLines(allocator, body.blocks[0].text, width, long_token_test_options);
+    defer deinitSelectableLines(allocator, lines);
+
+    try std.testing.expect(lines.len > 3);
+    try expectLinesFitAndRejoin(allocator, lines, width, long_token_path);
+    for (lines[1..]) |line| try std.testing.expect(line.joins_previous);
+
+    // Height measurement walks the same layout as selection and rendering.
+    const last = lines[lines.len - 1];
+    try std.testing.expectApproxEqAbs(last.y + last.height, measureBodyHeight(body, width, long_token_test_options), 0.001);
+}
+
+test "a long token after ordinary words wraps first, then breaks" {
+    const allocator = std.testing.allocator;
+    const source = "see " ++ long_token_path ++ " done";
+    var body = try buildPlainBodyView(allocator, source);
+    defer body.deinit(allocator);
+    const width: f32 = 200.0;
+    const lines = try buildSelectableTextLines(allocator, body.blocks[0].text, width, long_token_test_options);
+    defer deinitSelectableLines(allocator, lines);
+
+    try std.testing.expectEqualStrings("see", lines[0].chunks[0].text);
+    try std.testing.expect(!lines[1].joins_previous);
+    try expectLinesFitAndRejoin(allocator, lines, width, source);
+}
+
+test "overlong tokens prefer breaking after a path separator" {
+    const text = "alpha/bravocharliedeltaechofoxtrot";
+    const font_size: f32 = 16.0;
+    // Room for "alpha/bra" but not the whole token.
+    const width = text_measure.textWidth(.prose, font_size, "alpha/bra") + 0.01;
+    const end = tokenBreakEnd(.prose, font_size, text, 0, text.len, width);
+    try std.testing.expectEqualStrings("alpha/", text[0..end]);
+
+    // Without a separator in the fitting prefix, break at the last codepoint that fits.
+    const plain = "bravocharliedeltaechofoxtrot";
+    const plain_end = tokenBreakEnd(.prose, font_size, plain, 0, plain.len, width);
+    try std.testing.expect(text_measure.textWidth(.prose, font_size, plain[0..plain_end]) <= width);
+    try std.testing.expect(text_measure.textWidth(.prose, font_size, plain[0 .. plain_end + 1]) > width);
+
+    // A width narrower than one glyph still makes progress by one codepoint.
+    try std.testing.expectEqual(@as(usize, 1), tokenBreakEnd(.prose, font_size, plain, 0, plain.len, 0.5));
+}
+
+test "overlong token breaks stay on UTF-8 codepoint boundaries" {
+    const allocator = std.testing.allocator;
+    const source = "日本語テキストéàü→日本語テキストéàü→日本語テキストéàü→日本語テキスト";
+    var body = try buildPlainBodyView(allocator, source);
+    defer body.deinit(allocator);
+    const width: f32 = 90.0;
+    const lines = try buildSelectableTextLines(allocator, body.blocks[0].text, width, long_token_test_options);
+    defer deinitSelectableLines(allocator, lines);
+
+    try std.testing.expect(lines.len > 2);
+    try expectLinesFitAndRejoin(allocator, lines, width, source);
+
+    // Even a width below one wide glyph emits whole codepoints.
+    const narrow = try buildSelectableTextLines(allocator, body.blocks[0].text, 4.0, long_token_test_options);
+    defer deinitSelectableLines(allocator, narrow);
+    try std.testing.expectEqual(countColumns(source), narrow.len);
+    for (narrow) |line| try std.testing.expect(std.unicode.utf8ValidateSlice(line.chunks[0].text));
+}
+
+fn copySelectionAtWidth(allocator: Allocator, body: BodyView, width: f32, selection: SelectionRange) ![]u8 {
+    var batch: palette.RenderBatch = .{};
+    defer batch.deinit(allocator);
+    var frame_text: std.ArrayList(u8) = .empty;
+    defer frame_text.deinit(allocator);
+    var text_arena = std.heap.ArenaAllocator.init(allocator);
+    defer text_arena.deinit();
+    var context: PaletteRenderContext = .{
+        .allocator = allocator,
+        .batch = &batch,
+        .frame_text = &frame_text,
+        .text_arena = &text_arena,
+        .cursor = .{ .x = 0.0, .y = 0.0, .w = width, .h = 2000.0 },
+        .available_width = width,
+    };
+    var output = renderSelectablePaletteBody(&context, allocator, body, long_token_test_options, selection, true);
+    defer output.deinit(allocator);
+    return allocator.dupe(u8, std.mem.sliceTo(output.copied_text.?, 0));
+}
+
+test "selection offsets map across a broken token and copy it whole" {
+    const allocator = std.testing.allocator;
+    const source = long_token_path ++ "\nnext line";
+    var body = try buildPlainBodyView(allocator, source);
+    defer body.deinit(allocator);
+    const width: f32 = 160.0;
+    const lines = try buildSelectableTextLines(allocator, body.blocks[0].text, width, long_token_test_options);
+    defer deinitSelectableLines(allocator, lines);
+    try std.testing.expect(lines.len > 3);
+
+    // Whole body: the broken token copies without inserted newlines.
+    const last = try lastSelectablePointInBody(allocator, body, width, long_token_test_options);
+    const whole = try copySelectionAtWidth(allocator, body, width, .{ .anchor = .{ .line_index = 0, .column = 0 }, .focus = last });
+    defer allocator.free(whole);
+    try std.testing.expectEqualStrings(source, whole);
+
+    // Partial: column 3 of the first visual line through column 2 of the second.
+    const first_columns = lines[0].total_columns;
+    const partial = try copySelectionAtWidth(allocator, body, width, .{
+        .anchor = .{ .line_index = 0, .column = 3 },
+        .focus = .{ .line_index = 1, .column = 2 },
+    });
+    defer allocator.free(partial);
+    try std.testing.expectEqualStrings(long_token_path[3 .. first_columns + 2], partial);
+
+    // Hit-testing the continuation line resolves to columns on that visual line.
+    const second = lines[1];
+    const hit = (try hitTestSelectablePaletteBody(
+        allocator,
+        body,
+        long_token_test_options,
+        .{ .x = 0.0, .y = 0.0, .w = width, .h = 2000.0 },
+        width,
+        second.chunks[0].x + second.chunks[0].width + 1.0,
+        second.y + second.height * 0.5,
+    )).?;
+    try std.testing.expectEqual(@as(usize, 1), hit.line_index);
+    try std.testing.expectEqual(second.total_columns, hit.column);
+}
+
+test "assistant markdown paragraphs and inline code break overlong tokens" {
+    const allocator = std.testing.allocator;
+    const source = "Wrote `" ++ long_token_path ++ "` and **" ++ long_token_path ++ "** today.";
+    var body = try buildBodyView(allocator, source);
+    defer body.deinit(allocator);
+    const width: f32 = 180.0;
+    const block = body.blocks[0].text;
+    const lines = try buildSelectableTextLines(allocator, block, width, long_token_test_options);
+    defer deinitSelectableLines(allocator, lines);
+    try std.testing.expect(lines.len > 4);
+    try expectLinesFitAndRejoin(allocator, lines, width, block.text);
 }
