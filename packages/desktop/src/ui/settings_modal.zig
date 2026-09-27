@@ -45,6 +45,8 @@ pub const Control = enum(u8) {
     workspace_tabs_disabled,
     companion_character_dropdown,
     ui_font_family_dropdown,
+    user_bubble_neutral,
+    user_bubble_verde,
     tool_groups_collapsed,
     tool_groups_expanded,
     tool_groups_remember_last,
@@ -451,6 +453,8 @@ const SettingsLayout = struct {
     // Appearance
     theme_dropdown: palette.Rect = OFFSCREEN,
     ui_font_family_dropdown: palette.Rect = OFFSCREEN,
+    user_bubble_neutral: palette.Rect = OFFSCREEN,
+    user_bubble_verde: palette.Rect = OFFSCREEN,
     ui_font_dec: palette.Rect = OFFSCREEN,
     ui_font_inc: palette.Rect = OFFSCREEN,
     reduced_motion: palette.Rect = OFFSCREEN,
@@ -746,6 +750,9 @@ fn buildPage(state: *runtime.AppState, layout: *SettingsLayout, scroll_y: f32) v
             const ui_font = b.stepperRow("UI font size");
             layout.ui_font_dec = ui_font.dec;
             layout.ui_font_inc = ui_font.inc;
+            const bubble = b.segmentRow(2, "Message bubble", .{ "Neutral", "Verde" });
+            layout.user_bubble_neutral = bubble[0];
+            layout.user_bubble_verde = bubble[1];
 
             b.group("Motion");
             layout.reduced_motion = b.switchRowDescribed("Reduce motion", "Turn off animation everywhere, or pick areas below");
@@ -1285,6 +1292,8 @@ pub fn registerHits(state: *runtime.AppState, width: f32, height: f32, queue_hit
         queueControlHit(state, layout.ui_font_dec, layout.body_clip, .ui_font_dec, queue_hit);
         queueControlHit(state, layout.ui_font_inc, layout.body_clip, .ui_font_inc, queue_hit);
         queueControlHit(state, layout.ui_font_family_dropdown, layout.body_clip, .ui_font_family_dropdown, queue_hit);
+        queueControlHit(state, layout.user_bubble_neutral, layout.body_clip, .user_bubble_neutral, queue_hit);
+        queueControlHit(state, layout.user_bubble_verde, layout.body_clip, .user_bubble_verde, queue_hit);
         queueControlHit(state, layout.reduced_motion, layout.body_clip, .reduced_motion, queue_hit);
         for (REDUCED_MOTION_PARTS, layout.reduced_motion_parts) |part, rect| {
             queueControlHit(state, rect, layout.body_clip, part.control, queue_hit);
@@ -1435,6 +1444,7 @@ pub fn render(state: *runtime.AppState, width: f32, height: f32) void {
             drawDropdown(state, layout.theme_dropdown, state.settingsThemeChoiceLabel(selected_theme), .theme_dropdown, state.settings_controller.theme_dropdown_open, clip);
             drawDropdown(state, layout.ui_font_family_dropdown, draft.ui_font_family.label(), .ui_font_family_dropdown, state.settings_controller.ui_font_family_dropdown_open, clip);
             drawStepper(state, draft.font_size, app_config.MIN_FONT_SIZE, app_config.MAX_FONT_SIZE, .ui_font_dec, .ui_font_inc, layout.ui_font_dec, layout.ui_font_inc, clip);
+            drawSegmented(state, &.{ layout.user_bubble_neutral, layout.user_bubble_verde }, &.{ "Neutral", "Verde" }, @intFromEnum(draft.user_bubble_style), &.{ .user_bubble_neutral, .user_bubble_verde }, clip);
             const motion = draft.reduced_motion;
             drawSwitchRow(state, layout.reduced_motion, motion.all(), isControlHovered(state, .reduced_motion), clip);
             for (REDUCED_MOTION_PARTS, layout.reduced_motion_parts) |part, rect| {
@@ -1885,6 +1895,8 @@ pub fn applyControl(state: *runtime.AppState, control_index: usize) void {
         .tool_groups_collapsed => state.settings_controller.draft.tool_call_group_preference = .collapsed,
         .tool_groups_expanded => state.settings_controller.draft.tool_call_group_preference = .expanded,
         .tool_groups_remember_last => state.settings_controller.draft.tool_call_group_preference = .remember_last,
+        .user_bubble_neutral => state.settings_controller.draft.user_bubble_style = .neutral,
+        .user_bubble_verde => state.settings_controller.draft.user_bubble_style = .verde,
         .diff_layout_stacked => state.settings_controller.draft.diff_layout_preference = .stacked,
         .diff_layout_split => state.settings_controller.draft.diff_layout_preference = .split,
         .automatic_chat_titles => state.settings_controller.draft.automatic_chat_titles_enabled = !state.settings_controller.draft.automatic_chat_titles_enabled,
@@ -4046,6 +4058,35 @@ test "pane navigation unzoom setting is a persisted draft toggle" {
     try std.testing.expect(state.settings_controller.draft.unzoom_on_pane_navigation);
     try std.testing.expect(state.app_config.unzoom_on_pane_navigation);
     try std.testing.expect(!state.isSettingsDraftDirty());
+}
+
+test "message bubble style is a live appearance segment" {
+    const allocator = std.testing.allocator;
+    defer theme.applyTheme(1.0);
+    theme.applyTheme(1.0);
+    var state = testSettingsState(allocator);
+    defer deinitTestSettingsState(&state, allocator);
+
+    const width: f32 = 1200.0;
+    const height: f32 = 900.0;
+    const layout = computeLayout(&state, width, height);
+    try std.testing.expect(layout.user_bubble_neutral.y > layout.ui_font_dec.y);
+    try std.testing.expect(layout.reduced_motion.y > layout.user_bubble_neutral.y + layout.user_bubble_neutral.h);
+
+    state.palette_modal_hits.clearRetainingCapacity();
+    registerHits(&state, width, height, captureSettingsHit);
+    var saw_verde = false;
+    for (state.palette_modal_hits.items) |hit| {
+        if (hit.action == .settings_control and hit.index == @intFromEnum(Control.user_bubble_verde)) saw_verde = true;
+    }
+    try std.testing.expect(saw_verde);
+
+    try std.testing.expectEqual(app_config.UserBubbleStyle.neutral, state.app_config.user_bubble_style);
+    applyControl(&state, @intFromEnum(Control.user_bubble_verde));
+    try std.testing.expectEqual(app_config.UserBubbleStyle.verde, state.app_config.user_bubble_style);
+    try std.testing.expect(!state.isSettingsDraftDirty());
+    applyControl(&state, @intFromEnum(Control.user_bubble_neutral));
+    try std.testing.expectEqual(app_config.UserBubbleStyle.neutral, state.app_config.user_bubble_style);
 }
 
 test "reduced motion setting is a persisted draft toggle" {

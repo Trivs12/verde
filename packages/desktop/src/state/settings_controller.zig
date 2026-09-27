@@ -152,6 +152,7 @@ pub const Category = enum(u8) {
 pub const Draft = struct {
     font_size: f32 = theme.DEFAULT_FONT_SIZE,
     ui_font_family: app_config.UiFontFamily = .classic,
+    user_bubble_style: app_config.UserBubbleStyle = .neutral,
     terminal_font_size: f32 = app_config.DEFAULT_TERMINAL_FONT_SIZE,
     workspace_pane_gap: f32 = app_config.DEFAULT_WORKSPACE_PANE_GAP,
     workspace_panes_per_view: u8 = app_config.DEFAULT_WORKSPACE_PANES_PER_VIEW,
@@ -391,6 +392,7 @@ pub fn syncSettingsDraftFromConfig(self: anytype) void {
     self.settings_controller.draft = .{
         .font_size = self.app_config.font_size,
         .ui_font_family = self.app_config.ui_font_family,
+        .user_bubble_style = self.app_config.user_bubble_style,
         .terminal_font_size = self.app_config.terminal_font_size,
         .workspace_pane_gap = self.app_config.workspace_pane_gap,
         .workspace_panes_per_view = self.app_config.workspace_panes_per_view,
@@ -439,6 +441,7 @@ pub fn isSettingsDraftDirty(self: anytype) bool {
     const draft = self.settings_controller.draft;
     if (draft.font_size != self.app_config.font_size) return true;
     if (draft.ui_font_family != self.app_config.ui_font_family) return true;
+    if (draft.user_bubble_style != self.app_config.user_bubble_style) return true;
     if (draft.terminal_font_size != self.app_config.terminal_font_size) return true;
     if (draft.workspace_pane_gap != self.app_config.workspace_pane_gap) return true;
     if (draft.workspace_panes_per_view != self.app_config.workspace_panes_per_view) return true;
@@ -631,6 +634,7 @@ fn applySettingsDraftToConfig(self: anytype) !void {
     try self.app_config.selectThemeChoice(self.allocator, self.settings_controller.draft.theme_choice);
     self.app_config.font_size = theme.clampf(self.settings_controller.draft.font_size, app_config.MIN_FONT_SIZE, app_config.MAX_FONT_SIZE);
     self.app_config.ui_font_family = self.settings_controller.draft.ui_font_family;
+    self.app_config.user_bubble_style = self.settings_controller.draft.user_bubble_style;
     self.app_config.terminal_font_size = theme.clampf(self.settings_controller.draft.terminal_font_size, app_config.MIN_TERMINAL_FONT_SIZE, app_config.MAX_TERMINAL_FONT_SIZE);
     self.app_config.workspace_pane_gap = theme.clampf(self.settings_controller.draft.workspace_pane_gap, app_config.MIN_WORKSPACE_PANE_GAP, app_config.MAX_WORKSPACE_PANE_GAP);
     const next_panes_per_view = std.math.clamp(self.settings_controller.draft.workspace_panes_per_view, app_config.MIN_WORKSPACE_PANES_PER_VIEW, app_config.MAX_WORKSPACE_PANES_PER_VIEW);

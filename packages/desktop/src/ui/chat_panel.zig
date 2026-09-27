@@ -8851,14 +8851,16 @@ fn renderTranscriptBubbleFromParts(
     }
     const bubble = snapRect(box.bubble);
     // Replies render directly on the pane background with no card; the
-    // user's own turns sit in a soft neutral bubble. Live state is carried by
-    // the pulsing dot beside the role label, not by the bubble edge.
+    // user's own turns sit in a soft bubble (neutral or accent-tinted, per
+    // `ui.user_bubble_style`). Live state is carried by the pulsing dot
+    // beside the role label, not by the bubble edge.
     const activity = if (active) theme.activityPulse(profiler.nowNs()) else 0.0;
+    const user_bubble = theme.userBubbleColors(state.app_config.user_bubble_style);
     switch (role) {
         .user => {
             var fill = bubble;
             fill.h = @max(fill.h - transcriptImageBlockHeightFor(.user, image_count, column.w), theme.scaledUi(1.0));
-            queueRoundedClipped(state, fill, paletteColor(theme.userBubble()), designUi(USER_BUBBLE_RADIUS_CSS), clip);
+            queueRoundedClipped(state, fill, paletteColor(user_bubble.fill), designUi(USER_BUBBLE_RADIUS_CSS), clip);
         },
         .assistant, .system => {},
     }
@@ -8902,7 +8904,7 @@ fn renderTranscriptBubbleFromParts(
             message_index,
             body_rect,
             body_text,
-            if (muted_body) theme.COLOR_TEXT_MUTED else theme.COLOR_WHITE,
+            if (muted_body) theme.COLOR_TEXT_MUTED else if (role == .user) user_bubble.text else theme.COLOR_WHITE,
             clip,
             streaming,
         );

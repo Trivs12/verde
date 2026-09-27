@@ -56,6 +56,7 @@ A complete example:
   "ui": {
     "font_size": 20,
     "font_family": "geist",
+    "user_bubble_style": "neutral",
     "workspace_pane_gap": 12,
     "workspace_panes_per_view": 2,
     "workspace_split_default_pane": "chat",
@@ -138,6 +139,9 @@ Most of these options also appear in Settings:
   macOS, Inter elsewhere). The
   family covers chrome, chat prose, and chat code blocks and applies without a
   restart; terminals keep their own font.
+  Message bubble (`ui.user_bubble_style`) picks the fill for your own chat
+  messages: `neutral` (default) or `verde`, a soft green tint derived from the
+  active theme's accent.
 - **Transcript** — tool-call groups: `collapsed`, `expanded`, or
   `remember_last`.
 - **Chat** — generate concise chat titles automatically after the opening

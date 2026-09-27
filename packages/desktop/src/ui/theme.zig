@@ -422,6 +422,78 @@ pub fn userBubble() [4]f32 {
     return mix(current_colors.background, current_colors.text, 0.07);
 }
 
+/// Fill treatment for the user's own transcript turns (`ui.user_bubble_style`).
+pub const UserBubbleStyle = enum {
+    /// Soft neutral lift from the background (`userBubble`).
+    neutral,
+    /// Soft green tint derived from the active accent.
+    verde,
+
+    pub fn parse(value: []const u8) ?UserBubbleStyle {
+        inline for (std.meta.fields(UserBubbleStyle)) |field| {
+            if (std.ascii.eqlIgnoreCase(value, field.name)) return @enumFromInt(field.value);
+        }
+        return null;
+    }
+};
+
+pub const UserBubbleColors = struct {
+    fill: [4]f32,
+    text: [4]f32,
+};
+
+/// Minimum WCAG contrast kept between user bubble text and its fill.
+const USER_BUBBLE_MIN_CONTRAST: f32 = 4.5;
+
+/// Fill and body text colour for the user's own transcript turns.
+pub fn userBubbleColors(style: UserBubbleStyle) UserBubbleColors {
+    return userBubbleColorsFor(style, current_colors);
+}
+
+fn userBubbleColorsFor(style: UserBubbleStyle, palette_colors: ThemeColors) UserBubbleColors {
+    const text = palette_colors.text;
+    switch (style) {
+        .neutral => return .{ .fill = mix(palette_colors.background, text, 0.07), .text = text },
+        .verde => {
+            const accent_color = withAlpha(palette_colors.accent, 255);
+            const light = relativeLuma(palette_colors.background) > relativeLuma(text);
+            // Light palettes tint the white panel lightly and darken the accent
+            // toward the ink; dark palettes need a stronger tint to read as
+            // green and lighten the accent toward the foreground instead.
+            const fill = withAlpha(if (light)
+                mix(palette_colors.panel, accent_color, 0.15)
+            else
+                mix(palette_colors.background, accent_color, 0.22), 255);
+            var amount: f32 = if (light) 0.42 else 0.85;
+            var bubble_text = mix(accent_color, text, amount);
+            // Custom accents can land too close to the fill; walk toward the
+            // theme's own text colour until the body stays readable.
+            while (contrastRatio(bubble_text, fill) < USER_BUBBLE_MIN_CONTRAST and amount < 1.0) {
+                amount = @min(amount + 0.1, 1.0);
+                bubble_text = mix(accent_color, text, amount);
+            }
+            return .{ .fill = fill, .text = withAlpha(bubble_text, 255) };
+        },
+    }
+}
+
+/// WCAG 2 relative luminance of an sRGB colour (alpha ignored).
+pub fn wcagLuminance(color: [4]f32) f32 {
+    var linear: [3]f32 = undefined;
+    for (0..3) |index| {
+        const channel = clampf(color[index], 0.0, 1.0);
+        linear[index] = if (channel <= 0.04045) channel / 12.92 else std.math.pow(f32, (channel + 0.055) / 1.055, 2.4);
+    }
+    return linear[0] * 0.2126 + linear[1] * 0.7152 + linear[2] * 0.0722;
+}
+
+/// WCAG 2 contrast ratio (1..21) between two opaque colours.
+pub fn contrastRatio(a: [4]f32, b: [4]f32) f32 {
+    const la = wcagLuminance(a);
+    const lb = wcagLuminance(b);
+    return (@max(la, lb) + 0.05) / (@min(la, lb) + 0.05);
+}
+
 /// Chooses the active theme foreground or background token with the clearest
 /// luminance separation from a filled control. This keeps accent buttons
 /// readable for both light and dark custom themes.
@@ -1399,4 +1471,49 @@ test "withHue keeps lightness and moves the hue" {
         @min(verde_dark_colors.accent[0], @min(verde_dark_colors.accent[1], verde_dark_colors.accent[2]))) * 0.5;
     const blue_lightness = (@max(blue[0], @max(blue[1], blue[2])) + @min(blue[0], @min(blue[1], blue[2]))) * 0.5;
     try std.testing.expectApproxEqAbs(original_lightness, blue_lightness, 0.01);
+}
+
+fn expectNearHex(expected: [4]f32, actual: [4]f32) !void {
+    for (0..3) |index| try std.testing.expectApproxEqAbs(expected[index], actual[index], 6.0 / 255.0);
+}
+
+test "verde user bubble derives a readable green from the accent" {
+    const light = userBubbleColorsFor(.verde, verde_light_colors);
+    try expectNearHex(rgb(0xDC, 0xEF, 0xE3), light.fill);
+    try expectNearHex(rgb(0x14, 0x53, 0x2D), light.text);
+    try std.testing.expect(contrastRatio(light.text, light.fill) >= 4.5);
+
+    const dark = userBubbleColorsFor(.verde, verde_dark_colors);
+    try expectNearHex(rgb(0x1D, 0x3A, 0x2B), dark.fill);
+    try expectNearHex(rgb(0xCF, 0xEF, 0xDD), dark.text);
+    try std.testing.expect(contrastRatio(dark.text, dark.fill) >= 4.5);
+
+    // Selected text inside the bubble sits on the translucent selection fill.
+    for ([_]ThemeColors{ verde_light_colors, verde_dark_colors }) |palette_colors| {
+        const colors_for = userBubbleColorsFor(.verde, palette_colors);
+        const selected = mix(colors_for.fill, withAlpha(palette_colors.selection, 255), 210.0 / 255.0);
+        try std.testing.expect(contrastRatio(colors_for.text, selected) >= 4.5);
+    }
+}
+
+test "neutral user bubble keeps the existing fill and text" {
+    const saved = current_colors;
+    defer current_colors = saved;
+    current_colors = verde_light_colors;
+    const neutral = userBubbleColors(.neutral);
+    try std.testing.expectEqual(userBubble(), neutral.fill);
+    try std.testing.expectEqual(verde_light_colors.text, neutral.text);
+}
+
+test "verde user bubble text falls back toward the theme text for low-contrast accents" {
+    var palette_colors = verde_light_colors;
+    palette_colors.accent = rgb(0xB8, 0xF5, 0xC8);
+    const pale = userBubbleColorsFor(.verde, palette_colors);
+    try std.testing.expect(contrastRatio(pale.text, pale.fill) >= 4.5);
+}
+
+test "user bubble style parses case-insensitively" {
+    try std.testing.expectEqual(UserBubbleStyle.verde, UserBubbleStyle.parse("Verde").?);
+    try std.testing.expectEqual(UserBubbleStyle.neutral, UserBubbleStyle.parse("neutral").?);
+    try std.testing.expect(UserBubbleStyle.parse("green") == null);
 }
