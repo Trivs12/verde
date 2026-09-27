@@ -1521,6 +1521,8 @@ pub fn render(state: *runtime.AppState, width: f32, height: f32) void {
         },
         .app => drawUpdatesPage(state, layout, m),
     }
+    // After the controls so a switch row's hover fill sits under its label.
+    drawPageLabels(state, layout);
 
     drawBodyScrollbar(state, layout);
     drawThemeDropdownMenu(state, layout);
@@ -2540,6 +2542,16 @@ fn drawPageChrome(state: *runtime.AppState, layout: SettingsLayout) void {
         if (row.divider) {
             queueRoundedRectClipped(state, .{ .x = rect.x + pad, .y = rect.y, .w = rect.w - pad * 2.0, .h = 1.0 }, paletteColor(rowHairline()), 0.0, clip);
         }
+    }
+}
+
+/// Row labels and descriptions, drawn over the page's controls pass.
+fn drawPageLabels(state: *runtime.AppState, layout: SettingsLayout) void {
+    const clip = layout.body_clip;
+    const plan = &layout.page;
+    const pad = designUi(ROW_PAD_X);
+    for (plan.rows[0..plan.row_count]) |row| {
+        const rect = row.rect;
         if (row.style == .custom or row.label.len == 0) continue;
         const sub = row.style == .sub;
         const label_x = rect.x + pad + (if (sub) designUi(SUB_ROW_INDENT) else 0.0);
