@@ -9,6 +9,7 @@ const provider_cli_version = @import("../providers/cli_version.zig");
 const settings_controller = @import("../state/settings_controller.zig");
 const updater = @import("../app/updater.zig");
 const theme = @import("theme.zig");
+const context_menu = @import("context_menu.zig");
 const runtime = @import("runtime.zig");
 const text_measure = @import("text_measure.zig");
 const utils = @import("../utils.zig");
@@ -2439,23 +2440,8 @@ fn drawModalChrome(state: *runtime.AppState, width: f32, height: f32, layout: Se
     const modal = layout.modal;
     const radius = designUi(DIALOG_RADIUS);
     queueRoundedRect(state, .{ .x = 0.0, .y = 0.0, .w = width, .h = height }, paletteColor(theme.scrim(SHELL_SCRIM_ALPHA)), 0.0);
-    // Approximates `0 24px 64px rgba(20,20,18,.22)` with a few soft layers.
-    const ShadowLayer = struct { spread: f32, offset: f32, alpha: f32 };
-    const layers = [_]ShadowLayer{
-        .{ .spread = 28.0, .offset = 22.0, .alpha = 0.035 },
-        .{ .spread = 16.0, .offset = 16.0, .alpha = 0.045 },
-        .{ .spread = 8.0, .offset = 10.0, .alpha = 0.06 },
-        .{ .spread = 2.0, .offset = 3.0, .alpha = 0.06 },
-    };
-    for (layers) |layer| {
-        const spread = designUi(layer.spread);
-        queueRoundedRect(state, .{
-            .x = modal.x - spread,
-            .y = modal.y - spread + designUi(layer.offset),
-            .w = modal.w + spread * 2.0,
-            .h = modal.h + spread * 2.0,
-        }, paletteColor(theme.scrim(layer.alpha)), radius + spread);
-    }
+    // Approximates `0 24px 64px rgba(20,20,18,.22)`; same shadow as the palette.
+    context_menu.queueSoftShadow(state, modal, radius, designUi(48.0), designUi(16.0), 0.12);
     queueRoundedRect(state, modal, paletteColor(sheetSurface()), radius);
     // Nav column: rounded on the dialog's left corners only, so paint a
     // rounded rect and square off its right edge with a plain strip.

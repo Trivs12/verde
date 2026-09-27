@@ -1360,20 +1360,7 @@ fn renderQuickPane(state: *runtime.AppState, workspace_rect: palette.Rect, targe
     const strip_h = designUi(QUICK_PANE_STRIP_H_CSS);
     const inset = designUi(QUICK_PANE_CONTENT_INSET_CSS);
 
-    // Two stacked, offset scrims read as a soft shadow without a blur pass.
-    const shadow_layers = [_]struct { spread: f32, drop: f32, alpha: f32 }{
-        .{ .spread = 14.0, .drop = 12.0, .alpha = 0.06 },
-        .{ .spread = 4.0, .drop = 4.0, .alpha = 0.10 },
-    };
-    for (shadow_layers) |layer| {
-        const spread = designUi(layer.spread);
-        queueRounded(state, context_menu.snap(.{
-            .x = frame.x - spread,
-            .y = frame.y - spread + designUi(layer.drop),
-            .w = frame.w + spread * 2.0,
-            .h = frame.h + spread * 2.0,
-        }), paletteColor(theme.scrim(layer.alpha)), radius + spread);
-    }
+    context_menu.queueSoftShadow(state, frame, radius, designUi(28.0), designUi(10.0), 0.12);
     queueRounded(state, frame, paletteColor(theme.COLOR_PANEL), radius);
 
     const content = quickPaneContentRect(frame, strip_h, inset);

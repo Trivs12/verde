@@ -1790,24 +1790,9 @@ fn runToggleSidebar(state: *runtime.AppState) void {
 // Rendering
 // ---------------------------------------------------------------------------
 
-/// Soft ambient shadow approximating the design's `0 24px 64px` drop with
-/// stacked, offset translucent fills (the renderer has no blur pass).
+/// Soft ambient shadow approximating the design's `0 24px 64px` drop.
 fn queueDialogShadow(state: *runtime.AppState, rect: palette.Rect, radius: f32) void {
-    const layers = [_]struct { spread: f32, drop: f32, alpha: f32 }{
-        .{ .spread = 32.0, .drop = 24.0, .alpha = 0.025 },
-        .{ .spread = 20.0, .drop = 18.0, .alpha = 0.035 },
-        .{ .spread = 10.0, .drop = 10.0, .alpha = 0.05 },
-        .{ .spread = 3.0, .drop = 4.0, .alpha = 0.06 },
-    };
-    for (layers) |layer| {
-        const spread = designUi(layer.spread);
-        queueRoundedRect(state, context_menu.snap(.{
-            .x = rect.x - spread,
-            .y = rect.y - spread + designUi(layer.drop),
-            .w = rect.w + spread * 2.0,
-            .h = rect.h + spread * 2.0,
-        }), paletteColor(theme.scrim(layer.alpha)), radius + spread);
-    }
+    context_menu.queueSoftShadow(state, rect, radius, designUi(48.0), designUi(16.0), 0.12);
 }
 
 /// Search row: magnifier, query field, scope label, bottom divider.

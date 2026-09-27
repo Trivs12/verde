@@ -7,6 +7,7 @@
 //! prose face, which does not match `.ui` measurement), and icon-font
 //! chevrons/checks instead of ASCII `>` and `*`.
 
+const std = @import("std");
 const palette = @import("palette");
 
 const runtime = @import("runtime.zig");
@@ -38,25 +39,35 @@ pub fn snap(rect: palette.Rect) palette.Rect {
     return .{ .x = x, .y = y, .w = @round(rect.x + rect.w) - x, .h = @round(rect.y + rect.h) - y };
 }
 
+const SOFT_SHADOW_STEPS = 16;
+
+/// Blur-like drop shadow for floating surfaces (the renderer has no blur
+/// pass). Stacks many faint rounded fills whose spreads fall off with the
+/// square of the distance, so the edge darkens smoothly and fades into a long
+/// tail instead of showing a few hard rings. `alpha` is the opacity right at
+/// the surface edge; `blur` is how far past the edge the shadow reaches.
+pub fn queueSoftShadow(state: *runtime.AppState, rect: palette.Rect, radius: f32, blur: f32, drop: f32, alpha: f32) void {
+    const steps: f32 = @floatFromInt(SOFT_SHADOW_STEPS);
+    // Per-layer opacity that composites to `alpha` where every layer overlaps.
+    const layer_alpha = 1.0 - std.math.pow(f32, 1.0 - alpha, 1.0 / steps);
+    for (0..SOFT_SHADOW_STEPS) |i| {
+        const u = (@as(f32, @floatFromInt(i)) + 0.5) / steps;
+        const spread = blur * (1.0 - @sqrt(u));
+        queueRounded(state, snap(.{
+            .x = rect.x - spread,
+            .y = rect.y - spread + drop,
+            .w = rect.w + spread * 2.0,
+            .h = rect.h + spread * 2.0,
+        }), color(theme.scrim(layer_alpha)), radius + spread);
+    }
+}
+
 /// Draws the panel shadow, fill and hairline border. Returns the snapped
 /// rect so callers lay rows out on the same pixel grid.
 pub fn queuePanel(state: *runtime.AppState, rect: palette.Rect) palette.Rect {
     const panel = snap(rect);
     const radius = theme.scaledUi(RADIUS_UI);
-    // Two stacked, offset scrims read as a soft ambient shadow without a blur pass.
-    const shadow_layers = [_]struct { spread: f32, drop: f32, alpha: f32 }{
-        .{ .spread = 6.0, .drop = 6.0, .alpha = 0.10 },
-        .{ .spread = 2.0, .drop = 2.0, .alpha = 0.16 },
-    };
-    for (shadow_layers) |layer| {
-        const spread = theme.scaledUi(layer.spread);
-        queueRounded(state, snap(.{
-            .x = panel.x - spread,
-            .y = panel.y - spread + theme.scaledUi(layer.drop),
-            .w = panel.w + spread * 2.0,
-            .h = panel.h + spread * 2.0,
-        }), color(theme.scrim(layer.alpha)), radius + spread);
-    }
+    queueSoftShadow(state, panel, radius, theme.scaledUi(14.0), theme.scaledUi(4.0), 0.12);
     queueRounded(state, panel, color(theme.COLOR_PANEL_ALT), radius);
     state.palette_overlay_batch.rectBorder(state.allocator, panel, color(theme.borderMuted()), radius, @max(@round(theme.scaledUi(1.0)), 1.0)) catch {};
     return panel;
