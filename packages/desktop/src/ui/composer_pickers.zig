@@ -8,6 +8,7 @@ const std = @import("std");
 const palette = @import("palette");
 
 const native_state = @import("../state.zig");
+const context_menu = @import("context_menu.zig");
 const theme = @import("theme.zig");
 
 const log = std.log.scoped(.composer_pickers);
@@ -51,21 +52,8 @@ fn renderComposerSettingsMenu(state: *AppState) void {
     const allocator = state.allocator;
     const radius = theme.scaledUi(SETTINGS_MENU_CORNER_RADIUS);
 
-    // The renderer has no blur; two offset translucent rounded rects give
-    // the panel a soft drop shadow.
-    const shadow_steps = [_]struct { grow: f32, drop: f32, alpha: f32 }{
-        .{ .grow = 6.0, .drop = 6.0, .alpha = 0.10 },
-        .{ .grow = 2.0, .drop = 3.0, .alpha = 0.14 },
-    };
-    for (shadow_steps) |step| {
-        const grow = theme.scaledUi(step.grow);
-        batch.roundedRect(allocator, .{
-            .x = layout.panel.x - grow,
-            .y = layout.panel.y - grow + theme.scaledUi(step.drop),
-            .w = layout.panel.w + grow * 2.0,
-            .h = layout.panel.h + grow * 2.0,
-        }, .{ .r = 0.0, .g = 0.0, .b = 0.0, .a = step.alpha }, radius + grow) catch {};
-    }
+    // Same soft shadow as the context menus, inside this menu's z-layer.
+    context_menu.queueSoftShadow(state, layout.panel, radius, theme.scaledUi(14.0), theme.scaledUi(4.0), 0.12);
     batch.panel(
         allocator,
         layout.panel,
