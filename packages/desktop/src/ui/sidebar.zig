@@ -330,11 +330,18 @@ pub fn renderPalette(state: *runtime.AppState, rect: palette.Rect) void {
     attention_motion_animating = false;
 
     queuePaletteRect(state, rect, paletteColor(theme.COLOR_PANEL));
+    // A collapsed rail is narrower than the macOS traffic lights, so the
+    // titlebar band above it takes the window background (continuous with
+    // the workspace side) and the rail's edge starts below the band.
+    const band_h = if (state.isSidebarCollapsed()) @min(theme.window_top_inset_px, rect.h) else 0.0;
+    if (band_h > 0.0) {
+        queuePaletteRect(state, .{ .x = rect.x, .y = rect.y, .w = rect.w, .h = band_h }, paletteColor(theme.background()));
+    }
     queuePaletteRect(state, .{
         .x = rect.x + rect.w - theme.scaledUi(1.0),
-        .y = rect.y,
+        .y = rect.y + band_h,
         .w = theme.scaledUi(1.0),
-        .h = rect.h,
+        .h = rect.h - band_h,
     }, paletteColor(theme.borderMuted()));
 
     if (state.isSidebarCollapsed()) {

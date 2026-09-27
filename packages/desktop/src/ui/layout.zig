@@ -680,7 +680,11 @@ fn computeRootLayout(state: *runtime.AppState, width: f32, height: f32) RootLayo
     }
 
     const layout_sidebar_width = if (hidden) 0.0 else sidebar_anim_width;
-    const workspace_top = if (hidden) top else 0.0;
+    // The expanded sidebar is wide enough to hold the traffic lights in its own
+    // header row. A collapsed rail is not, and a hidden one leaves them over
+    // the workspace, so then the titlebar band spans the window and the
+    // workspace (tab strip included) starts below it.
+    const workspace_top = if (hidden or state.isSidebarCollapsed()) top else 0.0;
     const target_layout_sidebar_width = if (hidden) 0.0 else target_sidebar_width;
     const workspace_width = @max(width - layout_sidebar_width - gap, theme.scaledUi(320.0));
     return .{
