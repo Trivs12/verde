@@ -61,6 +61,8 @@ const SIDEBAR_HOVER_TINT: f32 = 0.045;
 const SIDEBAR_ICON_HOVER_TINT: f32 = 0.07;
 const SIDEBAR_SELECTED_TINT: f32 = 0.08;
 const SIDEBAR_TILE_TINT: f32 = 0.035;
+/// Gap between a split tile's hairline frame and the pane rows inside it.
+const SIDEBAR_TILE_INSET: f32 = 2.0;
 const SIDEBAR_GROUP_BAR_TINT: f32 = 0.22;
 /// Status pip diameter shared by expanded pane rows and collapsed avatar badges.
 const SIDEBAR_STATUS_DOT_CSS: f32 = 6.0;
@@ -2306,7 +2308,17 @@ fn renderOpenPanesSection(
                 .h = group_h,
             };
             if (rowVisible(group_rect, list_clip)) {
-                renderOpenPaneGroupNode(state, project_index, project, root, group_id, group_rect, clip);
+                // One hairline frame holds the whole tile; its panes sit inset
+                // as plain rows, so only focus and hover add a fill.
+                const inset = theme.scaledUi(SIDEBAR_TILE_INSET);
+                queuePaletteBorder(state, group_rect, paletteColor(theme.borderMuted()), designUi(SIDEBAR_ROW_RADIUS_CSS) + inset, theme.scaledUi(1.0));
+                const inner_rect: palette.Rect = .{
+                    .x = group_rect.x + inset,
+                    .y = group_rect.y + inset,
+                    .w = @max(group_rect.w - inset * 2.0, 0.0),
+                    .h = @max(group_rect.h - inset * 2.0, 0.0),
+                };
+                renderOpenPaneGroupNode(state, project_index, project, root, group_id, inner_rect, clip);
                 if (tile_shortcut.len > 0) {
                     renderSidebarShortcutKeyTip(state, .{ .x = x + indent, .y = y, .w = rail_w - indent, .h = group_h }, clip, tile_shortcut);
                 }
@@ -2359,7 +2371,6 @@ fn renderOpenPaneGroupNode(
         .leaf => |pane_id| {
             if (layout.scrollGroupIdForPane(pane_id) != group_id) return;
             const pane = layout.paneById(pane_id) orelse return;
-            queuePaletteRoundedRect(state, snapRect(rect), paletteColor(sidebarTint(SIDEBAR_TILE_TINT)), theme.scaledUi(6.0));
             renderOpenPaneRow(state, project_index, project, pane, rect, clip, false, false, null, true);
         },
         .split => |split| {
@@ -2384,12 +2395,22 @@ fn renderOpenPaneGroupSplit(
     clip: palette.Rect,
 ) void {
     const gap = theme.scaledUi(4.0);
+    // A hairline in the gap marks each split instead of separate filled boxes.
+    const hairline = theme.scaledUi(1.0);
+    const divider_inset = theme.scaledUi(6.0);
+    const divider = paletteColor(theme.borderMuted());
     const ratio = std.math.clamp(split.ratio, 0.22, 0.78);
     if (split.axis == .vertical) {
         const available = @max(rect.w - gap, 0.0);
         const first_w = available * ratio;
         const first_rect: palette.Rect = .{ .x = rect.x, .y = rect.y, .w = first_w, .h = rect.h };
         const second_rect: palette.Rect = .{ .x = rect.x + first_w + gap, .y = rect.y, .w = available - first_w, .h = rect.h };
+        queuePaletteRect(state, snapRect(.{
+            .x = rect.x + first_w + (gap - hairline) * 0.5,
+            .y = rect.y + divider_inset,
+            .w = hairline,
+            .h = @max(rect.h - divider_inset * 2.0, 0.0),
+        }), divider);
         renderOpenPaneGroupNode(state, project_index, project, split.first, group_id, first_rect, clip);
         renderOpenPaneGroupNode(state, project_index, project, split.second, group_id, second_rect, clip);
         return;
@@ -2398,6 +2419,12 @@ fn renderOpenPaneGroupSplit(
     const first_h = available * ratio;
     const first_rect: palette.Rect = .{ .x = rect.x, .y = rect.y, .w = rect.w, .h = first_h };
     const second_rect: palette.Rect = .{ .x = rect.x, .y = rect.y + first_h + gap, .w = rect.w, .h = available - first_h };
+    queuePaletteRect(state, snapRect(.{
+        .x = rect.x + divider_inset,
+        .y = rect.y + first_h + (gap - hairline) * 0.5,
+        .w = @max(rect.w - divider_inset * 2.0, 0.0),
+        .h = hairline,
+    }), divider);
     renderOpenPaneGroupNode(state, project_index, project, split.first, group_id, first_rect, clip);
     renderOpenPaneGroupNode(state, project_index, project, split.second, group_id, second_rect, clip);
 }
