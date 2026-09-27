@@ -14,38 +14,44 @@ const text_measure = @import("text_measure.zig");
 const runtime = @import("runtime.zig");
 const sidebar = @import("sidebar.zig");
 
-/// Strip height in unscaled UI units: one compact tab row, matching the
-/// sidebar header row so the pane region loses the least height possible.
-pub const STRIP_HEIGHT_UI: f32 = 32.0;
-/// Vertical inset between the strip edge and the tab body; tabs are full
-/// rectangles inside it so every tab shares one height and the bottom gap
-/// to pane content stays constant.
-pub const TAB_INSET_Y_UI: f32 = 4.0;
+/// Design px to UI units (design body 15px = app 18 units), matching
+/// `DESIGN_SCALE` in sidebar.zig so the strip shares the redesign's metrics.
+const DESIGN_SCALE: f32 = 18.0 / 15.0;
+/// Strip height in unscaled UI units (design 36px): a browser-style tab row
+/// whose tabs sit on the strip's bottom hairline.
+pub const STRIP_HEIGHT_UI: f32 = 36.0 * DESIGN_SCALE;
+/// Tab body height (design 30px). Tabs are bottom-aligned so the selected
+/// tab's fill runs into the pane content below the strip.
+pub const TAB_HEIGHT_UI: f32 = 30.0 * DESIGN_SCALE;
 /// Leading/trailing breathing room so the first tab does not butt against
-/// the sidebar rail edge and the "+" tab never touches the window edge.
-pub const STRIP_PAD_X_UI: f32 = 8.0;
+/// the sidebar rail edge and the "+" button never touches the window edge.
+pub const STRIP_PAD_X_UI: f32 = 8.0 * DESIGN_SCALE;
 /// Narrowest tab that still shows a readable "..." label on tight windows.
-pub const MIN_TAB_WIDTH_UI: f32 = 44.0;
+pub const MIN_TAB_WIDTH_UI: f32 = 40.0 * DESIGN_SCALE;
 /// Widest tab; keeps long labels from swallowing the strip on wide windows.
-pub const MAX_TAB_WIDTH_UI: f32 = 200.0;
-/// Adjacent tabs are separated by a hairline gap instead of a border so they
-/// read as one tab row (Herdr-style) rather than floating pills.
-pub const TAB_GAP_UI: f32 = 3.0;
-pub const TAB_PAD_X_UI: f32 = 12.0;
-/// The trailing "+" tab is square-ish: tab height plus a little side padding
-/// so the glyph has a comfortable hit target without reading as a label tab.
-pub const PLUS_TAB_WIDTH_UI: f32 = 30.0;
-const LABEL_FONT_UI: f32 = 13.0;
+pub const MAX_TAB_WIDTH_UI: f32 = 200.0 * DESIGN_SCALE;
+/// Small gap between tabs so adjacent hover/selected fills stay distinct.
+pub const TAB_GAP_UI: f32 = 2.0 * DESIGN_SCALE;
+pub const TAB_PAD_X_UI: f32 = 12.0 * DESIGN_SCALE;
+/// The trailing "+" is a square icon button (design 26px) centred in the
+/// tab band rather than a label-sized tab.
+pub const PLUS_TAB_WIDTH_UI: f32 = 26.0 * DESIGN_SCALE;
+const LABEL_FONT_UI: f32 = 13.0 * DESIGN_SCALE;
 /// Lucide `plus` for the trailing new-tab button (icon_alt role).
 const LU_PLUS = "\u{E13D}";
-const PLUS_ICON_SIZE_UI: f32 = 15.0;
-const TAB_RADIUS_UI: f32 = 3.0;
+const PLUS_ICON_SIZE_UI: f32 = 14.0 * DESIGN_SCALE;
+/// Top-corner radius of a tab (design 8px); also the "+" button radius.
+const TAB_RADIUS_UI: f32 = 8.0 * DESIGN_SCALE;
+const PLUS_RADIUS_UI: f32 = 6.0 * DESIGN_SCALE;
+/// Hover fill strength: text mixed into the window background, the same
+/// quiet neutral the sidebar rows use.
+const TAB_HOVER_TINT: f32 = 0.05;
 /// Ctrl-reveal key tip: same square badge the sidebar pane rows draw so the
 /// Ctrl+N ordinal reads identically in both places.
 const KEY_TIP_SIZE_UI: f32 = 18.0;
 const KEY_TIP_FONT_UI: f32 = 11.0;
 const KEY_TIP_RADIUS_UI: f32 = 5.0;
-const KEY_TIP_INSET_X_UI: f32 = 4.0;
+const KEY_TIP_INSET_X_UI: f32 = 6.0;
 /// Same line box the other Palette UI text queues use (see sidebar/layout).
 const LINE_HEIGHT_FACTOR: f32 = 1.25;
 /// Bounded label buffer; tabs are short so longer titles are truncated.
@@ -117,18 +123,23 @@ pub fn tabWidth(label_w: f32, cap: f32) f32 {
     return theme.clampf(natural, theme.scaledUi(MIN_TAB_WIDTH_UI), cap);
 }
 
+/// Tabs are bottom-aligned in the strip at one shared height, so the gap
+/// above them is constant and the selected tab meets the pane content.
 pub fn tabRect(strip: palette.Rect, x: f32, w: f32) palette.Rect {
-    const inset = theme.scaledUi(TAB_INSET_Y_UI);
-    return .{ .x = x, .y = strip.y + inset, .w = w, .h = @max(strip.h - inset * 2.0, 0.0) };
+    const h = @min(theme.scaledUi(TAB_HEIGHT_UI), strip.h);
+    return .{ .x = x, .y = strip.y + strip.h - h, .w = w, .h = h };
 }
 
-/// The "+" tab follows the last tab but never leaves the strip: on overflow
-/// it pins to the right edge so opening a new tab stays reachable.
+/// The "+" button follows the last tab but never leaves the strip: on
+/// overflow it pins to the right edge so opening a new tab stays reachable.
+/// It is a square centred vertically in the tab band.
 pub fn plusTabRect(strip: palette.Rect, after_x: f32) palette.Rect {
     const w = theme.scaledUi(PLUS_TAB_WIDTH_UI);
     const pad = theme.scaledUi(STRIP_PAD_X_UI);
-    const x = @min(after_x, strip.x + strip.w - pad - w);
-    return tabRect(strip, @max(x, strip.x + pad), w);
+    const x = @max(@min(after_x, strip.x + strip.w - pad - w), strip.x + pad);
+    const band = tabRect(strip, x, w);
+    const h = @min(w, band.h);
+    return .{ .x = x, .y = band.y + (band.h - h) * 0.5, .w = w, .h = h };
 }
 
 /// Label shown on a tab: the title of its preferred pane (the last-focused
@@ -140,14 +151,18 @@ pub fn tabLabel(state: *const runtime.AppState, project_index: usize, tab: runti
     return sidebar.paneTitle(state, project_index, project, pane, term_title_buf);
 }
 
-/// Tab strip: a Herdr-style row of rectangular tabs along the top of the
-/// pane region, one per tab of the selected workspace (a split tile is one
-/// tab) plus a trailing "+" tab. Rendered only when the sidebar is collapsed
-/// or hidden.
+/// Tab strip: a browser-style row of tabs along the top of the pane region,
+/// one per tab of the selected workspace (a split tile is one tab) plus a
+/// trailing "+" button. Rendered only when the sidebar is collapsed or
+/// hidden (or forced on by `ui.workspace_tabs`).
 pub fn render(state: *runtime.AppState, strip: palette.Rect) void {
     strip_hit_count = 0;
     strip_rect = strip;
-    queueRect(state, strip, paletteColor(theme.COLOR_PANEL));
+    // Strip ground: window background with a bottom hairline; the selected
+    // tab is drawn over the hairline so it merges into the content below.
+    queueRect(state, strip, paletteColor(theme.background()));
+    const hairline = hairlineWidth();
+    queueRect(state, .{ .x = strip.x, .y = strip.y + strip.h - hairline, .w = strip.w, .h = @min(hairline, strip.h) }, paletteColor(theme.restingEdge()));
     if (state.project_controller.projects.items.len == 0) return;
     const project_index = state.project_controller.selected_index;
     const layout = &state.project_controller.projects.items[project_index].workspace_layout;
@@ -160,7 +175,7 @@ pub fn render(state: *runtime.AppState, strip: palette.Rect) void {
     const pad_x = theme.scaledUi(TAB_PAD_X_UI);
     const plus_w = theme.scaledUi(PLUS_TAB_WIDTH_UI);
     const strip_pad = theme.scaledUi(STRIP_PAD_X_UI);
-    // Tabs may not run under the "+" tab's reserved right-edge slot.
+    // Tabs may not run under the "+" button's reserved right-edge slot.
     const tabs_right = strip.x + strip.w - strip_pad - plus_w - gap;
     // Holding Ctrl reveals the Ctrl+N ordinal of each tab, mirroring the
     // sidebar pane rows; the badge takes a slot at the tab's right edge.
@@ -173,45 +188,72 @@ pub fn render(state: *runtime.AppState, strip: palette.Rect) void {
         var key_tip_buf: [16]u8 = undefined;
         const key_tip = tabKeyTip(state, &key_tip_buf, tab_index);
         const tip_reserve = if (key_tip.len > 0) key_tip_w else 0.0;
-        // Measure through the GPU text path so tab widths match drawn glyphs.
-        const label_w = runtime.paletteUiTextPrefixWidth(title, font_size, title.len);
+        // Width follows the medium (selected) face so selecting a tab never
+        // reflows the row; the regular face is never wider.
+        const label_w = text_measure.textWidth(.ui_medium, font_size, title);
         const rect = tabRect(strip, x, tabWidth(label_w + tip_reserve, cap));
         if (rect.x + theme.scaledUi(MIN_TAB_WIDTH_UI) > tabs_right) break;
         const clip: palette.Rect = .{ .x = strip.x, .y = strip.y, .w = @max(tabs_right - strip.x, 0.0), .h = strip.h };
         const selected = focused_tab_id != null and focused_tab_id.? == tab.id;
         const hovered = hovered_hit == strip_hit_count;
-        renderTab(state, rect, clip, selected, hovered);
+        renderTab(state, strip, rect, clip, selected, hovered);
+        const role: palette.FontRole = if (selected) .ui_medium else .ui;
         var label_buf: [LABEL_BUFFER_LEN]u8 = undefined;
         const label_area: palette.Rect = .{ .x = rect.x, .y = rect.y, .w = @max(rect.w - tip_reserve, 0.0), .h = rect.h };
-        const label = truncatedLabel(&label_buf, title, @max(label_area.w - pad_x * 2.0, 0.0), font_size);
-        const shown_w = runtime.paletteUiTextPrefixWidth(label, font_size, label.len);
-        const text_color = if (selected) theme.COLOR_WHITE else if (hovered) theme.raise(theme.COLOR_TEXT_MUTED, 0.12) else theme.COLOR_TEXT_MUTED;
-        queueCenteredText(state, label_area, label, shown_w, paletteColor(text_color), font_size, clip);
+        const label = truncatedLabel(&label_buf, title, @max(label_area.w - pad_x * 2.0, 0.0), font_size, role);
+        const shown_w = text_measure.textWidth(role, font_size, label);
+        const text_color = if (selected or hovered) theme.COLOR_WHITE else theme.COLOR_TEXT_MUTED;
+        queueCenteredText(state, label_area, label, shown_w, paletteColor(text_color), font_size, role, clip);
         if (key_tip.len > 0) renderTabKeyTip(state, rect, clip, key_tip);
         addHit(rect, .tab, project_index, tab.preferred_pane_id);
         x = rect.x + rect.w + gap;
     }
     const plus_rect = plusTabRect(strip, x);
     const plus_hovered = hovered_hit == strip_hit_count;
-    renderTab(state, plus_rect, strip, false, plus_hovered);
+    if (plus_hovered) queueRoundedRectClipped(state, plus_rect, paletteColor(hoverFill()), theme.scaledUi(PLUS_RADIUS_UI), strip);
     const plus_color = if (plus_hovered) theme.COLOR_WHITE else theme.COLOR_TEXT_MUTED;
     queueCenteredIcon(state, plus_rect, LU_PLUS, paletteColor(plus_color), theme.scaledUi(PLUS_ICON_SIZE_UI), strip);
     addHit(plus_rect, .add_tab, project_index, 0);
 }
 
-/// One tab body: rectangular background with a hairline edge so adjacent
-/// tabs separate cleanly; the active tab carries the accent tint.
-fn renderTab(state: *runtime.AppState, rect: palette.Rect, clip: palette.Rect, selected: bool, hovered: bool) void {
-    const radius = theme.scaledUi(TAB_RADIUS_UI);
-    const fill: [4]f32 = if (selected)
-        theme.wash(theme.accent(), 64)
-    else if (hovered)
-        theme.raise(theme.COLOR_PANEL_ALT, 0.06)
-    else
-        theme.COLOR_PANEL_ALT;
-    queueRoundedRectClipped(state, rect, paletteColor(fill), radius, clip);
-    const edge: [4]f32 = if (selected) theme.withAlpha(theme.accent(), 180) else theme.borderMuted();
-    queueBorderClipped(state, rect, paletteColor(edge), radius, 1.0, clip);
+/// One tab body. At rest a tab is bare text on the strip. Hover and
+/// selection draw a top-rounded body: the rounded rect extends one radius
+/// below the strip and is clipped at its bottom edge, so only the top
+/// corners round. The selected tab takes the panel fill with a light edge
+/// whose bottom side is clipped away, merging it into the content below;
+/// hover stops above the hairline so it reads as a soft wash, not a tab.
+fn renderTab(state: *runtime.AppState, strip: palette.Rect, rect: palette.Rect, clip: palette.Rect, selected: bool, hovered: bool) void {
+    if (!selected and !hovered) return;
+    const radius = @min(theme.scaledUi(TAB_RADIUS_UI), rect.w * 0.5);
+    const body: palette.Rect = .{ .x = rect.x, .y = rect.y, .w = rect.w, .h = rect.h + radius };
+    const strip_bottom = strip.y + strip.h;
+    const bottom = if (selected) strip_bottom else strip_bottom - hairlineWidth();
+    const tab_clip = intersect(clip, .{ .x = strip.x, .y = strip.y, .w = strip.w, .h = @max(bottom - strip.y, 0.0) });
+    if (selected) {
+        queueRoundedRectClipped(state, body, paletteColor(theme.COLOR_PANEL), radius, tab_clip);
+        queueBorderClipped(state, body, paletteColor(theme.restingEdge()), radius, hairlineWidth(), tab_clip);
+    } else {
+        queueRoundedRectClipped(state, body, paletteColor(hoverFill()), radius, tab_clip);
+    }
+}
+
+/// Soft neutral hover wash over the window background; polarity-aware
+/// through `mix`, so it lightens dark themes and darkens light ones.
+fn hoverFill() [4]f32 {
+    return theme.mix(theme.background(), theme.COLOR_WHITE, TAB_HOVER_TINT);
+}
+
+/// One device-pixel-snapped hairline, matching the pane frames.
+fn hairlineWidth() f32 {
+    return @max(@round(theme.scaledUi(1.0)), 1.0);
+}
+
+fn intersect(a: palette.Rect, b: palette.Rect) palette.Rect {
+    const x0 = @max(a.x, b.x);
+    const y0 = @max(a.y, b.y);
+    const x1 = @min(a.x + a.w, b.x + b.w);
+    const y1 = @min(a.y + a.h, b.y + b.h);
+    return .{ .x = x0, .y = y0, .w = @max(x1 - x0, 0.0), .h = @max(y1 - y0, 0.0) };
 }
 
 /// Key label for the tab's Ctrl+N binding while plain Ctrl is held (the
@@ -238,22 +280,22 @@ fn renderTabKeyTip(state: *runtime.AppState, tab: palette.Rect, clip: palette.Re
     queueBorderClipped(state, rect, paletteColor(theme.borderMuted()), radius, 1.0, clip);
     const font_size = theme.scaledUi(KEY_TIP_FONT_UI);
     const text_w = runtime.paletteUiTextPrefixWidth(label, font_size, label.len);
-    queueCenteredText(state, rect, label, text_w, paletteColor(theme.accent()), font_size, clip);
+    queueCenteredText(state, rect, label, text_w, paletteColor(theme.accent()), font_size, .ui, clip);
 }
 
 /// Truncates `label` with a trailing ellipsis so it fits `max_w` using
 /// Palette text metrics, cutting only at UTF-8 codepoint boundaries.
-pub fn truncatedLabel(buffer: *[LABEL_BUFFER_LEN]u8, label: []const u8, max_w: f32, font_size: f32) []const u8 {
+pub fn truncatedLabel(buffer: *[LABEL_BUFFER_LEN]u8, label: []const u8, max_w: f32, font_size: f32, role: palette.FontRole) []const u8 {
     const ellipsis = "...";
     const bounded = label[0..@min(label.len, buffer.len - ellipsis.len)];
-    if (text_measure.textWidth(.ui, font_size, bounded) <= max_w and bounded.len == label.len) return label;
-    const ellipsis_w = text_measure.textWidth(.ui, font_size, ellipsis);
+    if (text_measure.textWidth(role, font_size, bounded) <= max_w and bounded.len == label.len) return label;
+    const ellipsis_w = text_measure.textWidth(role, font_size, ellipsis);
     var end: usize = 0;
     var fit_end: usize = 0;
     while (end < bounded.len) {
         const cp_len = std.unicode.utf8ByteSequenceLength(bounded[end]) catch 1;
         const next = @min(end + cp_len, bounded.len);
-        if (text_measure.textPrefixWidth(.ui, bounded, font_size, next) + ellipsis_w > max_w) break;
+        if (text_measure.textPrefixWidth(role, bounded, font_size, next) + ellipsis_w > max_w) break;
         fit_end = next;
         end = next;
     }
@@ -335,11 +377,11 @@ fn queueBorderClipped(state: *runtime.AppState, rect: palette.Rect, color: palet
 
 /// Centers a single line inside a tab: horizontally from the measured
 /// width, vertically by offsetting the text line box within the tab height.
-fn queueCenteredText(state: *runtime.AppState, tab: palette.Rect, value: []const u8, text_w: f32, color: palette.Color, font_size: f32, clip: palette.Rect) void {
+fn queueCenteredText(state: *runtime.AppState, tab: palette.Rect, value: []const u8, text_w: f32, color: palette.Color, font_size: f32, role: palette.FontRole, clip: palette.Rect) void {
     const line_h = font_size * LINE_HEIGHT_FACTOR;
     const text_x = tab.x + @max((tab.w - text_w) * 0.5, 0.0);
     const text_y = tab.y + @max((tab.h - line_h) * 0.5, 0.0);
-    queueText(state, .{ .x = text_x, .y = text_y, .w = @max(tab.x + tab.w - text_x, 0.0), .h = line_h }, value, color, font_size, clip);
+    queueText(state, .{ .x = text_x, .y = text_y, .w = @max(tab.x + tab.w - text_x, 0.0), .h = line_h }, value, color, font_size, role, clip);
 }
 
 /// Lucide glyph centred in `tab`.
@@ -359,20 +401,19 @@ fn queueCenteredIcon(state: *runtime.AppState, tab: palette.Rect, glyph: []const
     };
 }
 
-fn queueText(state: *runtime.AppState, rect: palette.Rect, value: []const u8, color: palette.Color, font_size: f32, clip: palette.Rect) void {
+fn queueText(state: *runtime.AppState, rect: palette.Rect, value: []const u8, color: palette.Color, font_size: f32, role: palette.FontRole, clip: palette.Rect) void {
     const stable_value = state.palette_frame_text_arena.allocator().dupe(u8, value) catch |err| {
         runtime.log.warn("failed to retain workspace strip text: {s}", .{@errorName(err)});
         return;
     };
-    // Explicit .ui role so tabs use the same face as the sidebar/rail text
-    // instead of the batch default.
+    // Explicit role (.ui or .ui_medium): a null role renders bold.
     state.palette_overlay_batch.roleText(
         state.allocator,
         rect,
         stable_value,
         color,
         font_size,
-        .ui,
+        role,
         null,
         clip,
     ) catch |err| {
@@ -466,10 +507,11 @@ test "workspace strip tabs are content-sized, uniformly tall, and never overlap"
     // A long label stops at the cap instead of growing without bound.
     try std.testing.expectEqual(cap, tabWidth(900.0, cap));
 
-    // Every tab shares one height inset from the strip edges.
+    // Every tab shares one height and sits on the strip's bottom edge.
     const first = tabRect(strip, strip.x, short_w);
     const second = tabRect(strip, first.x + first.w + TAB_GAP_UI, cap);
-    try std.testing.expectEqual(STRIP_HEIGHT_UI - TAB_INSET_Y_UI * 2.0, first.h);
+    try std.testing.expectEqual(TAB_HEIGHT_UI, first.h);
+    try std.testing.expectEqual(strip.y + strip.h, first.y + first.h);
     try std.testing.expectEqual(first.h, second.h);
     try std.testing.expectEqual(first.y, second.y);
     try std.testing.expectEqual(first.x + first.w + TAB_GAP_UI, second.x);
@@ -493,15 +535,18 @@ test "workspace strip plus tab trails the last tab and stays inside the strip" {
     const trailing = plusTabRect(strip, 200.0);
     try std.testing.expectEqual(@as(f32, 200.0), trailing.x);
     try std.testing.expectEqual(PLUS_TAB_WIDTH_UI, trailing.w);
-    try std.testing.expectEqual(STRIP_HEIGHT_UI - TAB_INSET_Y_UI * 2.0, trailing.h);
+    try std.testing.expectEqual(PLUS_TAB_WIDTH_UI, trailing.h);
+    // Centred in the tab band, fully inside the strip.
+    const band = tabRect(strip, trailing.x, trailing.w);
+    try std.testing.expectApproxEqAbs(band.y + band.h * 0.5, trailing.y + trailing.h * 0.5, 0.001);
+    try std.testing.expect(trailing.y >= strip.y and trailing.y + trailing.h <= strip.y + strip.h);
 
     // Overflow pins the "+" to the right edge instead of pushing it off-screen.
     const pinned = plusTabRect(strip, 5000.0);
     try std.testing.expectEqual(strip.x + strip.w - STRIP_PAD_X_UI - PLUS_TAB_WIDTH_UI, pinned.x);
     try std.testing.expect(pinned.x + pinned.w <= strip.x + strip.w - STRIP_PAD_X_UI);
-    // Vertically centered: equal space above and below the text line box.
-    const line_h = LABEL_FONT_UI * LINE_HEIGHT_FACTOR;
-    try std.testing.expect(trailing.h >= line_h);
+    // Tabs are tall enough for the label's line box.
+    try std.testing.expect(band.h >= LABEL_FONT_UI * LINE_HEIGHT_FACTOR);
 }
 
 test "workspace strip labels truncate with an ellipsis using text metrics" {
@@ -509,15 +554,15 @@ test "workspace strip labels truncate with an ellipsis using text metrics" {
     const label = "a-very-long-workspace-name-that-cannot-fit";
     const font_size = LABEL_FONT_UI;
     const full_w = text_measure.textWidth(.ui, font_size, label);
-    try std.testing.expectEqualStrings(label, truncatedLabel(&buffer, label, full_w, font_size));
+    try std.testing.expectEqualStrings(label, truncatedLabel(&buffer, label, full_w, font_size, .ui));
 
-    const truncated = truncatedLabel(&buffer, label, full_w * 0.5, font_size);
+    const truncated = truncatedLabel(&buffer, label, full_w * 0.5, font_size, .ui);
     try std.testing.expect(truncated.len < label.len);
     try std.testing.expect(std.mem.endsWith(u8, truncated, "..."));
     try std.testing.expect(text_measure.textWidth(.ui, font_size, truncated) <= full_w * 0.5 + 0.5);
 
     // Nothing fits: only the ellipsis remains rather than a partial glyph.
-    try std.testing.expectEqualStrings("...", truncatedLabel(&buffer, label, 0.0, font_size));
+    try std.testing.expectEqualStrings("...", truncatedLabel(&buffer, label, 0.0, font_size, .ui));
 }
 
 test "workspace strip hits resolve tabs and the add-tab button" {
