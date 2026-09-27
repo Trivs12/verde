@@ -3568,7 +3568,7 @@ fn renderTranscriptContent(state: *app_state.AppState, rect: palette.Rect, lane:
             logTranscriptBlankFrame(thread, "empty-thread-hydrating");
             return false;
         }
-        queueText(state, .{ .x = column.x, .y = column.y, .w = column.w, .h = theme.scaledUi(30.0) }, "No messages yet", paletteColor(theme.COLOR_WHITE), theme.scaledUi(20.0), clip);
+        queueRoleLabel(state, .{ .x = column.x, .y = column.y, .w = column.w, .h = theme.scaledUi(30.0) }, "No messages yet", paletteColor(theme.COLOR_WHITE), theme.scaledUi(20.0), .ui_medium, clip);
         queueText(state, .{ .x = column.x, .y = column.y + theme.scaledUi(32.0), .w = column.w, .h = theme.scaledUi(26.0) }, "Choose a provider, type a prompt below, and start the first chat for this directory.", paletteColor(theme.COLOR_TEXT_MUTED), theme.scaledUi(15.0), clip);
         return true;
     }
@@ -10760,8 +10760,10 @@ fn queueProviderLogo(state: *app_state.AppState, rect: palette.Rect, texture: ap
     }, .{ .r = tint[0], .g = tint[1], .b = tint[2], .a = tint[3] }, clip) catch {};
 }
 
+/// Plain UI-face label. The role is explicit: a null role falls back to the
+/// renderer's bold prose face, which made every label drawn here bold.
 fn queueText(state: *app_state.AppState, rect: palette.Rect, value: []const u8, color: palette.Color, font_size: f32, clip: ?palette.Rect) void {
-    state.palette_overlay_batch.text(state.allocator, rect, stableText(state, value), color, font_size, clip) catch {};
+    state.palette_overlay_batch.roleText(state.allocator, rect, stableText(state, value), color, font_size, .ui, null, clip) catch {};
 }
 
 fn queueFixedText(state: *app_state.AppState, rect: palette.Rect, value: []const u8, color: palette.Color, font_size: f32, clip: ?palette.Rect) void {
