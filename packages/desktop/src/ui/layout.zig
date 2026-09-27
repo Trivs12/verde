@@ -173,6 +173,7 @@ fn rectContainsModalPoint(rect: palette.Rect, x: f32, y: f32) bool {
 /// Lays out the root window and routes to the main UI regions.
 pub fn renderRoot(state: *runtime.AppState, width: f32, height: f32) void {
     state.resetUiDebugFrame();
+    state.root_render_width = width;
     // Re-armed by the sidebar pass when it draws a pulsing pip; the main loop
     // reads the previous frame's value to pace its animation tick.
     state.sidebar_pulse_animating = false;

@@ -4784,6 +4784,9 @@ pub const AppState = struct {
     /// Monotonic stamp of the last `setSidebarNotice`; drives the toast
     /// (item 11). Zero means no transient notice has been set yet.
     sidebar_notice_set_at_ms: i64 = 0,
+    /// Window width in UI units, set at the start of each root render, so
+    /// popovers owned by a pane can extend past it. Zero before first render.
+    root_render_width: f32 = 0.0,
     close_durability_notice: bool = false,
     import_thread_id_storage: [256:0]u8,
     import_notice_storage: [256:0]u8,
@@ -13995,10 +13998,17 @@ pub const AppState = struct {
         const row_index = layout.indexOf(settingsRowForSubmenu(kind)) orelse return;
         const bounds = self.composer_controller.composer.bounds();
         const top = theme.scaledUi(composer_controller.SETTINGS_MENU_TOP_INSET);
+        // Horizontally the submenu may use the whole window: a narrow split
+        // pane's composer has no room beside the menu, and clamping to it
+        // pushed the submenu back over the menu's own rows.
+        const edge = theme.scaledUi(8.0);
+        const window_w = self.root_render_width;
+        const span_x = if (window_w > bounds.w) edge else bounds.x;
+        const span_w = if (window_w > bounds.w) window_w - edge * 2.0 else bounds.w;
         picker.setViewportRect(.{
-            .x = bounds.x,
+            .x = span_x,
             .y = top,
-            .w = bounds.w,
+            .w = span_w,
             .h = @max(layout.panel.y + layout.panel.h - top, theme.scaledUi(120.0)),
         });
         picker.setSideAnchor(.{ .panel = layout.panel, .row = layout.rows[row_index] });
