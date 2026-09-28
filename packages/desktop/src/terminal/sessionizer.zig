@@ -33,6 +33,7 @@ const platform_live_endpoint = @import("../platform/live_endpoint.zig");
 const workspace_identity = @import("../platform/workspace_identity.zig");
 const stack = @import("../workspace/stack.zig");
 const platform_runtime = @import("platform_runtime");
+const platform_paths = @import("platform_paths");
 const process_env = @import("../platform/env.zig");
 const provider_cli_version = @import("../providers/cli_version.zig");
 const provider_hooks = @import("../providers/hooks.zig");
@@ -286,6 +287,19 @@ pub const SessionStatus = session_protocol.SessionStatus;
 pub const SessionSummary = session_protocol.SessionSummary;
 pub const Method = session_protocol.Method;
 pub const METHOD_NAMES = session_protocol.METHOD_NAMES;
+
+test "provider auth probe falls back when the workspace folder is gone" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var root_buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const root_len = try tmp.dir.realPath(std.testing.io, &root_buffer);
+    const existing = root_buffer[0..root_len];
+    try std.testing.expect(Daemon.authProbeDirectoryExists(existing));
+    const missing = try std.fs.path.join(std.testing.allocator, &.{ existing, "moved-away" });
+    defer std.testing.allocator.free(missing);
+    try std.testing.expect(!Daemon.authProbeDirectoryExists(missing));
+    try std.testing.expect(!Daemon.authProbeDirectoryExists(""));
+}
 
 test "session tail batching is an additive daemon method" {
     try std.testing.expectEqualStrings("session.tail", METHOD_NAMES[7]);
@@ -7906,11 +7920,22 @@ pub const Daemon = struct {
         } else null;
         var auth_state: harness.AuthState = .unknown;
         if (installed) {
-            if (send_runner.connectProvider(self.allocator, provider, request.project_path, false)) |client_value| {
+            // Sign-in is per user, not per folder: a workspace whose folder
+            // was moved or deleted must not make every provider look broken,
+            // so probe from HOME when the project folder is gone.
+            const home = if (authProbeDirectoryExists(request.project_path)) null else platform_paths.userHome(self.allocator) catch null;
+            defer if (home) |path| self.allocator.free(path);
+            const probe_cwd = home orelse request.project_path;
+            if (send_runner.connectProvider(self.allocator, provider, probe_cwd, false)) |client_value| {
                 var provider_client = client_value;
                 defer provider_client.deinit();
-                auth_state = provider_client.authState() catch .unknown;
-            } else |_| {}
+                auth_state = provider_client.authState() catch |err| blk: {
+                    log.warn("provider {s} auth probe failed: {s}", .{ @tagName(provider), @errorName(err) });
+                    break :blk .unknown;
+                };
+            } else |err| {
+                log.warn("provider {s} auth probe could not connect (cwd={s}): {s}", .{ @tagName(provider), probe_cwd, @errorName(err) });
+            }
         }
         return try okValueResponse(self.allocator, id_value, headless.providers_protocol.AuthStatusResult{
             .provider = request.provider,
@@ -7919,6 +7944,13 @@ pub const Daemon = struct {
             .ready = installed and auth_state == .signed_in,
             .version = version,
         });
+    }
+
+    fn authProbeDirectoryExists(path: []const u8) bool {
+        if (path.len == 0) return false;
+        var threaded = std.Io.Threaded.init_single_threaded;
+        const stat = std.Io.Dir.cwd().statFile(threaded.io(), path, .{}) catch return false;
+        return stat.kind == .directory;
     }
 
     // Provider thread inventory used by the desktop import picker.
