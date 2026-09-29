@@ -1340,7 +1340,6 @@ fn renderPaletteExpandedSidebar(state: *runtime.AppState, rect: palette.Rect) vo
         if (!effective_collapsed) {
             y = renderOpenPanesSection(state, project_index, project, x, rail_w, workspace_clip, workspace_clip, y);
         }
-
     }
 
     // Scrollbar must clip to the workspace tree so the thumb never extends
